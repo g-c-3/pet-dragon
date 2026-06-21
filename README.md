@@ -3,7 +3,9 @@
 > *The world's first original chess variant engine built natively in Rust*
 
 **Created by Gokul Chandar**
+
 **Engine contributors: Claude (Anthropic)**
+
 **Licensed under GPL v3**
 
 ---
