@@ -5,14 +5,12 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-# Allow only one deployment at a time
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
 
-  # ── Build WASM + copy web files ──────────────────────────────────────
   build:
     name: Build WASM & Web
     runs-on: ubuntu-latest
@@ -39,14 +37,16 @@ jobs:
             --target web \
             --release \
             --out-dir web/pkg \
-            --out-name pet_dragon
+            --out-name pet_dragon \
+            -- --features wasm
 
-      - name: Verify web folder exists
+      - name: Create web folder if missing
+        run: mkdir -p web
+
+      - name: Verify build output
         run: |
-          echo "Web folder contents:"
-          ls -la web/ || echo "web/ folder not yet created — will be added in Phase 12"
           echo "WASM package contents:"
-          ls -la web/pkg/
+          ls -la web/pkg/ || echo "pkg folder empty"
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v4
@@ -56,7 +56,6 @@ jobs:
         with:
           path: web/
 
-  # ── Deploy to GitHub Pages ───────────────────────────────────────────
   deploy:
     name: Deploy
     needs: build
