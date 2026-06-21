@@ -22,6 +22,7 @@ fn main() {
     // Must happen before anything else — all move generation depends on these
     pet_dragon_lib::bitboard::masks::init_masks();
     pet_dragon_lib::bitboard::magic::init_magic();
+    pet_dragon_lib::position::zobrist::init_zobrist();
 
     // ── Engine banner ────────────────────────────────────────────────────────
     // Printed when the engine first starts.
