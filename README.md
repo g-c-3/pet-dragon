@@ -158,5 +158,7 @@ discussions are welcome.
 ---
 
 *Pet Dragon — an original chess variant by Gokul Chandar*
+
 *Engine built in Rust from the ground up*
+
 *Contributors: Claude (Anthropic)*
