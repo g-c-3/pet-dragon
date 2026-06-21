@@ -10,9 +10,7 @@ homepage = "https://g-c-3.github.io/pet-dragon"
 keywords = ["chess", "engine", "variant", "wasm", "uci"]
 categories = ["game-engines"]
 
-# ── Build targets ────────────────────────────────────────────────────────────
-# lib = shared engine code (used by both native binary and WASM)
-# bin = native UCI binary for desktop GUIs
+# ── Build targets ─────────────────────────────────────────────────────────────
 
 [[bin]]
 name = "pet_dragon"
@@ -22,49 +20,52 @@ path = "src/main.rs"
 name = "pet_dragon_lib"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
-# cdylib = needed for WASM
-# rlib   = needed for tests and native binary
 
-# ── Dependencies ─────────────────────────────────────────────────────────────
+# ── Dependencies ──────────────────────────────────────────────────────────────
 
 [dependencies]
-# WASM bindings — lets Rust talk to JavaScript in the browser
-wasm-bindgen = "0.2"
+# WASM bindings — marked optional so they only compile when targeting WASM
+wasm-bindgen = { version = "0.2", optional = true }
 
-# JavaScript interop types (used with wasm-bindgen)
-js-sys = "0.3"
+# JavaScript interop types — also optional, only needed for WASM
+js-sys = { version = "0.3", optional = true }
 
-# Random number generation — works in both native and WASM environments
-# The "js" feature makes it work in the browser via Math.random()
-getrandom = { version = "0.2", features = ["js"] }
+# Random number generation
+# "js" feature makes it work in the browser via Math.random()
+# Also optional — only needed for WASM target
+getrandom = { version = "0.2", optional = true }
 
-# ── Dev dependencies (only used during testing) ───────────────────────────────
+# ── Dev dependencies ──────────────────────────────────────────────────────────
 
 [dev-dependencies]
-# Benchmarking framework — used to measure NPS (nodes per second)
 criterion = { version = "0.5", features = ["html_reports"] }
 
-# ── Build profiles ────────────────────────────────────────────────────────────
-
-# Native release build — maximum speed
-[profile.release]
-opt-level = 3          # Maximum optimisation
-lto = true             # Link-time optimisation (faster binary)
-codegen-units = 1      # Single unit = better optimisation
-panic = "abort"        # Smaller binary, faster panics
-strip = true           # Strip debug symbols from binary
-
-# WASM release build — minimum file size for fast browser loading
-[profile.release-wasm]
-inherits = "release"
-opt-level = "z"        # Optimise for size (smallest .wasm file)
-lto = true
-codegen-units = 1
-panic = "abort"
-
 # ── Feature flags ─────────────────────────────────────────────────────────────
+# The "wasm" feature pulls in all browser-specific dependencies at once.
+# Native builds use no extra dependencies — keeps the binary lean.
 
 [features]
 default = []
-# "wasm" feature enables browser-specific code paths
-wasm = ["wasm-bindgen", "js-sys", "getrandom/js"]
+wasm = [
+    "wasm-bindgen",
+    "js-sys",
+    "getrandom/js",
+]
+
+# ── Build profiles ────────────────────────────────────────────────────────────
+
+# Native release — maximum speed
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# WASM release — minimum file size
+[profile.release-wasm]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
