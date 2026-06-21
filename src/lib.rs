@@ -15,6 +15,7 @@ use wasm_bindgen::prelude::*;
 
 pub mod types;
 pub mod bitboard;
+pub mod position;
 
 // Future modules (uncommented phase by phase):
 // pub mod bitboard;  // Phase 2
