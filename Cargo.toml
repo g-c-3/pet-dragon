@@ -33,7 +33,7 @@ js-sys = { version = "0.3", optional = true }
 # Random number generation
 # "js" feature makes it work in the browser via Math.random()
 # Also optional — only needed for WASM target
-getrandom = { version = "0.2", optional = true }
+getrandom = { version = "0.2", features = ["std"] }
 
 # ── Dev dependencies ──────────────────────────────────────────────────────────
 
