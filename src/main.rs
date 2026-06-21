@@ -18,6 +18,11 @@
 use pet_dragon_lib::types;
 
 fn main() {
+    // ── Initialise attack tables ─────────────────────────────────────────────
+    // Must happen before anything else — all move generation depends on these
+    pet_dragon_lib::bitboard::masks::init_masks();
+    pet_dragon_lib::bitboard::magic::init_magic();
+
     // ── Engine banner ────────────────────────────────────────────────────────
     // Printed when the engine first starts.
     // UCI-compatible GUIs ignore non-UCI output before "uci" command,
