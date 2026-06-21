@@ -22,6 +22,8 @@
 //   This is the key data structure enabling Pet Dragon's double-step rule.
 // ============================================================================
 
+pub mod fen;
+pub mod zobrist;
 pub mod setup;
 
 use crate::bitboard::Bitboard;
@@ -33,7 +35,7 @@ use crate::position::zobrist::{
     piece_key, side_key,
 };
 use crate::types::{
-    CastlingRights, Color, Move, MoveKind, PawnStartMap, Piece,
+    CastlingRights, Color, Move, PawnStartMap, Piece,
     PieceKind, Square,
 };
 
