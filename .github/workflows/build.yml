@@ -1,0 +1,152 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+
+  # ── Run all tests ────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run all tests
+        run: cargo test --verbose
+
+  # ── Build native binaries for all platforms ──────────────────────────
+  build:
+    name: Build — ${{ matrix.target }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: pet_dragon.exe
+            asset_name: pet-dragon-windows-x64.exe
+
+          # macOS (Apple Silicon + Intel)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: pet_dragon
+            asset_name: pet-dragon-macos-arm64
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary: pet_dragon
+            asset_name: pet-dragon-macos-x64
+
+          # Linux
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: pet_dragon
+            asset_name: pet-dragon-linux-x64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: >
+          cargo build
+          --release
+          --target ${{ matrix.target }}
+          --bin pet_dragon
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} \
+             dist/${{ matrix.asset_name }}
+
+      - name: Upload binary as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
+          retention-days: 7
+
+  # ── Publish release when tests pass & binaries are built ─────────────
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Get short commit hash
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create or update rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Pet Dragon — Latest Build
+          body: |
+            ## Pet Dragon Chess Engine
+
+            **Automatically built from latest source.**
+            Commit: ${{ steps.sha.outputs.short }}
+
+            ### Downloads
+            | Platform | File |
+            |---|---|
+            | Windows 64-bit | `pet-dragon-windows-x64.exe` |
+            | macOS Apple Silicon | `pet-dragon-macos-arm64` |
+            | macOS Intel | `pet-dragon-macos-x64` |
+            | Linux 64-bit | `pet-dragon-linux-x64` |
+
+            ### How to use
+            Connect to any UCI chess GUI (Arena, BanksiaGUI, CuteChess).
+
+            Copyright © 2026 Gokul Chandar. Licensed under GPL v3.
+          files: dist/**/*
+          make_latest: true
+          prerelease: false
