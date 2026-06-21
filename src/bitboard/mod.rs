@@ -23,6 +23,12 @@
 pub mod masks;
 pub mod magic;
 
+pub use magic::{rook_attacks, bishop_attacks, queen_attacks};
+pub use masks::{
+    knight_attacks, king_attacks, pawn_attacks,
+    between, line, pawn_double_push_mask, are_aligned,
+};
+
 use crate::types::Square;
 
 // ── Bitboard type ─────────────────────────────────────────────────────────────
