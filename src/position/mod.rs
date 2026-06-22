@@ -546,15 +546,16 @@ impl Position {
     #[inline]
     pub fn is_repetition(&self) -> bool {
         let current = self.hash;
-        // Count backwards — recent positions more likely to match
-        // Stop early if we find a match
+        // game_history contains the current position hash (pushed by
+        // make_move_with_history after the move). So we need count >= 2
+        // in history to mean the position appeared before this move too.
+        // count == 1 means only the just-pushed entry (not a repetition)
+        // count >= 2 means it appeared in a previous position too (repetition)
         let mut count = 0u32;
         for &hash in self.game_history.iter().rev() {
             if hash == current {
                 count += 1;
-                if count >= 1 {
-                    // Found at least one previous occurrence
-                    // Combined with current = 2nd occurrence = draw
+                if count >= 2 {
                     return true;
                 }
             }
@@ -573,8 +574,9 @@ impl Position {
                 count += 1;
             }
         }
-        // current position + count occurrences in history = count+1 total
-        count >= 2 // means 3 total occurrences
+        // game_history includes current position (pushed by make_move_with_history)
+        // count >= 3 means position appears 3 times in history = threefold
+        count >= 3
     }
 
     /// Load the game history from a list of position hashes.
