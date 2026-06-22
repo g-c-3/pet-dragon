@@ -352,36 +352,21 @@ mod tests {
 fn test_en_passant_legality() {
     setup();
     // En passant that would expose King to check is illegal
-    // This is the famous "en passant pin" case
-    // White King a5, White pawn b5, Black pawn c5 (just doubled from c7)
-    // White Rook d5 — after bxc6 ep, rank 5 opens exposing King to Rook
-    // Note: Rook is Black's, King is White's
-    let fen = "8/8/8/KPpR4/8/8/8/7k w - c6 0 1";
+    // Classic "en passant pin" case:
+    // White King a5, White pawn b5, Black pawn c5, BLACK Rook d5
+    // After b5xc6 en passant:
+    //   White pawn b5 moves to c6
+    //   Black pawn c5 is captured and removed
+    //   Rank 5 now has: King a5, empty b5, empty c5, Black Rook d5
+    //   King a5 is exposed to Black Rook d5 — ILLEGAL
+    let fen = "8/8/8/KPpr4/8/8/8/7k w - c6 0 1";
     let pos = Position::from_fen(fen).unwrap();
-
-    // Manually verify the position loaded correctly
-    // If the position is valid, check en passant legality
     let legal = generate_moves(&pos);
     let ep_moves: Vec<_> = legal.iter()
         .filter(|m| m.kind == MoveKind::EnPassant)
         .collect();
-
-    // After bxc6 en passant:
-    // - White pawn moves from b5 to c6
-    // - Black pawn on c5 is removed
-    // - King on a5 is now exposed to Black Rook on d5 along rank 5
-    // This should be filtered as illegal
-    // Verify by making the move and checking for check
-    for mv in ep_moves.iter() {
-        let mut test_pos = pos.clone();
-        apply_move_for_legality_pub(&mut test_pos, **mv, Color::White);
-        assert!(test_pos.in_check(Color::White),
-            "After en passant, White King should be in check");
-    }
-
-    // The legal move list should not contain the en passant
     assert_eq!(ep_moves.len(), 0,
-        "En passant that exposes King to Rook should be illegal");
+        "En passant that exposes King to Black Rook should be illegal");
 }
     #[test]
     fn test_castling_through_check_illegal() {
