@@ -389,4 +389,20 @@ impl Position {
             }
         }
     }
+
+    /// Make a move AND record position in game history (for repetition detection).
+    /// Use this in the search instead of make_move() alone.
+    #[inline]
+    pub fn make_move_with_history(&mut self, mv: Move) {
+        self.make_move(mv);
+        self.push_game_history();
+    }
+
+    /// Unmake a move AND remove position from game history.
+    /// Use this in the search instead of unmake_move() alone.
+    #[inline]
+    pub fn unmake_move_with_history(&mut self, mv: Move) {
+        self.pop_game_history();
+        self.unmake_move(mv);
+    }
 }
