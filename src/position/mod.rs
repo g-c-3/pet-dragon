@@ -77,6 +77,15 @@ pub struct Position {
     // ── Move history (for unmake) ─────────────────────────────────────────────
     // Each entry stores state that cannot be recovered from the move alone
     pub history: Vec<HistoryEntry>,
+
+    // ── Game history (for repetition detection) ───────────────────────────────
+    // Stores Zobrist hashes of all positions seen in the current game.
+    // Used to detect draws by threefold repetition during search.
+    // Checked BEFORE transposition table — repetition always overrides TT.
+    // ⚠️ Pet Dragon: hash encodes pawn start configuration, so positions
+    // from different Pet Dragon games with same piece placement but different
+    // pawn starts will have different hashes — no false repetition detection.
+    pub game_history: Vec<u64>,
 }
 
 /// State saved before making a move, restored during unmake
@@ -107,6 +116,7 @@ impl Position {
             hash:            0,
             pawn_starts:     PawnStartMap::EMPTY,
             history:         Vec::with_capacity(256),
+            game_history:    Vec::with_capacity(512),
         }
     }
 
