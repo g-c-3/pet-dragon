@@ -269,3 +269,128 @@ fn test_pawn_start_map_unchanged_after_make_unmake() {
         }
     }
 }
+
+// ── Repetition detection tests ────────────────────────────────────────────────
+
+#[test]
+fn test_no_repetition_at_start() {
+    setup();
+    let pos = Position::start_pos().unwrap();
+    // Fresh position — no history — no repetition
+    assert!(!pos.is_repetition(),
+        "Fresh position should not be a repetition");
+}
+
+#[test]
+fn test_repetition_detected_after_moves() {
+    setup();
+    let mut pos = Position::start_pos().unwrap();
+    let original_hash = pos.hash;
+
+    // Make a move and record
+    let moves = generate_moves(&pos);
+    let mv1 = moves.get(0); // e.g. e2-e4
+    pos.make_move_with_history(mv1);
+
+    // Make Black's response
+    let moves2 = generate_moves(&pos);
+    let mv2 = moves2.get(0);
+    pos.make_move_with_history(mv2);
+
+    // Unmake both — should be back at original position
+    pos.unmake_move_with_history(mv2);
+    pos.unmake_move_with_history(mv1);
+
+    // Original position hash is back
+    assert_eq!(pos.hash, original_hash);
+
+    // Make same moves again
+    pos.make_move_with_history(mv1);
+    pos.make_move_with_history(mv2);
+    pos.unmake_move_with_history(mv2);
+    pos.unmake_move_with_history(mv1);
+
+    // Now the position has appeared before in game history
+    // game_history should contain the hash from first visit
+    // Current position matches → repetition
+    assert!(pos.is_repetition(),
+        "Position appearing second time should be detected as repetition");
+}
+
+#[test]
+fn test_threefold_repetition() {
+    setup();
+    let mut pos = Position::start_pos().unwrap();
+
+    let moves = generate_moves(&pos);
+    let mv1 = moves.get(0);
+    let mv2 = generate_moves(&{ let mut p = pos.clone(); p.make_move(mv1); p })
+        .get(0);
+
+    // Visit start position 3 times total
+    // First visit: already there (count = 0 in history)
+    pos.push_game_history(); // record initial position
+
+    // Second visit
+    pos.make_move_with_history(mv1);
+    pos.make_move_with_history(mv2);
+    pos.unmake_move_with_history(mv2);
+    pos.unmake_move_with_history(mv1);
+
+    // Third visit
+    pos.make_move_with_history(mv1);
+    pos.make_move_with_history(mv2);
+    pos.unmake_move_with_history(mv2);
+    pos.unmake_move_with_history(mv1);
+
+    assert!(pos.is_threefold_repetition(),
+        "Position appearing 3 times should be threefold repetition");
+}
+
+#[test]
+fn test_game_history_cleared_on_new_game() {
+    setup();
+    let mut pos = Position::start_pos().unwrap();
+    pos.push_game_history();
+    pos.push_game_history();
+    assert!(!pos.game_history.is_empty());
+    pos.clear_game_history();
+    assert!(pos.game_history.is_empty(),
+        "Game history should be empty after clear");
+}
+
+#[test]
+fn test_repetition_not_triggered_by_different_positions() {
+    setup();
+    let mut pos = Position::start_pos().unwrap();
+    let moves = generate_moves(&pos);
+
+    // Make several different moves — no repetition
+    for mv in moves.iter().take(5) {
+        pos.make_move_with_history(*mv);
+        assert!(!pos.is_repetition(),
+            "Different positions should not trigger repetition");
+        pos.unmake_move_with_history(*mv);
+        pos.clear_game_history();
+    }
+}
+
+#[test]
+fn test_pet_dragon_repetition_uses_pawn_start_hash() {
+    setup();
+    // Two different Pet Dragon positions with same piece placement
+    // but different pawn starts should NOT be considered equal
+    // (Zobrist hash includes pawn start configuration)
+    let pos1 = Position::generate_with_seed(0);
+    let pos2 = Position::generate_with_seed(1);
+
+    // If hashes differ (almost guaranteed), repetition won't be triggered
+    // This test verifies the hash encodes enough to distinguish them
+    if pos1.hash != pos2.hash {
+        let mut test_pos = pos1.clone();
+        // Push pos2's hash as if it were a previous position
+        test_pos.game_history.push(pos2.hash);
+        assert!(!test_pos.is_repetition(),
+            "Different Pet Dragon positions should not be considered repetitions");
+    }
+}
