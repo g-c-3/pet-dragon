@@ -64,6 +64,15 @@ pub fn is_legal(pos: &Position, mv: Move, color: Color) -> bool {
 // game state (no history stack, no Zobrist hash update).
 // Phase 5 builds the full make/unmake on top of this foundation.
 
+/// Public version for use in perft tests
+pub fn apply_move_for_legality_pub(
+    pos: &mut Position,
+    mv: Move,
+    color: Color,
+) {
+    apply_move_for_legality(pos, mv, color);
+}
+
 fn apply_move_for_legality(pos: &mut Position, mv: Move, color: Color) {
     let from = mv.from;
     let to   = mv.to;
