@@ -129,9 +129,9 @@ Requires Rust 1.75+ and wasm-pack for WASM builds.
 | Phase | Status | Description |
 |---|---|---|
 | Scaffold & types | 🔄 In progress | Core data types |
-| Bitboards | ⏳ Pending | Board representation |
-| Position generator | ⏳ Pending | Pet Dragon setup |
-| Move generation | ⏳ Pending | All legal moves |
+| Bitboards | ⏳ In progress | Board representation |
+| Position generator | ⏳ In progress | Pet Dragon setup |
+| Move generation | ⏳ In progress | All legal moves |
 | Search | ⏳ Pending | Alpha-beta + PVS |
 | Evaluation | ⏳ Pending | HCE |
 | UCI protocol | ⏳ Pending | GUI compatibility |
