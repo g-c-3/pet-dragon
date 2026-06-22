@@ -512,8 +512,84 @@ impl Position {
     }
 }
 
-// ── Display ───────────────────────────────────────────────────────────────────
+// ── Repetition detection ──────────────────────────────────────────────────────
 
+impl Position {
+    /// Record the current position hash in game history.
+    /// Call this AFTER make_move() — records the new position.
+    /// The search calls this to track positions for repetition detection.
+    #[inline]
+    pub fn push_game_history(&mut self) {
+        self.game_history.push(self.hash);
+    }
+
+    /// Remove the last recorded position from game history.
+    /// Call this AFTER unmake_move() — removes the position we just undid.
+    #[inline]
+    pub fn pop_game_history(&mut self) {
+        self.game_history.pop();
+    }
+
+    /// Has the current position occurred before in this game?
+    /// Returns true if the current hash appears 1+ times in game history
+    /// (meaning it has occurred before — this would be the 2nd occurrence,
+    /// making it a draw claim available, or 3rd occurrence = forced draw).
+    ///
+    /// We use count >= 1 (not 2) because:
+    /// - game_history contains past positions
+    /// - current position is NOT yet in game_history
+    /// - if current hash appears once in history = 2nd occurrence = draw claimable
+    /// - if appears twice in history = 3rd occurrence = draw by repetition
+    ///
+    /// For search purposes we return true at 2nd occurrence (draw claimable)
+    /// to be safe and avoid repetition cycles.
+    #[inline]
+    pub fn is_repetition(&self) -> bool {
+        let current = self.hash;
+        // Count backwards — recent positions more likely to match
+        // Stop early if we find a match
+        let mut count = 0u32;
+        for &hash in self.game_history.iter().rev() {
+            if hash == current {
+                count += 1;
+                if count >= 1 {
+                    // Found at least one previous occurrence
+                    // Combined with current = 2nd occurrence = draw
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Is this position a draw by threefold repetition?
+    /// Returns true only if position has occurred 3 or more times total.
+    /// Use is_repetition() in search (conservative), this for game adjudication.
+    pub fn is_threefold_repetition(&self) -> bool {
+        let current = self.hash;
+        let mut count = 0u32;
+        for &hash in self.game_history.iter() {
+            if hash == current {
+                count += 1;
+            }
+        }
+        // current position + count occurrences in history = count+1 total
+        count >= 2 // means 3 total occurrences
+    }
+
+    /// Load the game history from a list of position hashes.
+    /// Used when loading a game via UCI position command with move list.
+    pub fn set_game_history(&mut self, hashes: Vec<u64>) {
+        self.game_history = hashes;
+    }
+
+    /// Clear game history (called on ucinewgame)
+    pub fn clear_game_history(&mut self) {
+        self.game_history.clear();
+    }
+}
+
+// ── Display ───────────────────────────────────────────────────────────────────
 impl std::fmt::Display for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "  ┌─────────────────┐")?;
