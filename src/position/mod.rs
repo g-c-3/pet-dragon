@@ -25,6 +25,7 @@
 pub mod fen;
 pub mod zobrist;
 pub mod setup;
+pub mod make_move;
 
 use crate::bitboard::Bitboard;
 use crate::position::fen::{
