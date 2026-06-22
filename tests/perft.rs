@@ -238,9 +238,9 @@ fn test_perft_promo_depth1() {
     setup();
     let pos = Position::from_fen(PROMO_POS).unwrap();
     let result = perft(&pos, 1);
-    // Known value for this position
-    assert_eq!(result, 6,
-        "Promotion position perft(1) should be 6");
+    // Known value: 36 legal moves from this complex position
+    assert_eq!(result, 36,
+        "Promotion position perft(1) should be 36");
 }
 
 // ── Pet Dragon specific perft tests ───────────────────────────────────────────
