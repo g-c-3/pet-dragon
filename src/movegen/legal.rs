@@ -282,6 +282,7 @@ mod tests {
     use crate::bitboard::magic::init_magic;
     use crate::bitboard::masks::init_masks;
     use crate::movegen::{generate_moves, generate_pseudo_legal};
+    use crate::movegen::legal::apply_move_for_legality_pub;
     use crate::position::Position;
     use crate::position::zobrist::init_zobrist;
     use crate::types::{Color, MoveKind, Square};
