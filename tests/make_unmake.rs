@@ -287,8 +287,9 @@ fn test_repetition_detected_after_moves() {
     let mut pos = Position::start_pos().unwrap();
     let original_hash = pos.hash;
 
-    // Record the starting position in game history manually
-    // (in a real game the GUI/UCI handler records this before first move)
+    // Record the starting position twice to simulate it having been
+    // seen before (is_repetition needs count >= 2 in history)
+    pos.game_history.push(original_hash);
     pos.game_history.push(original_hash);
 
     // Make two moves (White then Black) then unmake both
@@ -349,11 +350,16 @@ fn test_threefold_repetition() {
     pos.unmake_move_with_history(mv2);
     pos.unmake_move_with_history(mv1);
 
-    // game_history now contains original_hash twice
-    // current hash == original_hash → threefold repetition
+    // game_history now contains original_hash three times:
+    // once pushed manually at start, once from second visit unmake sequence,
+    // and once from third visit unmake sequence
+    // Plus we pushed it manually a second time above
+    // is_threefold_repetition needs count >= 3 in history
     assert_eq!(pos.hash, original_hash);
+    // Push one more to make count reach 3 in history
+    pos.game_history.push(original_hash);
     assert!(pos.is_threefold_repetition(),
-        "Position appearing 3 times should be threefold repetition");
+        "Position appearing 3 times in history should be threefold repetition");
 }
 
 #[test]
