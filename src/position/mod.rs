@@ -32,7 +32,7 @@ use crate::position::fen::{
     generate_fen, parse_fen, FenError, STANDARD_START_FEN,
 };
 use crate::position::zobrist::{
-    castling_key, ep_key, init_zobrist, pawn_start_key,
+    castling_key, ep_key, pawn_start_key,
     piece_key, side_key,
 };
 use crate::types::{
@@ -353,6 +353,7 @@ impl Position {
     /// Is a square attacked by any piece of the given color?
     /// Used for check detection, castling legality, king safety
     pub fn is_attacked(&self, sq: Square, by_color: Color) -> bool {
+        #[allow(unused_imports)]
         use crate::bitboard::{
             bishop_attacks, queen_attacks, rook_attacks,
         };
