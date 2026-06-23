@@ -18,6 +18,7 @@ pub mod bitboard;
 pub mod position;
 pub mod movegen;
 pub mod tt;
+pub mod search;
 
 // Future modules (uncommented phase by phase):
 // pub mod bitboard;  // Phase 2
