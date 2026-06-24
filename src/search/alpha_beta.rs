@@ -413,6 +413,10 @@ pub fn alpha_beta(
         if score > best_score {
             best_score = score;
             best_move  = mv;
+            if root_node {
+                info.best_move  = mv;
+                info.best_score = score;
+            }
 
             if score > alpha {
                 alpha = score;
