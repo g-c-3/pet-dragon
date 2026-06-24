@@ -21,10 +21,9 @@
 
 use crate::position::Position;
 use crate::search::{
-    alpha_beta::{alpha_beta, evaluate},
+    alpha_beta::alpha_beta,
     time::{allocate_time, TimeControl, TimeManager},
-    SearchInfo, SearchResult, DRAW_SCORE, INFINITY, MATE_SCORE,
-    MATE_THRESHOLD, is_mate_score, mate_in,
+    SearchInfo, SearchResult, INFINITY, is_mate_score, mate_in,
 };
 use crate::tt::TranspositionTable;
 use crate::types::Move;
