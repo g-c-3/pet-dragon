@@ -172,8 +172,9 @@ pub fn see_value_of(pos: &Position, mv: Move) -> i32 {
         depth += 1;
         if depth >= gain.len() { break; }
 
-        // Gain from capturing the piece that just moved
         gain[depth] = see_value(next_piece) - gain[depth - 1];
+
+        if gain[depth].max(-gain[depth - 1]) < 0 { break; }
 
         let (attacker_sq, attacker_kind) = match
             least_valuable_attacker(pos, &attackers, side, occupancy)
@@ -183,17 +184,16 @@ pub fn see_value_of(pos: &Position, mv: Move) -> i32 {
         };
 
         occupancy.clear(attacker_sq);
-        attackers |= xray_attackers(pos, to, occupancy, attacker_sq);
-        attackers &= occupancy;
+        attackers = all_attackers(pos, to, occupancy);
 
         next_piece = attacker_kind;
         side       = side.flip();
     }
 
-    // Negate-max: work backwards through gain array
+    // Negamax backwards
     while depth > 1 {
         depth -= 1;
-        gain[depth - 1] = (-gain[depth]).max(gain[depth - 1]);
+        gain[depth - 1] = -((-gain[depth - 1]).max(gain[depth]));
     }
 
     gain[0]
