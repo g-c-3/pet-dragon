@@ -35,7 +35,7 @@ pub fn extension(
     in_check:    bool,
     gives_check: bool,
     depth:       i32,
-    ply:         usize,
+    _ply:        usize,
 ) -> i32 {
     let mut ext = 0i32;
 
@@ -188,7 +188,6 @@ pub fn try_probcut(
     use crate::movegen::generate_captures;
     use crate::search::ordering::{next_move, score_captures};
     use crate::search::alpha_beta::quiescence;
-    use crate::search::INFINITY;
 
     let probcut_beta  = beta + PROBCUT_MARGIN;
     let tt_move = tt.probe(pos.hash).map(|e| e.mv).unwrap_or(Move::NULL);
