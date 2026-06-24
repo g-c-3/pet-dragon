@@ -221,6 +221,10 @@ impl TimeManager {
     /// likely to run out of time mid-search
     pub fn should_start_next_depth(&self, elapsed_ms: u64) -> bool {
         // Don't start if we've used more than 75% of soft limit
+        // Guard against overflow when soft_limit_ms is u64::MAX/2
+        if self.soft_limit_ms > u64::MAX / 4 {
+            return true; // Infinite time — always start next depth
+        }
         elapsed_ms < self.soft_limit_ms * 3 / 4
     }
 }
