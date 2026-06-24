@@ -31,8 +31,7 @@
 // ⚠️ Pet Dragon notes throughout — see comments marked ⚠️
 // ============================================================================
 
-use crate::movegen::{generate_captures, generate_moves, is_checkmate,
-                     is_stalemate};
+use crate::movegen::{generate_captures, generate_moves};
 use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
@@ -43,7 +42,7 @@ use crate::search::{
     MIN_DEPTH_NULL_MOVE, MIN_DEPTH_RAZORING,
 };
 use crate::tt::{Bound, TranspositionTable};
-use crate::types::{Color, Move, MoveKind, PieceKind};
+use crate::types::{Color, Move, PieceKind};
 
 // ── Quiescence search ─────────────────────────────────────────────────────────
 
