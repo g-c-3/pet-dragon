@@ -65,9 +65,9 @@ fn mvv_lva_score(attacker: PieceKind, victim: PieceKind) -> i32 {
 
 /// A move paired with its ordering score
 #[derive(Clone, Copy)]
-struct ScoredMove {
-    mv:    Move,
-    score: i32,
+pub struct ScoredMove {
+    pub mv:    Move,
+    pub score: i32,
 }
 
 // ── Main scoring function ─────────────────────────────────────────────────────
