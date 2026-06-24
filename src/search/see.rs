@@ -60,7 +60,7 @@ fn see_value(kind: PieceKind) -> i32 {
 ///
 /// threshold: minimum gain required (use 0 for "does this win material?")
 /// Returns true if SEE >= threshold.
-pubpub fn see(pos: &Position, mv: Move, threshold: i32) -> bool {
+pub fn see(pos: &Position, mv: Move, threshold: i32) -> bool {
     let from  = mv.from;
     let to    = mv.to;
     let color = pos.side_to_move;
