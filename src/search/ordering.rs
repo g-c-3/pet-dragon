@@ -78,7 +78,7 @@ pub fn score_moves(
     moves:      &MoveList,
     info:       &SearchInfo,
     tt_move:    Move,
-    ply:        usize,
+    _ply:        usize,
     prev_move:  Move,
 ) -> Vec<ScoredMove> {
     let color   = pos.side_to_move;
