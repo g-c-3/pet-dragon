@@ -60,93 +60,78 @@ fn see_value(kind: PieceKind) -> i32 {
 ///
 /// threshold: minimum gain required (use 0 for "does this win material?")
 /// Returns true if SEE >= threshold.
-pub fn see(pos: &Position, mv: Move, threshold: i32) -> bool {
+pubpub fn see(pos: &Position, mv: Move, threshold: i32) -> bool {
     let from  = mv.from;
     let to    = mv.to;
     let color = pos.side_to_move;
 
-    // Get the piece being moved
-    let moving_piece = match pos.piece_on(from, color) {
+    // Value of the piece on the target square
+    let target_value = match mv.kind {
+        MoveKind::EnPassant => see_value(PieceKind::Pawn),
+        _ => pos.piece_on(to, color.flip())
+                .map(see_value)
+                .unwrap_or(0),
+    };
+
+    // If we can't even meet threshold by capturing, fail immediately
+    if target_value < threshold {
+        return false;
+    }
+
+    // Value of our piece making the capture
+    let our_piece = match pos.piece_on(from, color) {
         Some(k) => k,
         None    => return false,
     };
 
-    // Initial gain: value of captured piece
-    let mut gain = match mv.kind {
-        MoveKind::EnPassant => see_value(PieceKind::Pawn),
-        _ => {
-            match pos.piece_on(to, color.flip()) {
-                Some(k) => see_value(k),
-                None    => 0, // Quiet move — no initial gain
-            }
-        }
-    };
-
-    // If initial gain minus moving piece value is already >= threshold
-    // even in the worst case (we lose our piece), it's a win
-    gain -= see_value(moving_piece);
-
-    // If even giving up our piece still beats threshold, return true
-    if gain >= threshold {
-        return true;
-    }
-
-    // If losing our piece makes it worse than threshold already, return false
-    if gain + see_value(moving_piece) < threshold {
-        return false;
-    }
-
-    // ── SWAP algorithm ────────────────────────────────────────────────────────
-    // Simulate the exchange sequence on the 'to' square
+    // Gain array for negamax
+    let mut gain    = [0i32; 32];
+    let mut depth   = 0usize;
+    gain[0]         = target_value;
 
     let mut occupancy = pos.all_pieces();
     occupancy.clear(from);
-    // Handle en passant: also remove the captured pawn
     if mv.kind == MoveKind::EnPassant {
-        let ep_pawn_sq = Square::from_file_rank(to.file(), from.rank())
-            .unwrap();
-        occupancy.clear(ep_pawn_sq);
+        let ep_sq = crate::types::Square::from_file_rank(
+            to.file(), from.rank()
+        ).unwrap();
+        occupancy.clear(ep_sq);
     }
 
-    let mut attackers = all_attackers(pos, to, occupancy);
-    let mut side      = color.flip(); // Opponent recaptures first
-    let mut next_piece = moving_piece;
+    let mut attackers  = all_attackers(pos, to, occupancy);
+    let mut side       = color.flip();
+    let mut next_piece = our_piece;
 
     loop {
-        // Remove the piece that just moved from attackers
-        let piece_bb = Bitboard::from_square(from);
-        attackers &= !piece_bb;
+        depth += 1;
+        if depth >= gain.len() { break; }
 
-        // Find least valuable attacker for current side
+        // Gain for this side: value of piece just captured minus previous gain
+        gain[depth] = see_value(next_piece) - gain[depth - 1];
+
+        // Pruning: if this side can't improve even by stopping now
+        if gain[depth].max(-gain[depth - 1]) < 0 { break; }
+
         let (attacker_sq, attacker_kind) = match
             least_valuable_attacker(pos, &attackers, side, occupancy)
         {
             Some(x) => x,
-            None    => break, // No more attackers — exchange over
+            None    => break,
         };
 
-        // Update occupancy — remove this attacker
         occupancy.clear(attacker_sq);
-
-        // Add any new X-ray attackers revealed by removing this piece
-        attackers |= xray_attackers(pos, to, occupancy, attacker_sq);
-        attackers &= occupancy; // Only pieces still on board
-
-        // Negate and update gain
-        // From current side's perspective:
-        // gain = value of piece just captured - gain so far
-        gain = see_value(next_piece) - gain;
-
-        // If this side can't improve by continuing, stop
-        if gain < threshold - see_value(attacker_kind) {
-            break;
-        }
-
+        attackers  = all_attackers(pos, to, occupancy);
         next_piece = attacker_kind;
         side       = side.flip();
     }
 
-    gain >= threshold
+    // Negamax: work backwards
+    while depth > 1 {
+        depth -= 1;
+        gain[depth - 1] = -((-gain[depth - 1]).max(gain[depth]));
+    }
+
+    gain[0] >= threshold
 }
 
 /// Simple SEE: returns the estimated material gain/loss as a number
