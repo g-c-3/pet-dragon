@@ -27,6 +27,7 @@ pub mod iterative;
 pub mod ordering;
 pub mod time;
 pub mod see;
+pub mod pruning;
 
 use crate::types::Move;
 
