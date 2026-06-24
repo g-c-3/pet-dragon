@@ -18,7 +18,7 @@
 // ============================================================================
 
 use crate::position::Position;
-use crate::search::{MATE_THRESHOLD, MAX_PLY};
+use crate::search::MATE_THRESHOLD;
 use crate::types::{Color, Move, MoveKind, PieceKind};
 
 // ── Extension logic ───────────────────────────────────────────────────────────
