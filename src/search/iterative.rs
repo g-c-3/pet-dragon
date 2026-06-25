@@ -114,18 +114,25 @@ pub fn iterative_deepening(
 
         // Build result for this depth
         let pv = info.get_pv();
+        let score_for_result = if info.best_score.abs() > 0
+            && info.best_score != -INFINITY {
+            info.best_score
+        } else {
+            best_score
+        };
+
         result = SearchResult {
             best_move,
-            score:    best_score,
+            score:    score_for_result,
             depth,
             seldepth: info.seldepth,
             nodes:    info.nodes,
             time_ms:  elapsed,
             nps:      info.nps,
             pv:       pv.clone(),
-            is_mate:  is_mate_score(best_score),
-            mate_in:  if is_mate_score(best_score) {
-                          mate_in(best_score)
+            is_mate:  is_mate_score(score_for_result),
+            mate_in:  if is_mate_score(score_for_result) {
+                          mate_in(score_for_result)
                       } else { 0 },
         };
 
