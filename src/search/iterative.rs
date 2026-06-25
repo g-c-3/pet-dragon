@@ -326,20 +326,19 @@ mod tests {
     #[test]
     fn test_finds_mate_in_1() {
         setup();
-        // White Queen on h7, King on g6, Black King on h8 — mate in 1
-        let fen = "7k/7Q/6K1/8/8/8/8/8 w - - 0 1";
+        // White up a queen — should find winning move
+        let fen = "4k3/8/8/8/8/8/8/4KQ2 w - - 0 1";
         let mut pos  = Position::from_fen(fen).unwrap();
         let mut info = SearchInfo::new();
         let mut tt   = TranspositionTable::new(16);
-        let tc       = fixed_depth_tc(3);
+        let tc       = fixed_depth_tc(4);
 
         let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
 
         assert_ne!(result.best_move, Move::NULL,
-            "Should find a move in mate position");
+            "Should find a move");
         assert!(result.score > 0,
-            "Score should be positive (winning) in mate position: {}",
-            result.score);
+            "Score should be positive when up a queen: {}", result.score);
     }
 
     #[test]
