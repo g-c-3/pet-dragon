@@ -243,7 +243,9 @@ mod tests {
     #[test]
     fn test_see_even_exchange() {
         setup();
-        let fen = "4k3/8/8/3r4/3R4/8/8/4K3 w - - 0 1";
+        // White Rook takes Black Rook, Black Rook recaptures — even exchange
+        // Need Black to have a recapturer — add Black Rook on d8
+        let fen = "3rk3/8/8/3r4/3R4/8/8/4K3 w - - 0 1";
         let pos = Position::from_fen(fen).unwrap();
         let mv  = capture(Square::D4, Square::D5, PieceKind::Rook);
         let val = see_value_of(&pos, mv);
