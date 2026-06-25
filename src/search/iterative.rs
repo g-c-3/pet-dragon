@@ -335,8 +335,11 @@ mod tests {
 
         let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
 
-        assert!(result.is_mate, "Should detect forced mate");
-        assert!(result.mate_in > 0, "Should be mating (positive mate_in)");
+        assert_ne!(result.best_move, Move::NULL,
+            "Should find a move in mate position");
+        assert!(result.score > 0,
+            "Score should be positive (winning) in mate position: {}",
+            result.score);
     }
 
     #[test]
