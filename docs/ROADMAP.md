@@ -92,7 +92,7 @@
             ⚠️ PROVIDED TO GOKUL — verify upload before continuing
 - [~] 8.2 — src/eval/mod.rs — Module declarations (stub)
             ⚠️ PROVIDED TO GOKUL — verify upload before continuing
-- [ ] 8.3 — src/eval/tables.rs — Piece-square tables (PST) MG+EG
+- [~] 8.3 — src/eval/tables.rs — Piece-square tables (PST) MG+EG
             Knight centre bonus, King endgame centralisation, Rook 7th rank
             ️⚠️ PROVIDED TO GOKUL — verify upload before continuing
 - [ ] 8.4 — src/eval/mobility.rs — Mobility bonus per piece type
