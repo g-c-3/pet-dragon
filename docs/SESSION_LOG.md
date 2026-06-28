@@ -7,6 +7,23 @@ Most recent session at TOP.
 
 ---
 
+## Session 8 — 2026-06-29
+
+**Built:** Nothing new — pure bug-fix session on Phase 8 eval compilation.
+
+**Bugs fixed:**
+- E0015 (388 errors): `s()`, `mg()`, `eg()` were plain `fn` used in `const` PST array initialisers in `tables.rs`. Fix: make them `const fn`. Applied in both `src/eval/material.rs` and `src/material.rs`.
+- E0583 (file not found): `src/eval/mod.rs` declared `mobility`, `pawns`, `king_safety`, `open_lines` modules that don't exist yet. Fix: comment them out.
+- E0658 (4 errors): `taper()` was also made `const fn` but uses `i32::max()`/`i32::min()` which are not yet stable as const (rust-lang issue #143874). Fix: revert `taper` to plain `fn` — only `s/mg/eg` need to be const.
+- Unused import `mg, eg` in `tables.rs` after removing their calls. Fix: trim import.
+- 3 unused variable warnings (`ply`, `depth`, `them`) prefixed with `_`.
+
+**Decisions:** None new — these were implementation fixes only.
+
+**Next session start point:** Phase 8 eval is compiling. Next task: implement `src/eval/mobility.rs`, `src/eval/pawns.rs`, `src/eval/king_safety.rs`, `src/eval/open_lines.rs`, then re-enable them in `mod.rs`. Start with `mobility.rs`.
+
+---
+
 ## Session 7 — Phase 8 Start + Docs Setup
 **Date**: 2026-06-28
 **Build**: #86 green (239 tests passing)

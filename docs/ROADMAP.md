@@ -87,14 +87,11 @@
 ---
 
 ## Phase 8 — Handcrafted Evaluation (HCE) 🔄 IN PROGRESS
-- [~] 8.1 — src/eval/material.rs — Tapered material values (Ethereal weights)
+- [x] 8.1 — src/eval/material.rs — Tapered material values (Ethereal weights)
             s(mg,eg) packed score, taper(), game_phase()
-            ⚠️ PROVIDED TO GOKUL — verify upload before continuing
-- [~] 8.2 — src/eval/mod.rs — Module declarations (stub)
-            ⚠️ PROVIDED TO GOKUL — verify upload before continuing
-- [~] 8.3 — src/eval/tables.rs — Piece-square tables (PST) MG+EG
+- [x] 8.2 — src/eval/mod.rs — Module declarations (stub)
+- [x] 8.3 — src/eval/tables.rs — Piece-square tables (PST) MG+EG
             Knight centre bonus, King endgame centralisation, Rook 7th rank
-            ️⚠️ PROVIDED TO GOKUL — verify upload before continuing
 - [ ] 8.4 — src/eval/mobility.rs — Mobility bonus per piece type
             Bonus for each legal move (from Ethereal weights)
 - [ ] 8.5 — src/eval/pawns.rs — Pawn structure evaluation
