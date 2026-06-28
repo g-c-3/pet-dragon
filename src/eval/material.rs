@@ -72,7 +72,7 @@ pub const BISHOP_PAIR_EG: i32 = 30;
 /// High 32 bits = middlegame, Low 32 bits = endgame
 /// This allows accumulating scores with a single addition
 #[inline]
-pub fn s(mg: i32, eg: i32) -> i64 {
+pub const fn s(mg: i32, eg: i32) -> i64 {
     ((mg as i64) << 32) + (eg as i64)
 }
 
