@@ -72,25 +72,25 @@ pub const BISHOP_PAIR_EG: i32 = 30;
 /// High 32 bits = middlegame, Low 32 bits = endgame
 /// This allows accumulating scores with a single addition
 #[inline]
-pub fn s(mg: i32, eg: i32) -> i64 {
+pub const fn s(mg: i32, eg: i32) -> i64 {
     ((mg as i64) << 32) + (eg as i64)
 }
 
 /// Extract middlegame score from packed value
 #[inline]
-pub fn mg(score: i64) -> i32 {
+pub const fn mg(score: i64) -> i32 {
     (score >> 32) as i32
 }
 
 /// Extract endgame score from packed value
 #[inline]
-pub fn eg(score: i64) -> i32 {
+pub const fn eg(score: i64) -> i32 {
     score as i32
 }
 
 /// Apply taper: blend MG and EG scores based on game phase
 #[inline]
-pub fn taper(score: i64, phase: i32) -> i32 {
+pub const fn taper(score: i64, phase: i32) -> i32 {
     let phase = phase.max(0).min(24);
     (mg(score) * phase + eg(score) * (24 - phase)) / 24
 }
