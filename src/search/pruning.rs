@@ -179,7 +179,7 @@ pub fn should_try_probcut(
 /// Returns None if probcut fails (continue normal search)
 pub fn try_probcut(
     pos:   &mut Position,
-    depth: i32,
+    _depth: i32,
     beta:  i32,
     ply:   usize,
     info:  &mut crate::search::SearchInfo,
