@@ -129,7 +129,7 @@ fn score_move(
     killer2:     Move,
     countermove: Move,
     color_idx:   usize,
-    ply:         usize,
+    _ply:        usize,
 ) -> i32 {
     // ── TT move — highest priority ────────────────────────────────────────────
     if mv == tt_move {
