@@ -78,13 +78,13 @@ pub const fn s(mg: i32, eg: i32) -> i64 {
 
 /// Extract middlegame score from packed value
 #[inline]
-pub fn mg(score: i64) -> i32 {
+pub const fn mg(score: i64) -> i32 {
     (score >> 32) as i32
 }
 
 /// Extract endgame score from packed value
 #[inline]
-pub fn eg(score: i64) -> i32 {
+pub const fn eg(score: i64) -> i32 {
     score as i32
 }
 
