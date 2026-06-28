@@ -90,7 +90,7 @@ pub const fn eg(score: i64) -> i32 {
 
 /// Apply taper: blend MG and EG scores based on game phase
 #[inline]
-pub fn taper(score: i64, phase: i32) -> i32 {
+pub const fn taper(score: i64, phase: i32) -> i32 {
     let phase = phase.max(0).min(24);
     (mg(score) * phase + eg(score) * (24 - phase)) / 24
 }
