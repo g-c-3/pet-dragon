@@ -149,7 +149,7 @@ pub fn pst_value(kind: PieceKind, sq: Square, color: Color) -> i64 {
 /// Returns score from side-to-move perspective
 pub fn evaluate_tables(pos: &Position, phase: i32) -> i32 {
     let us   = pos.side_to_move;
-    let them = us.flip();
+    let _them = us.flip();
 
     let mut score = 0i64;
 
