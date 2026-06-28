@@ -94,7 +94,7 @@
             ⚠️ PROVIDED TO GOKUL — verify upload before continuing
 - [ ] 8.3 — src/eval/tables.rs — Piece-square tables (PST) MG+EG
             Knight centre bonus, King endgame centralisation, Rook 7th rank
-            ⚠️ NEXT FILE TO PROVIDE
+            ️⚠️ PROVIDED TO GOKUL — verify upload before continuing
 - [ ] 8.4 — src/eval/mobility.rs — Mobility bonus per piece type
             Bonus for each legal move (from Ethereal weights)
 - [ ] 8.5 — src/eval/pawns.rs — Pawn structure evaluation
