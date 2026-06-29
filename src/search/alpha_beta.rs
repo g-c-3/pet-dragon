@@ -472,17 +472,10 @@ fn move_gives_check(pos: &Position, mv: Move) -> bool {
     test.in_check(side)
 }
 
-/// Placeholder evaluation function
-/// Phase 8 replaces this with the full HCE
-/// For now: material count only
+/// Evaluate a position using the full HCE (Phase 8).
+/// Delegates to crate::eval::evaluate() — all terms combined and tapered.
 pub fn evaluate(pos: &Position) -> i32 {
-    let us   = pos.side_to_move;
-    let them = us.flip();
-
-    let our_material  = pos.material(us);
-    let their_material = pos.material(them);
-
-    our_material - their_material
+    crate::eval::evaluate(pos)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
