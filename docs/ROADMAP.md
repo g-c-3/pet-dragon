@@ -86,7 +86,7 @@
 
 ---
 
-## Phase 8 — Handcrafted Evaluation (HCE) 🔄 IN PROGRESS
+## Phase 8 — Handcrafted Evaluation (HCE) ✅ COMPLETE (296 tests passing)
 - [x] 8.1 — src/eval/material.rs — Tapered material values (Ethereal weights)
             s(mg,eg) packed score, taper(), game_phase()
 - [x] 8.2 — src/eval/mod.rs — Module declarations (stub)
@@ -100,6 +100,9 @@
 - [x] 8.9 — Wire evaluate() into src/search/alpha_beta.rs
 - [x] 8.10 — src/material.rs duplicate — orphan file, not declared in lib.rs,
              compiler ignores it. Leave in place (can't delete via web UI).
+- [x] 8.11 — Bug fix: PST White indexing reversed in tables.rs
+             (7-rank)*8+file for White; sq.index() for Black.
+             296 tests passing. Phase 8 complete. ✅
 
 ---
 

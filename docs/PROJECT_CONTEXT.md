@@ -27,12 +27,13 @@ Live: https://g-c-3.github.io/pet-dragon
 ---
 
 ## Current Status
-**Phase 8 — Handcrafted Evaluation (HCE) — IN PROGRESS**
+**Phase 9 — UCI Protocol — NEXT**
 
-- Phases 0–7 complete and green (239 tests passing, Build #86 ✅)
-- Phase 8 started: `src/eval/material.rs` and `src/eval/mod.rs` provided,
-  may or may not be uploaded yet — check GitHub to confirm before continuing.
-
+- Phases 0–8 complete and green (296 tests passing) ✅
+- Phase 8 HCE complete: material, tables, mobility, pawns, king_safety, open_lines
+- evaluate() wired into alpha_beta.rs — engine now uses full HCE
+- Next: Phase 9 — full UCI command loop in src/main.rs
+ 
 ---
 
 ## Tech Stack

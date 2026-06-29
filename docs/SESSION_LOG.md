@@ -31,7 +31,13 @@ Most recent session at TOP.
 - None new — all consistent with D6/D7/D8 already documented
 
 ### Bugs Fixed
-- None this session (writing new code)
+- **PST table White indexing reversed** (`tables.rs`): PST tables are written rank 8 at
+  index 0 (Ethereal/Stockfish layout), but White used `sq.index()` = `rank*8+file`, which
+  reads the table upside-down (rank 1 pawn got rank 7 bonus, rank 7 pawn got rank 1 bonus).
+  Fix: White uses `(7-rank)*8+file`, Black uses `sq.index()`. Black was accidentally correct
+  (its mirror formula happened to match what White should use).
+  Affected tests: `test_pawn_advance_bonus`, `test_rook_7th_rank` (both now pass).
+  Build went from 294 passed / 2 failed → 296 passed / 0 failed.
 
 ### Next Session Start Point
 1. Confirm all 5 eval files uploaded + alpha_beta.rs delta applied
