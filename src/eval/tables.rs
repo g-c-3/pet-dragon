@@ -123,14 +123,16 @@ const KING_TABLE: [i64; 64] = [
 /// Automatically mirrors for Black (Black's a8 = White's a1 perspective)
 pub fn pst_value(kind: PieceKind, sq: Square, color: Color) -> i64 {
     // Mirror square for Black — Black plays from rank 8 downward
+    // PST tables are written rank 8 at index 0, rank 1 at index 56 (standard Ethereal/Stockfish layout).
+    // White moves toward rank 8 → use (7-rank)*8+file to index correctly.
+    // Black moves toward rank 1 → mirror rank, so use rank*8+file (same as White's sq.index()).
     let idx = match color {
-        Color::White => sq.index() as usize,
-        Color::Black => {
-            // Mirror rank: rank 0 ↔ rank 7
+        Color::White => {
             let file = sq.file() as usize;
             let rank = 7 - sq.rank() as usize;
             rank * 8 + file
         }
+        Color::Black => sq.index() as usize,
     };
 
     match kind {
