@@ -31,6 +31,9 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
+      - name: Create web folder
+        run: mkdir -p web/pkg
+
       - name: Build WebAssembly
         run: |
           wasm-pack build \
@@ -40,13 +43,10 @@ jobs:
             --out-name pet_dragon \
             -- --features wasm
 
-      - name: Create web folder if missing
-        run: mkdir -p web
-
       - name: Verify build output
         run: |
           echo "WASM package contents:"
-          ls -la web/pkg/ || echo "pkg folder empty"
+          ls -la web/pkg/
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v4
