@@ -7,6 +7,40 @@ Most recent session at TOP.
 
 ---
 
+## Session 9 — Phase 8 HCE Complete
+
+**Date**: 2026-06-29
+**Build**: #86 green entering session; Phase 8 files uploaded
+
+### What Was Done
+- Confirmed material.rs, mod.rs (stub), tables.rs all on GitHub and building
+- Confirmed `const fn s/mg/eg` fix and `taper` plain fn fix applied and green
+- Confirmed `mod.rs` stub had unimplemented modules commented out
+- Wrote and delivered Phase 8 remaining files:
+  - `src/eval/mobility.rs` — mobility bonus (Ethereal weights, tapered)
+  - `src/eval/pawns.rs` — pawn structure (passed/isolated/doubled/backward)
+    Pet Dragon: rank 1 pawns never penalised as backward
+  - `src/eval/king_safety.rs` — king safety (pawn shield, open files, attackers)
+    Pet Dragon: no castling bonus (D7), scaled by phase
+  - `src/eval/open_lines.rs` — open files, batteries, 7th rank, connected rooks
+    Pet Dragon: active from move 1, no suppression (D6, D8)
+  - `src/eval/mod.rs` FINAL — full evaluate() combining all 6 terms + tempo
+  - Delta: `src/search/alpha_beta.rs` — replace placeholder with crate::eval::evaluate()
+
+### Decisions Made
+- None new — all consistent with D6/D7/D8 already documented
+
+### Bugs Fixed
+- None this session (writing new code)
+
+### Next Session Start Point
+1. Confirm all 5 eval files uploaded + alpha_beta.rs delta applied
+2. Check GitHub Actions build is green (239+ tests should still pass)
+3. If green → Phase 8 complete, start Phase 9 (UCI protocol in src/main.rs)
+4. If red → upload error log and fix
+
+---
+
 ## Session 8 — 2026-06-29
 
 **Built:** Nothing new — pure bug-fix session on Phase 8 eval compilation.

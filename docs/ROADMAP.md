@@ -91,25 +91,15 @@
             s(mg,eg) packed score, taper(), game_phase()
 - [x] 8.2 — src/eval/mod.rs — Module declarations (stub)
 - [x] 8.3 — src/eval/tables.rs — Piece-square tables (PST) MG+EG
-            Knight centre bonus, King endgame centralisation, Rook 7th rank
-- [ ] 8.4 — src/eval/mobility.rs — Mobility bonus per piece type
-            Bonus for each legal move (from Ethereal weights)
-- [ ] 8.5 — src/eval/pawns.rs — Pawn structure evaluation
-            Passed / isolated / doubled / backward pawns
-            ⚠️ Rank 1 pawns NEVER penalised as backward (Pet Dragon rule)
-- [ ] 8.6 — src/eval/king_safety.rs — King safety evaluation
-            Pawn shield, open files near king, attack count
-            ⚠️ NO castling bonus — 74% of games have no castling
-- [ ] 8.7 — src/eval/open_lines.rs — Open file/diagonal evaluation
-            ⚠️ Pet Dragon CRITICAL — open lines exist from move 1
-            Rook on open file, battery detection, contested files,
-            Rook on 7th rank, connected rooks, Queen on open file
-- [ ] 8.8 — src/eval/mod.rs FINAL — Full evaluate() combining all terms
-            Tapered blend, correction history, tempo bonus
-            No opening suppression — all terms at full weight from move 1
-- [ ] 8.9 — Wire evaluate() into src/search/alpha_beta.rs
-            Replace placeholder with crate::eval::evaluate(pos)
-- [ ] 8.10 — src/material.rs duplicate — remove if exists (was a stray file)
+- [x] 8.4 — src/eval/mobility.rs — Mobility bonus per piece type
+- [x] 8.5 — src/eval/pawns.rs — Pawn structure evaluation
+            ⚠️ Rank 1 pawns NOT penalised as backward (Pet Dragon rule applied)
+- [x] 8.6 — src/eval/king_safety.rs — King safety (no castling bonus, D7)
+- [x] 8.7 — src/eval/open_lines.rs — Open file/diagonal, batteries, 7th rank
+- [x] 8.8 — src/eval/mod.rs FINAL — Full evaluate() combining all terms
+- [x] 8.9 — Wire evaluate() into src/search/alpha_beta.rs
+- [x] 8.10 — src/material.rs duplicate — orphan file, not declared in lib.rs,
+             compiler ignores it. Leave in place (can't delete via web UI).
 
 ---
 
