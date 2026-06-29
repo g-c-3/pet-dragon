@@ -1,9 +1,38 @@
 # SESSION_LOG.md
 # Pet Dragon — Session History
 
-## Format
+## Format 
 Each entry: date, what was built, decisions made, bugs fixed, next session start point.
 Most recent session at TOP.
+
+---
+
+## Session 10 — Phase 9 UCI Protocol
+
+**Date**: 2026-06-29
+**Build**: #86 green entering session (296 tests, Phase 8 HCE complete)
+
+### What Was Done
+- Confirmed Phase 8 fully uploaded (eval/mod.rs final + alpha_beta wired)
+- Wrote src/main.rs — full UCI protocol (Phase 9 complete):
+  - uci, isready, ucinewgame, position, go, stop, setoption, quit
+  - position: startpos and fen + moves list
+  - go: all time control fields, calls iterative_deepening, bestmove + ponder
+  - setoption: Hash resize live, Threads accepted (Phase 13)
+  - d: debug display, perft: divide output
+  - 9 tests added covering all command paths
+
+### Decisions Made
+- None new
+
+### Bugs Fixed
+- N/A (new file)
+
+### Next Session Start Point
+1. Confirm src/main.rs upload + GitHub Actions green
+2. If green → Phase 9 complete, start Phase 10 (Release pipeline in build.yml)
+3. Phase 10.1: build release binaries for Windows/macOS/Linux in .github/workflows/build.yml
+4. If red → check build log, likely a missing pub or wrong path
 
 ---
 

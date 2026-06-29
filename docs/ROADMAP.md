@@ -1,7 +1,7 @@
 # ROADMAP.md
 # Pet Dragon — Development Roadmap
 
-## How to Read This File
+## How to Read This File 
 - [x] = complete and green (tests passing)
 - [~] = in progress
 - [ ] = not started
@@ -106,14 +106,14 @@
 
 ---
 
-## Phase 9 — UCI Protocol ⏳
-- [ ] 9.1 — Full UCI command loop in src/main.rs
+## Phase 9 — UCI Protocol ✅
+- [x] 9.1 — Full UCI command loop in src/main.rs
             uci, isready, ucinewgame, position, go, stop, quit
-- [ ] 9.2 — position command: parse startpos / fen + moves
-- [ ] 9.3 — go command: parse wtime/btime/winc/binc/movestogo/movetime/depth
-- [ ] 9.4 — UCI options: Hash (TT size), Threads (future SMP)
-- [ ] 9.5 — bestmove output after search completes
-- [ ] 9.6 — info strings during search (already formatted in SearchResult)
+- [x] 9.2 — position command: parse startpos / fen + moves
+- [x] 9.3 — go command: parse wtime/btime/winc/binc/movestogo/movetime/depth
+- [x] 9.4 — UCI options: Hash (TT size), Threads (future SMP)
+- [x] 9.5 — bestmove output after search completes
+- [x] 9.6 — info strings during search (already formatted in SearchResult)
 
 ---
 
