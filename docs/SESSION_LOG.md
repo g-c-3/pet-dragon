@@ -7,6 +7,35 @@ Most recent session at TOP.
 
 ---
 
+## Session 11 — Phases 10/11/12: Release Pipeline + WASM + Browser UI
+
+**Date**: 2026-06-30
+**Build entering session**: #116 green (309 tests, Phase 9 UCI complete)
+
+### What Was Done
+- Confirmed Build & Release #116 green from screenshot — Phase 10 already complete
+- Diagnosed deploy.yml failure: mkdir -p web ran AFTER wasm-pack, directory didn't exist
+- Fixed deploy.yml: mkdir -p web/pkg now before wasm-pack build
+- Wrote src/lib.rs Phase 11: wasm_main() calls init_masks/magic/zobrist on load;
+  added new_game(), search_from_fen(), legal_moves_from_fen() WASM exports
+- Wrote web/index.html Phase 12: full browser chess UI — board, pieces, legal move
+  highlights, promotion modal, engine play, undo, flip, side select, think time
+
+### Decisions Made
+- Using Pet Dragon engine as browser opponent (not Stockfish) — engine is strong enough
+- JS-side FEN applicator (no apply_move WASM export needed) — keeps WASM API minimal
+- EP target = Math.floor((fromRank + toRank) / 2) — handles Pet Dragon rank 1→3 pushes
+
+### Bugs Fixed
+- deploy.yml: mkdir step was after wasm-pack, causing write to non-existent directory
+
+### Next Session Start Point
+1. Check Deploy workflow result — should be green, site live at g-c-3.github.io/pet-dragon
+2. If green → Phase 13 (Search Improvements): wire Probcut + CorrectionHistory into alpha_beta.rs
+3. If red → check deploy log, likely a wasm-pack compilation error or Pages permission issue
+
+---
+
 ## Session 10 — Phase 9 UCI Protocol
 
 **Date**: 2026-06-29

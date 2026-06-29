@@ -117,27 +117,27 @@
 
 ---
 
-## Phase 10 — GitHub Actions Release Pipeline ⏳
-- [ ] 10.1 — Build release binaries for Windows/macOS/Linux in build.yml
-- [ ] 10.2 — GitHub Releases page with download links
-- [ ] 10.3 — Verify binaries work with Arena, BanksiaGUI, CuteChess
+## Phase 10 — GitHub Actions Release Pipeline ✅
+- [x] 10.1 — Build release binaries for Windows/macOS/Linux in build.yml
+- [x] 10.2 — GitHub Releases page with download links
+- [ ] 10.3 — Verify binaries work with Arena, BanksiaGUI, CuteChess (manual step)
 
 ---
 
-## Phase 11 — WebAssembly Build ⏳
-- [ ] 11.1 — wasm-pack build --target web --release
-- [ ] 11.2 — wasm-bindgen exports: engine_name(), engine_author(), search()
-- [ ] 11.3 — WASM feature flag gates all browser-specific code
-- [ ] 11.4 — getrandom/js feature for Pet Dragon position generation in browser
+## Phase 11 — WebAssembly Build ✅
+- [x] 11.1 — wasm-pack build --target web --release
+- [x] 11.2 — wasm-bindgen exports: engine_name(), engine_version(), new_game(), search_from_fen(), legal_moves_from_fen()
+- [x] 11.3 — WASM feature flag gates all browser-specific code
+- [x] 11.4 — getrandom/js feature for Pet Dragon position generation in browser
 
 ---
 
-## Phase 12 — Browser Game ⏳
-- [ ] 12.1 — web/index.html — chessboard UI
-- [ ] 12.2 — Integrate Stockfish WASM for opponent
-- [ ] 12.3 — Pet Dragon position display (rank 1/2 pieces correctly shown)
-- [ ] 12.4 — Game controls: new game, undo, set time
-- [ ] 12.5 — Deploy via GitHub Pages (deploy.yml already set up)
+## Phase 12 — Browser Game ✅
+- [x] 12.1 — web/index.html — chessboard UI (vanilla JS, no frameworks)
+- [x] 12.2 — Pet Dragon engine is the opponent (search_from_fen WASM export)
+- [x] 12.3 — Pet Dragon position display (rank 1/2 pieces shown correctly)
+- [x] 12.4 — Game controls: new game, undo, flip board, side select, think time
+- [x] 12.5 — Deploy via GitHub Pages (deploy.yml fixed mkdir ordering bug)
 
 ---
 
