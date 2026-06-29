@@ -443,8 +443,8 @@ mod tests {
     #[test]
     fn test_parse_uci_move_promotion() {
         setup();
-        // White pawn on e7, king on e1, black king on e8
-        let fen = "4k3/4P3/8/8/8/8/8/4K3 w - - 0 1";
+        // White pawn on e7, white king on e1, black king on a8 (e8 clear)
+        let fen = "k7/4P3/8/8/8/8/8/4K3 w - - 0 1";
         let pos = Position::from_fen(fen).unwrap();
         let mv  = parse_uci_move(&pos, "e7e8q");
         assert!(mv.is_some(), "e7e8q should be a legal promotion");
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn test_parse_uci_move_default_queen_promo() {
         setup();
-        let fen = "4k3/4P3/8/8/8/8/8/4K3 w - - 0 1";
+        let fen = "k7/4P3/8/8/8/8/8/4K3 w - - 0 1";
         let pos = Position::from_fen(fen).unwrap();
         // No promo char — should default to queen
         let mv  = parse_uci_move(&pos, "e7e8");
