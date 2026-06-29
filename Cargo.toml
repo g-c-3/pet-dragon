@@ -52,6 +52,16 @@ wasm = [
     "getrandom/js",
 ]
 
+# ── wasm-pack config ──────────────────────────────────────────────────────────
+# Disable wasm-opt: the bundled wasm-opt version in wasm-pack does not support
+# the bulk memory proposal (memory.copy instruction) emitted by rustc.
+# This avoids the "Bulk memory operations require bulk memory" fatal error.
+# The unoptimised WASM is still perfectly functional; re-enable when wasm-pack
+# ships a newer wasm-opt binary.
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
 # ── Build profiles ────────────────────────────────────────────────────────────
 
 # Native release — maximum speed
