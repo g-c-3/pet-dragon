@@ -40,7 +40,7 @@ use crate::search::{
     see::see,
     SearchInfo, DRAW_SCORE, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
-    MIN_DEPTH_NULL_MOVE, MIN_DEPTH_RAZORING,
+    MIN_DEPTH_NULL_MOVE, MIN_DEPTH_RAZORING, MIN_DEPTH_SINGULAR,
 };
 use crate::tt::{Bound, TranspositionTable};
 use crate::types::{Color, Move, PieceKind};
