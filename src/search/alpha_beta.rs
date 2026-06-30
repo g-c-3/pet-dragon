@@ -328,6 +328,37 @@ fn alpha_beta_with_excluded(
         }
     }
 
+    // ── Singular extension verification (Phase 13.3) ──────────────────────────
+    // If the TT move beats every alternative by a wide margin, it's
+    // "singular" — extend it by one ply so tactics hidden behind a forced
+    // sequence aren't missed. Verified via a reduced-depth search of the
+    // position with the TT move excluded.
+    let mut singular_extension = false;
+    if !root_node
+        && depth >= MIN_DEPTH_SINGULAR
+        && tt_move != Move::NULL
+        && tt_hit.map_or(false, |e| {
+            e.bound != Bound::UpperBound && e.depth as i32 >= depth - 3
+        })
+    {
+        let tt_score = TranspositionTable::score_from_tt(
+            tt_hit.unwrap().score, ply as i32
+        );
+        if tt_score.abs() < MATE_THRESHOLD {
+            let singular_beta  = tt_score - 2 * depth;
+            let singular_depth = (depth - 1) / 2;
+
+            let score = alpha_beta_with_excluded(
+                pos, singular_depth, singular_beta - 1, singular_beta,
+                ply, false, info, tt, prev_move, tt_move,
+            );
+
+            if score < singular_beta {
+                singular_extension = true;
+            }
+        }
+    }
+
     // ── Generate and score moves ──────────────────────────────────────────────
     let moves = generate_moves(pos);
 
