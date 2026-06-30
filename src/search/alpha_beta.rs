@@ -298,6 +298,15 @@ pub fn alpha_beta(
         depth -= 1;
     }
 
+    // ── Probcut (Phase 13.1) ───────────────────────────────────────────────────
+    // Shallow-search verified captures that beat beta+margin let us prune
+    // the whole node — the opponent would never allow this position anyway.
+    if should_try_probcut(depth, beta, in_check, pv_node) {
+        if let Some(score) = try_probcut(pos, depth, beta, ply, info, tt) {
+            return score;
+        }
+    }
+
     // ── Generate and score moves ──────────────────────────────────────────────
     let moves = generate_moves(pos);
 
