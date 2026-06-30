@@ -130,6 +130,8 @@ pub struct SearchInfo {
     pub best_move: Move,
     /// Seldepth — maximum ply reached in search
     pub seldepth: usize,
+    /// Correction history — pawn-structure-indexed eval error tracker (Phase 13.2)
+    pub correction_history: crate::search::pruning::CorrectionHistory,
 }
 
 impl SearchInfo {
