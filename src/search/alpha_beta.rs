@@ -461,6 +461,16 @@ pub fn alpha_beta(
         tt.store(pos.hash, depth as i8, tt_score, bound, best_move);
     }
 
+    // ── Correction history update (Phase 13.2) ────────────────────────────────
+    // Skip when in check (static eval meaningless), search was aborted, or
+    // the result is a mate score (error signal is noise, not eval drift).
+    if !info.stop && !in_check && !crate::search::is_mate_score(best_score) {
+        let phash = pawn_hash(pos);
+        info.correction_history.update(
+            phash, pos.side_to_move, raw_static_eval, best_score, depth,
+        );
+    }
+
     best_score
 }
 
