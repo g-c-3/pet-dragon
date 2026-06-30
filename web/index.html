@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pet Dragon Chess</title>
 <style>
-  /* 鈹€鈹€ Reset & base 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Reset & base ───────────────────────────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
@@ -19,7 +19,7 @@
     padding: 16px 8px 32px;
   }
 
-  /* 鈹€鈹€ Header 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Header ─────────────────────────────────────────────────────────── */
   header {
     text-align: center;
     margin-bottom: 18px;
@@ -39,7 +39,7 @@
     margin-top: 3px;
   }
 
-  /* 鈹€鈹€ Status bar 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Status bar ─────────────────────────────────────────────────────── */
   #status {
     font-size: 0.92rem;
     font-weight: 500;
@@ -50,13 +50,13 @@
     letter-spacing: 0.02em;
   }
 
-  /* 鈹€鈹€ Board wrapper 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Board wrapper ──────────────────────────────────────────────────── */
   #board-wrap {
     position: relative;
     width: min(92vw, 480px);
   }
 
-  /* 鈹€鈹€ Coordinates 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Coordinates ────────────────────────────────────────────────────── */
   .coords-rank {
     position: absolute;
     left: -18px;
@@ -84,7 +84,7 @@
     font-weight: 600;
   }
 
-  /* 鈹€鈹€ Board 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Board ──────────────────────────────────────────────────────────── */
   #board {
     width: 100%;
     aspect-ratio: 1;
@@ -128,7 +128,7 @@
   }
   .sq.in-check { background: #e44 !important; }
 
-  /* 鈹€鈹€ Pieces 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Pieces ─────────────────────────────────────────────────────────── */
   .piece {
     width: 88%;
     height: 88%;
@@ -142,7 +142,7 @@
     z-index: 1;
   }
 
-  /* 鈹€鈹€ Controls 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Controls ───────────────────────────────────────────────────────── */
   #controls {
     display: flex;
     flex-wrap: wrap;
@@ -176,7 +176,7 @@
   #side-select label { cursor: pointer; display: flex; align-items: center; gap: 4px; }
   #side-select input[type=radio] { accent-color: #c8a96e; }
 
-  /* 鈹€鈹€ Think time 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Think time ─────────────────────────────────────────────────────── */
   #time-wrap {
     font-size: 0.82rem;
     color: #777;
@@ -193,7 +193,7 @@
     font-size: 0.82rem;
   }
 
-  /* 鈹€鈹€ Promotion modal 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Promotion modal ────────────────────────────────────────────────── */
   #promo-modal {
     display: none;
     position: fixed;
@@ -229,7 +229,7 @@
   }
   .promo-choice:hover { border-color: #c8a96e; }
 
-  /* 鈹€鈹€ Info panel 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+  /* ── Info panel ─────────────────────────────────────────────────────── */
   #info {
     margin-top: 18px;
     font-size: 0.75rem;
@@ -244,11 +244,11 @@
 <body>
 
 <header>
-  <h1>馃悏 Pet Dragon</h1>
-  <p>Original chess variant 路 Every game starts differently</p>
+  <h1>🐉 Pet Dragon</h1>
+  <p>Original chess variant · Every game starts differently</p>
 </header>
 
-<div id="status">Loading engine鈥�</div>
+<div id="status">Loading engine…</div>
 
 <div id="board-wrap">
   <!-- Rank labels injected by JS -->
@@ -283,24 +283,24 @@
 </div>
 
 <div id="info">
-  Pet Dragon by <strong>Gokul Chandar</strong> 路 Engine: Claude (Anthropic) 路 GPL v3<br>
+  Pet Dragon by <strong>Gokul Chandar</strong> · Engine: Claude (Anthropic) · GPL v3<br>
   <a href="https://github.com/g-c-3/pet-dragon">github.com/g-c-3/pet-dragon</a>
 </div>
 
 <script type="module">
-// 鈹€鈹€ Import WASM 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Import WASM ───────────────────────────────────────────────────────────────
 import init, {
   engine_name, engine_version,
   new_game, search_from_fen, legal_moves_from_fen
 } from './pkg/pet_dragon.js';
 
-// 鈹€鈹€ Piece Unicode map 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Piece Unicode map ─────────────────────────────────────────────────────────
 const PIECES = {
-  K:'鈾�', Q:'鈾�', R:'鈾�', B:'鈾�', N:'鈾�', P:'鈾�',
-  k:'鈾�', q:'鈾�', r:'鈾�', b:'鈾�', n:'鈾�', p:'鈾�',
+  K:'♔', Q:'♕', R:'♖', B:'♗', N:'♘', P:'♙',
+  k:'♚', q:'♛', r:'♜', b:'♝', n:'♞', p:'♟',
 };
 
-// 鈹€鈹€ State 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── State ─────────────────────────────────────────────────────────────────────
 let fen        = '';          // current FEN
 let selected   = null;        // selected square index (0-63) or null
 let legalMoves = [];          // legal move strings from current position
@@ -311,7 +311,7 @@ let history    = [];          // stack of FEN strings for undo
 let engineBusy = false;
 let pendingPromo = null;      // {from, to} awaiting promotion choice
 
-// 鈹€鈹€ Helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const idx  = (file, rank) => rank * 8 + file; // 0-based, rank 0 = rank 1
 const file = (sq) => sq % 8;
 const rank = (sq) => Math.floor(sq / 8);
@@ -354,17 +354,17 @@ function getStatus(fen, board) {
   const side  = sideToMove(fen);
   const legal = legal_moves_from_fen(fen).trim();
   if (!legal) {
-    // No legal moves 鈥� checkmate or stalemate
+    // No legal moves — checkmate or stalemate
     // Check if king is in check by seeing if any opponent move attacks king square
     // Simple: try to fetch legal moves for the position
     return side === 'w'
-      ? '鈾� Checkmate 鈥� Black wins!'
-      : '鈾� Checkmate 鈥� White wins!';
+      ? '♚ Checkmate — Black wins!'
+      : '♔ Checkmate — White wins!';
   }
   return side === 'w' ? "White to move" : "Black to move";
 }
 
-// 鈹€鈹€ Board render 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Board render ──────────────────────────────────────────────────────────────
 function render() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
@@ -418,14 +418,14 @@ function render() {
   const legal2 = legal_moves_from_fen(fen).trim();
   if (!legal2) {
     document.getElementById('status').textContent =
-      side === 'w' ? '鈾� Checkmate 鈥� Black wins!' : '鈾� Checkmate 鈥� White wins!';
+      side === 'w' ? '♔ Checkmate — Black wins!' : '♚ Checkmate — White wins!';
   } else if (!engineBusy) {
     document.getElementById('status').textContent =
       side === 'w' ? 'White to move' : 'Black to move';
   }
 }
 
-// 鈹€鈹€ Square click handler 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Square click handler ──────────────────────────────────────────────────────
 function onSquareClick(sq) {
   if (engineBusy) return;
   const side = sideToMove(fen);
@@ -445,7 +445,7 @@ function onSquareClick(sq) {
     return;
   }
 
-  // Attempt move: selected 鈫� sq
+  // Attempt move: selected → sq
   const fromName = sqName(selected);
   const toName   = sqName(sq);
 
@@ -453,7 +453,7 @@ function onSquareClick(sq) {
   const candidates = legal.filter(m => m.slice(0,2) === fromName && m.slice(2,4) === toName);
 
   if (candidates.length === 0) {
-    // Click on another own piece 鈥� reselect
+    // Click on another own piece — reselect
     const piece = board[sq];
     if (piece) {
       const isWhite = piece === piece.toUpperCase();
@@ -497,7 +497,7 @@ function executeMove(moveStr) {
   applyMove(moveStr);
 }
 
-// 鈹€鈹€ Move application 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Move application ──────────────────────────────────────────────────────────
 // We maintain a move list from the starting position and reconstruct the
 // FEN each time by calling into the engine with a perft-style walk.
 // Since WASM doesn't expose apply_move directly, we use a JS-side FEN applicator.
@@ -509,7 +509,7 @@ function applyMove(uciMove) {
   moveList.push(uciMove);
 
   // Rebuild FEN by using the engine to return the position FEN.
-  // We call search_from_fen with 0ms just to get the resulting state 鈥� but
+  // We call search_from_fen with 0ms just to get the resulting state — but
   // that won't work (we can't apply a move without an apply_move export).
   //
   // Instead: implement a JS-side move applier for the subset of moves we need.
@@ -533,7 +533,7 @@ function squareIndex(name) {
   return idx(f, r);
 }
 
-// 鈹€鈹€ JS-side FEN applicator 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── JS-side FEN applicator ────────────────────────────────────────────────────
 // Applies a UCI move to a FEN string and returns the new FEN.
 // Handles: quiet, capture, castling, en passant, double push, promotion.
 
@@ -563,7 +563,7 @@ function applyMoveToFen(fenStr, uciMove) {
     board[idx(file(toSq), capRank)] = '';
   }
 
-  // Set double-push EP target (works for Pet Dragon rank 1鈫�3 and standard rank 2鈫�4)
+  // Set double-push EP target (works for Pet Dragon rank 1→3 and standard rank 2→4)
   if ((piece === 'P' && rank(toSq) - rank(fromSq) === 2) ||
       (piece === 'p' && rank(fromSq) - rank(toSq) === 2)) {
     const epRank = Math.floor((rank(fromSq) + rank(toSq)) / 2);
@@ -627,11 +627,11 @@ function applyMoveToFen(fenStr, uciMove) {
   return `${placement} ${newSide} ${castle} ${ep} ${halfmove} ${fullmove}`;
 }
 
-// 鈹€鈹€ Promotion modal 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Promotion modal ───────────────────────────────────────────────────────────
 function showPromoModal(isWhite) {
   const pieces = isWhite
-    ? [['q','鈾�'],['r','鈾�'],['b','鈾�'],['n','鈾�']]
-    : [['q','鈾�'],['r','鈾�'],['b','鈾�'],['n','鈾�']];
+    ? [['q','♕'],['r','♖'],['b','♗'],['n','♘']]
+    : [['q','♛'],['r','♜'],['b','♝'],['n','♞']];
 
   const box = document.getElementById('promo-box');
   box.innerHTML = '';
@@ -651,7 +651,7 @@ function showPromoModal(isWhite) {
   document.getElementById('promo-modal').classList.add('show');
 }
 
-// 鈹€鈹€ Engine move 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Engine move ───────────────────────────────────────────────────────────────
 async function maybeEngineMove() {
   const side = sideToMove(fen);
   if (side === humanSide) return;
@@ -660,7 +660,7 @@ async function maybeEngineMove() {
   if (!legal) return; // game over
 
   engineBusy = true;
-  document.getElementById('status').textContent = '馃悏 Engine thinking鈥�';
+  document.getElementById('status').textContent = '🐉 Engine thinking…';
 
   const ms = parseInt(document.getElementById('time-sel').value);
 
@@ -684,7 +684,7 @@ async function maybeEngineMove() {
   render();
 }
 
-// 鈹€鈹€ New game 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── New game ──────────────────────────────────────────────────────────────────
 function startNewGame() {
   if (engineBusy) return;
   fen       = new_game();
@@ -702,7 +702,7 @@ function startNewGame() {
   }
 }
 
-// 鈹€鈹€ Controls 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Controls ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-new').addEventListener('click', startNewGame);
 
 document.getElementById('btn-flip').addEventListener('click', () => {
@@ -727,7 +727,7 @@ document.querySelectorAll('input[name=side]').forEach(r => {
   });
 });
 
-// 鈹€鈹€ WASM init 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── WASM init ─────────────────────────────────────────────────────────────────
 (async () => {
   try {
     await init();
