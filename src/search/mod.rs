@@ -154,6 +154,7 @@ impl SearchInfo {
             best_score:        -INFINITY,
             best_move:         Move::NULL,
             seldepth:          0,
+            correction_history: crate::search::pruning::CorrectionHistory::new(),
         }
     }
 
