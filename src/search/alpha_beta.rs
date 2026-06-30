@@ -294,9 +294,9 @@ fn alpha_beta_with_excluded(
         let old_ep = pos.en_passant;
         pos.en_passant = None;
 
-        let null_score = -alpha_beta(
+        let null_score = -alpha_beta_with_excluded(
             pos, depth - r - 1, -beta, -beta + 1,
-            ply + 1, false, info, tt, Move::NULL,
+            ply + 1, false, info, tt, Move::NULL, Move::NULL,
         );
 
         // Unmake null move
