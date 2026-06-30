@@ -388,6 +388,14 @@ fn alpha_beta_with_excluded(
             None    => break,
         };
 
+        // Skip the move excluded by singular extension verification (13.3)
+        if mv == excluded {
+            continue;
+        }
+
+        // Singular extension bonus — only the TT move itself gets it
+        let singular_ext = if singular_extension && mv == tt_move { 1 } else { 0 };
+
         let is_capture   = mv.kind.is_capture();
         let is_promotion = mv.kind.is_promotion();
         let is_quiet     = !is_capture && !is_promotion;
