@@ -54,6 +54,7 @@ pub const MIN_DEPTH_LMR:         i32 = 3;
 pub const MIN_DEPTH_PROBCUT:     i32 = 5;
 pub const MIN_DEPTH_IIR:         i32 = 4;
 pub const MIN_DEPTH_RAZORING:    i32 = 1;
+pub const MIN_DEPTH_SINGULAR:    i32 = 6;
 
 /// Maximum search depth
 pub const MAX_DEPTH: i32 = 128;
