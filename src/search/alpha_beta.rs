@@ -144,6 +144,26 @@ pub fn quiescence(
 /// pv_node: true if this is a principal variation node (not null window)
 pub fn alpha_beta(
     pos:       &mut Position,
+    depth:     i32,
+    alpha:     i32,
+    beta:      i32,
+    ply:       usize,
+    pv_node:   bool,
+    info:      &mut SearchInfo,
+    tt:        &mut TranspositionTable,
+    prev_move: Move,
+) -> i32 {
+    alpha_beta_with_excluded(
+        pos, depth, alpha, beta, ply, pv_node, info, tt, prev_move, Move::NULL,
+    )
+}
+
+/// Alpha-beta core with an optional excluded move (Phase 13.3).
+/// `excluded` is skipped entirely in the move loop — used by singular
+/// extension verification to ask "how good is this position WITHOUT the
+/// TT move?" without duplicating the whole search function.
+fn alpha_beta_with_excluded(
+    pos:       &mut Position,
     mut depth: i32,
     mut alpha: i32,
     beta:      i32,
@@ -152,6 +172,7 @@ pub fn alpha_beta(
     info:      &mut SearchInfo,
     tt:        &mut TranspositionTable,
     prev_move: Move,
+    excluded:  Move,
 ) -> i32 {
     // ── Time check ────────────────────────────────────────────────────────────
     if info.is_time_up() {
