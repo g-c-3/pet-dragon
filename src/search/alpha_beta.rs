@@ -36,6 +36,7 @@ use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
+    pruning::{pawn_hash, should_try_probcut, try_probcut},
     see::see,
     SearchInfo, DRAW_SCORE, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
