@@ -233,8 +233,16 @@ pub fn alpha_beta(
     }
 
     // ── Static evaluation ─────────────────────────────────────────────────────
-    // Only compute if needed for pruning
-    let static_eval = if !in_check { evaluate(pos) } else { -INFINITY };
+    // Only compute if needed for pruning. raw_static_eval feeds the
+    // correction-history update at the end of this node (Phase 13.2);
+    // static_eval is the corrected value all pruning decisions use.
+    let raw_static_eval = if !in_check { evaluate(pos) } else { -INFINITY };
+    let static_eval = if !in_check {
+        let phash = pawn_hash(pos);
+        info.correction_history.apply(raw_static_eval, phash, pos.side_to_move)
+    } else {
+        raw_static_eval
+    };
 
     // ── Razoring ─────────────────────────────────────────────────────────────
     // If static eval is far below alpha at low depth, drop to qsearch
