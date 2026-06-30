@@ -438,9 +438,9 @@ fn alpha_beta_with_excluded(
         // ── PVS with LMR ──────────────────────────────────────────────────────
         if moves_tried == 1 {
             // First move: full window search
-            score = -alpha_beta(
-                pos, depth - 1, -beta, -alpha,
-                ply + 1, pv_node, info, tt, mv,
+            score = -alpha_beta_with_excluded(
+                pos, depth - 1 + singular_ext, -beta, -alpha,
+                ply + 1, pv_node, info, tt, mv, Move::NULL,
             );
         } else {
             // Late Move Reductions
@@ -459,24 +459,24 @@ fn alpha_beta_with_excluded(
             }
 
             // Null window search with reduction
-            let mut s = -alpha_beta(
-                pos, depth - 1 - reduction, -alpha - 1, -alpha,
-                ply + 1, false, info, tt, mv,
+            let mut s = -alpha_beta_with_excluded(
+                pos, depth - 1 + singular_ext - reduction, -alpha - 1, -alpha,
+                ply + 1, false, info, tt, mv, Move::NULL,
             );
 
             // If reduced search beats alpha, re-search at full depth
             if s > alpha && reduction > 0 {
-                s = -alpha_beta(
-                    pos, depth - 1, -alpha - 1, -alpha,
-                    ply + 1, false, info, tt, mv,
+                s = -alpha_beta_with_excluded(
+                    pos, depth - 1 + singular_ext, -alpha - 1, -alpha,
+                    ply + 1, false, info, tt, mv, Move::NULL,
                 );
             }
 
             // If still beats alpha in PV node, full window re-search
             if s > alpha && pv_node {
-                s = -alpha_beta(
-                    pos, depth - 1, -beta, -alpha,
-                    ply + 1, true, info, tt, mv,
+                s = -alpha_beta_with_excluded(
+                    pos, depth - 1 + singular_ext, -beta, -alpha,
+                    ply + 1, true, info, tt, mv, Move::NULL,
                 );
             }
 
