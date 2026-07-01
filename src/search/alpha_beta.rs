@@ -150,7 +150,7 @@ pub fn alpha_beta(
     ply:       usize,
     pv_node:   bool,
     info:      &mut SearchInfo,
-    tt:        &mut TranspositionTable,
+    tt:        &TranspositionTable,
     prev_move: Move,
 ) -> i32 {
     alpha_beta_with_excluded(
