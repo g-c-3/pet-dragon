@@ -20,7 +20,7 @@ No download required. Play against Stockfish directly in your browser.
 
 ## What is Pet Dragon?
 
-Pet Dragon is an original chess variant where every game starts from a unique 2,162,160 distinct legal opening positions. The King stays home — but everything else finds its own place.
+Pet Dragon is an original chess variant where every game starts from any one of the unique 2,162,160 distinct legal opening positions. The King stays home — but everything else finds its own place.
 
 Built from the ground up in Rust. Not a fork. Not a port.Purpose-built for Pet Dragon from day one.
 
