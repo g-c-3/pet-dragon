@@ -61,7 +61,8 @@ pub fn iterative_deepening(
     }
 
     info.reset_for_search();
-    tt.new_search();
+    // Note: tt.new_search() is called by the caller (cmd_go in main.rs)
+    // before spawning the search thread. Tests create fresh TTs.
 
     // Record root position in game history
     pos.game_history.push(pos.hash);
