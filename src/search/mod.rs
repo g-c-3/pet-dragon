@@ -134,6 +134,9 @@ pub struct SearchInfo {
     pub seldepth: usize,
     /// Correction history — pawn-structure-indexed eval error tracker (Phase 13.2)
     pub correction_history: crate::search::pruning::CorrectionHistory,
+    /// Shared stop flag — set by UCI `stop` command or when time expires.
+    /// All threads sharing this Arc terminate as soon as the flag is set.
+    pub stop_flag: Arc<AtomicBool>,
 }
 
 impl SearchInfo {
