@@ -43,7 +43,7 @@ pub fn iterative_deepening(
     pos:    &mut Position,
     tc:     &TimeControl,
     info:   &mut SearchInfo,
-    tt:     &mut TranspositionTable,
+    tt:     &TranspositionTable,
 ) -> SearchResult {
     let is_white = pos.side_to_move == crate::types::Color::White;
     let (soft_ms, hard_ms) = allocate_time(tc, is_white);
