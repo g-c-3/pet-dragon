@@ -392,11 +392,11 @@ mod tests {
         // Aspiration windows should handle unexpected score changes
         let mut pos  = Position::start_pos().unwrap();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(16);
+        let tt   = TranspositionTable::new(16);
         let tc       = fixed_depth_tc(6);
 
         // Should not panic even with aspiration window failures
-        let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
         assert_ne!(result.best_move, Move::NULL);
     }
 
@@ -406,10 +406,10 @@ mod tests {
         let mut pos  = Position::start_pos().unwrap();
         let initial_history_len = pos.game_history.len();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(16);
+        let tt   = TranspositionTable::new(16);
         let tc       = fixed_depth_tc(4);
 
-        iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
+        iterative_deepening(&mut pos, &tc, &mut info, &tt);
 
         assert_eq!(pos.game_history.len(), initial_history_len,
             "Game history should be same length after search");
@@ -420,10 +420,10 @@ mod tests {
         setup();
         let mut pos  = Position::start_pos().unwrap();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(16);
+        let tt   = TranspositionTable::new(16);
         let tc       = fixed_depth_tc(5);
 
-        let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
 
         assert!(result.nodes > 0, "Should count searched nodes");
         assert!(result.nps > 0,   "Should compute NPS");
