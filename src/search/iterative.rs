@@ -180,7 +180,7 @@ fn search_at_depth(
     depth:      i32,
     prev_score: i32,
     info:       &mut SearchInfo,
-    tt:         &mut TranspositionTable,
+    tt:         &TranspositionTable,
 ) -> i32 {
     // Use aspiration windows for deeper searches
     if depth >= ASPIRATION_MIN_DEPTH && !is_mate_score(prev_score) {
@@ -204,7 +204,7 @@ fn search_with_aspiration(
     depth:      i32,
     prev_score: i32,
     info:       &mut SearchInfo,
-    tt:         &mut TranspositionTable,
+    tt:         &TranspositionTable,
 ) -> i32 {
     let mut delta = ASPIRATION_DELTA;
     let mut alpha = (prev_score - delta).max(-INFINITY);
