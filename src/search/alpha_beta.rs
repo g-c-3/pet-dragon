@@ -623,9 +623,8 @@ mod tests {
     #[test]
     fn test_draw_by_repetition() {
         setup();
-        let mut pos  = Position::start_pos().unwrap();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(4);
+        let tt       = TranspositionTable::new(4);
         info.time_allocated_ms = 60_000;
 
         // Push same position to history multiple times to trigger repetition
@@ -635,7 +634,7 @@ mod tests {
         // Search should handle repetition without panicking
         let score = alpha_beta(
             &mut pos, 4, -INFINITY, INFINITY,
-            0, true, &mut info, &mut tt, Move::NULL,
+            0, true, &mut info, &tt, Move::NULL,
         );
         // Score should be draw (0) or reasonable
         assert!(score.abs() < MATE_THRESHOLD,
