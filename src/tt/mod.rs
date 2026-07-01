@@ -318,6 +318,14 @@ impl TranspositionTable {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+// SAFETY: TranspositionTable uses lock-free design with benign races (D4).
+// Multiple threads may call store() concurrently; at worst an entry is
+// partially overwritten, which probe() detects via Zobrist key mismatch.
+// This is identical to Stockfish's approach — no crashes, at most one
+// slightly suboptimal move per race event.
+unsafe impl Send for TranspositionTable {}
+unsafe impl Sync for TranspositionTable {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
