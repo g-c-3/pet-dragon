@@ -160,7 +160,17 @@ impl SearchInfo {
             best_move:         Move::NULL,
             seldepth:          0,
             correction_history: crate::search::pruning::CorrectionHistory::new(),
+            stop_flag: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Create SearchInfo that shares an external stop flag.
+    /// Used in Lazy SMP (Phase 13.4): all helper threads share one AtomicBool
+    /// so the main thread terminating (or UCI `stop`) kills all helpers.
+    pub fn new_with_stop(stop_flag: Arc<AtomicBool>) -> Self {
+        let mut info = Self::new();
+        info.stop_flag = stop_flag;
+        info
     }
 
     /// Reset tables between searches (keep history across moves for better ordering)
