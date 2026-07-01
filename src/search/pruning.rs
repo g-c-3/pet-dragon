@@ -183,7 +183,7 @@ pub fn try_probcut(
     beta:  i32,
     ply:   usize,
     info:  &mut crate::search::SearchInfo,
-    tt:    &mut crate::tt::TranspositionTable,
+    tt:    &crate::tt::TranspositionTable,
 ) -> Option<i32> {
     use crate::movegen::generate_captures;
     use crate::search::ordering::{next_move, score_captures};
