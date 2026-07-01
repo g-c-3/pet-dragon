@@ -163,14 +163,18 @@ impl TranspositionTable {
 
     // ── Store ─────────────────────────────────────────────────────────────────
 
-    /// Store a result in the TT.
+    /// OLD: Store a result in the TT.
     /// Replacement policy:
     ///   - Always replace if entry is from an older search generation
     ///   - Always replace if same position (update with better info)
     ///   - Replace if new depth >= existing depth
     ///   - Otherwise keep existing (deeper = more reliable)
+    /// NEW: Store a result in the TT.
+    /// Takes `&self` (not `&mut self`) so it can be called from multiple
+    /// threads sharing the same `Arc<TranspositionTable>`.
+    /// Concurrent writes may race — this is accepted per D4 (benign races).
     pub fn store(
-        &mut self,
+        &self,
         hash:  u64,
         depth: i8,
         score: i32,
@@ -183,20 +187,18 @@ impl TranspositionTable {
 
         // Replacement decision
         let should_replace =
-            existing.key == 0                    // empty slot
-            || existing.age != self.age          // old generation
-            || existing.key == new_key           // same position — update
-            || depth >= existing.depth;          // deeper search — better info
+            existing.key == 0
+            || existing.age != self.age
+            || existing.key == new_key
+            || depth >= existing.depth;
 
         if should_replace {
-            // Don't overwrite a good move with no move
             let best_mv = if mv == Move::NULL && existing.key == new_key {
                 existing.mv
             } else {
                 mv
             };
-
-            self.entries[idx] = TTEntry {
+            let new_entry = TTEntry {
                 key:   new_key,
                 depth,
                 bound,
@@ -204,6 +206,12 @@ impl TranspositionTable {
                 mv:    best_mv,
                 score,
             };
+            // SAFETY: lock-free design per D4. Concurrent writes at most produce
+            // a corrupted entry; probe() catches this via key verification.
+            unsafe {
+                let ptr = self.entries.as_ptr().add(idx) as *mut TTEntry;
+                ptr.write(new_entry);
+            }
         }
     }
 
