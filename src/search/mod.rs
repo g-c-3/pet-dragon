@@ -29,6 +29,7 @@ pub mod time;
 pub mod see;
 pub mod pruning;
 
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crate::types::Move;
 
 // ── Score constants ───────────────────────────────────────────────────────────
