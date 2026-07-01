@@ -647,12 +647,12 @@ mod tests {
         let fen = "4k3/8/8/8/8/8/8/4K3 w - - 100 1";
         let mut pos  = Position::from_fen(fen).unwrap();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(4);
+        let tt       = TranspositionTable::new(4);
         info.time_allocated_ms = 60_000;
 
         let score = alpha_beta(
             &mut pos, 1, -INFINITY, INFINITY,
-            0, true, &mut info, &mut tt, Move::NULL,
+            0, true, &mut info, &tt, Move::NULL,
         );
         assert_eq!(score, DRAW_SCORE,
             "50-move rule should return draw score");
@@ -689,12 +689,12 @@ mod tests {
         for seed in 0..10u64 {
             let mut pos  = Position::generate_with_seed(seed);
             let mut info = SearchInfo::new();
-            let mut tt   = TranspositionTable::new(4);
+            let tt       = TranspositionTable::new(4);
             info.time_allocated_ms = 1000;
 
             let score = alpha_beta(
                 &mut pos, 4, -INFINITY, INFINITY,
-                0, true, &mut info, &mut tt, Move::NULL,
+                0, true, &mut info, &tt, Move::NULL,
             );
 
             assert!(score.abs() <= INFINITY,
@@ -707,12 +707,12 @@ mod tests {
         setup();
         let mut pos  = Position::start_pos().unwrap();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(16);
+        let tt       = TranspositionTable::new(16);
         info.time_allocated_ms = 5000;
 
         alpha_beta(
             &mut pos, 5, -INFINITY, INFINITY,
-            0, true, &mut info, &mut tt, Move::NULL,
+            0, true, &mut info, &tt, Move::NULL,
         );
 
         assert_ne!(info.best_move, Move::NULL,
