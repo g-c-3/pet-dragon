@@ -587,12 +587,12 @@ mod tests {
 
     fn make_search(pos: &mut Position, depth: i32) -> (Move, i32) {
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(16);
+        let tt       = TranspositionTable::new(16);
         info.time_allocated_ms = 60_000; // 60 seconds — no time pressure
 
         let score = alpha_beta(
             pos, depth, -INFINITY, INFINITY,
-            0, true, &mut info, &mut tt, Move::NULL,
+            0, true, &mut info, &tt, Move::NULL,
         );
         (info.best_move, score)
     }
