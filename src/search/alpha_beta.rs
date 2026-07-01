@@ -623,6 +623,7 @@ mod tests {
     #[test]
     fn test_draw_by_repetition() {
         setup();
+        let mut pos  = Position::start_pos().unwrap();
         let mut info = SearchInfo::new();
         let tt       = TranspositionTable::new(4);
         info.time_allocated_ms = 60_000;
