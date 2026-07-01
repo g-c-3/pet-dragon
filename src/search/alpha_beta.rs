@@ -58,7 +58,7 @@ pub fn quiescence(
     beta:      i32,
     ply:       usize,
     info:      &mut SearchInfo,
-    tt:        &mut TranspositionTable,
+    tt:        &TranspositionTable,
 ) -> i32 {
     if info.is_time_up() {
         return 0;
