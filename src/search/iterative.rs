@@ -282,10 +282,10 @@ mod tests {
         setup();
         let mut pos  = Position::start_pos().unwrap();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(16);
+        let tt   = TranspositionTable::new(16);
         let tc       = fixed_depth_tc(5);
 
-        let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
 
         assert_ne!(result.best_move, Move::NULL,
             "Should return a valid move");
@@ -298,10 +298,10 @@ mod tests {
         setup();
         let mut pos  = Position::start_pos().unwrap();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(16);
+        let tt   = TranspositionTable::new(16);
         let tc       = fixed_depth_tc(8);
 
-        let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
 
         assert_eq!(result.depth, 8,
             "Should reach requested depth");
@@ -312,10 +312,10 @@ mod tests {
         setup();
         let mut pos  = Position::start_pos().unwrap();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(16);
+        let tt   = TranspositionTable::new(16);
         let tc       = movetime_tc(200); // 200ms
 
-        let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
 
         // Should complete within reasonable time
         assert!(result.time_ms <= 500,
@@ -330,10 +330,10 @@ mod tests {
         let fen = "4k3/8/8/8/8/8/8/4KQ2 w - - 0 1";
         let mut pos  = Position::from_fen(fen).unwrap();
         let mut info = SearchInfo::new();
-        let mut tt   = TranspositionTable::new(16);
+        let tt   = TranspositionTable::new(16);
         let tc       = fixed_depth_tc(4);
 
-        let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
 
         assert_ne!(result.best_move, Move::NULL,
             "Should find a move");
@@ -347,11 +347,11 @@ mod tests {
         for seed in 0..5u64 {
             let mut pos  = Position::generate_with_seed(seed);
             let mut info = SearchInfo::new();
-            let mut tt   = TranspositionTable::new(16);
+            let tt   = TranspositionTable::new(16);
             let tc       = fixed_depth_tc(4);
 
             let result = iterative_deepening(
-                &mut pos, &tc, &mut info, &mut tt
+                &mut pos, &tc, &mut info, &tt
             );
 
             assert_ne!(result.best_move, Move::NULL,
