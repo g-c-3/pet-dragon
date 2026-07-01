@@ -170,7 +170,7 @@ fn alpha_beta_with_excluded(
     ply:       usize,
     pv_node:   bool,
     info:      &mut SearchInfo,
-    tt:        &mut TranspositionTable,
+    tt:        &TranspositionTable,
     prev_move: Move,
     excluded:  Move,
 ) -> i32 {
