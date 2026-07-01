@@ -204,7 +204,10 @@ impl SearchInfo {
     /// Is time up? Check periodically during search
     #[inline]
     pub fn is_time_up(&self) -> bool {
-        self.stop || (self.nodes & 2047 == 0 && self.elapsed_ms() >= self.time_allocated_ms)
+        if self.stop || self.stop_flag.load(Ordering::Relaxed) {
+            return true;
+        }
+        self.nodes & 2047 == 0 && self.elapsed_ms() >= self.time_allocated_ms
     }
 
     /// Milliseconds elapsed since search started
