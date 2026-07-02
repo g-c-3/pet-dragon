@@ -101,6 +101,30 @@ jobs:
           path: dist/${{ matrix.asset_name }}
           retention-days: 7
 
+  # ── Node count benchmarks (tracks search pruning efficiency) ─────────
+  bench:
+    name: Node Count Bench
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: bench-release
+
+      - name: Run node count benchmarks
+        run: cargo test --release node_count -- --ignored --nocapture
+        
   # ── Publish release when tests pass & binaries are built ─────────────
   release:
     name: Publish Release
