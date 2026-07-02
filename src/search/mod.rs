@@ -270,6 +270,29 @@ impl SearchInfo {
         self.countermoves[prev_from][prev_to]
     }
 
+    /// Get continuation history score conditioned on previous move destination
+    /// and the currently-moving piece type.
+    #[inline]
+    pub fn get_cont_hist(&self, prev_to: usize, piece_idx: usize, to: usize) -> i32 {
+        self.cont_hist[prev_to][piece_idx][to]
+    }
+
+    /// Update continuation history with gravity formula (prevents overflow).
+    /// `good = true` → bonus, `good = false` → penalty.
+    #[inline]
+    pub fn update_cont_hist(
+        &mut self,
+        prev_to:   usize,
+        piece_idx: usize,
+        to:        usize,
+        depth:     i32,
+        good:      bool,
+    ) {
+        let bonus = if good { depth * depth } else { -(depth * depth) };
+        let entry = &mut self.cont_hist[prev_to][piece_idx][to];
+        *entry += bonus - (*entry * bonus.abs() / 16384);
+    }
+
     /// Update PV table at a ply
     #[inline]
     pub fn update_pv(&mut self, mv: Move, ply: usize) {
