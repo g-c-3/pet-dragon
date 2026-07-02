@@ -292,7 +292,7 @@ fn alpha_beta_with_excluded(
 
     // ── Leaf node: quiescence search ──────────────────────────────────────────
     if depth <= 0 {
-        return quiescence(pos, alpha, beta, ply, info, tt);
+        return quiescence(pos, alpha, beta, ply, 0, info, tt);
     }
 
     info.nodes += 1;
