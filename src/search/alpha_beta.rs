@@ -383,7 +383,7 @@ fn alpha_beta_with_excluded(
         && depth <= MIN_DEPTH_RAZORING
         && static_eval + 300 * depth < alpha
     {
-        return quiescence(pos, alpha, beta, ply, info, tt);
+        return quiescence(pos, alpha, beta, ply, 0, info, tt);
     }
 
     // ── Null move pruning ─────────────────────────────────────────────────────
