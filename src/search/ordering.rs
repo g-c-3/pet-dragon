@@ -533,7 +533,7 @@ mod tests {
         let color = pos.side_to_move;
 
         update_ordering_on_cutoff(
-            &mut info, mv, Move::NULL, 0, 5, color, &[]
+            &mut info, mv, Move::NULL, 0, 5, color, &[], &pos
         );
 
         // History should be updated
