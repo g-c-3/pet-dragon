@@ -26,7 +26,9 @@
 //   - Singular extensions
 //   - Check extensions
 //   - Razoring
-//   - Delta pruning (in quiescence)
+//   - Delta pruning (global + per-capture in quiescence)
+//   - In-check evasion search in quiescence (checkmate detection)
+//   - Quiet checking moves in quiescence (qs_depth = 0 only)
 //
 // ⚠️ Pet Dragon notes throughout — see comments marked ⚠️
 // ============================================================================
