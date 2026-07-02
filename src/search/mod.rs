@@ -157,6 +157,7 @@ impl SearchInfo {
             killers:           [[Move::NULL; KILLER_COUNT]; MAX_PLY],
             history:           [[[0i32; 64]; 64]; 2],
             countermoves:      [[Move::NULL; 64]; 64],
+            cont_hist:         Box::new([[[0i32; 64]; 12]; 64]),
             max_depth:         MAX_DEPTH as i32,
             node_limit:        0,
             pv_length:         [0; MAX_PLY],
