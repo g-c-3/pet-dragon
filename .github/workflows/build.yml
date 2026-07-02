@@ -123,7 +123,9 @@ jobs:
           key: bench-release
 
       - name: Run node count benchmarks
-        run: cargo test --release node_count -- --ignored --nocapture
+        # --profile bench-tests = opt-level 3 but panic=unwind (required for test harness)
+        # panic=abort in [profile.release] silently kills the test binary — do not use --release here
+        run: cargo test --profile bench-tests node_count -- --ignored --nocapture
         
   # ── Publish release when tests pass & binaries are built ─────────────
   release:
