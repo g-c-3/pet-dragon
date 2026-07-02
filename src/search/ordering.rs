@@ -296,16 +296,19 @@ pub fn next_move(scored: &mut Vec<ScoredMove>, index: usize) -> Option<Move> {
     pick_next_move(scored, index)
 }
 
-/// Update move ordering tables after a beta cutoff
-/// Call when a quiet move causes a cutoff (fail-high)
+/// Update move ordering tables after a beta cutoff.
+/// Call when a quiet move causes a cutoff (fail-high).
+/// `pos` must be the position BEFORE the move was made (after unmake) so
+/// that `pos.piece_on(mv.from, color)` resolves the correct piece type.
 pub fn update_ordering_on_cutoff(
-    info:      &mut SearchInfo,
-    mv:        Move,
-    prev_move: Move,
-    ply:       usize,
-    depth:     i32,
-    color:     Color,
+    info:         &mut SearchInfo,
+    mv:           Move,
+    prev_move:    Move,
+    ply:          usize,
+    depth:        i32,
+    color:        Color,
     quiets_tried: &[Move],
+    pos:          &Position,
 ) {
     if mv.kind.is_capture() || mv.kind.is_promotion() {
         return; // Only update for quiet moves
