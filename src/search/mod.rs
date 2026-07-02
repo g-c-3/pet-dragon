@@ -532,7 +532,31 @@ mod tests {
         info.stop = true;
         assert!(info.is_time_up());
     }
+    
+    #[test]
+    fn test_cont_hist_update_get() {
+        let mut info = SearchInfo::new();
+        // prev_to=28 (e4), piece_idx=0 (white pawn), to=36 (e5)
+        info.update_cont_hist(28, 0, 36, 5, true);
+        assert!(info.get_cont_hist(28, 0, 36) > 0,
+            "Cont hist should be positive after good move");
+        // Apply penalty — should decrease
+        let before = info.get_cont_hist(28, 0, 36);
+        info.update_cont_hist(28, 0, 36, 5, false);
+        assert!(info.get_cont_hist(28, 0, 36) < before,
+            "Cont hist should decrease after penalty");
+    }
 
+    #[test]
+    fn test_cont_hist_reset_on_search() {
+        let mut info = SearchInfo::new();
+        info.update_cont_hist(10, 3, 20, 6, true);
+        assert!(info.get_cont_hist(10, 3, 20) > 0);
+        info.reset_for_search();
+        assert_eq!(info.get_cont_hist(10, 3, 20), 0,
+            "Cont hist should be zeroed by reset_for_search");
+    }
+    
     #[test]
     fn test_age_history() {
         let mut info = SearchInfo::new();
