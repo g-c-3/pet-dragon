@@ -196,8 +196,18 @@ fn score_move(
         return COUNTERMOVE_SCORE;
     }
 
-    // ── Quiet moves — ordered by history ─────────────────────────────────────
+    // ── Quiet moves — ordered by history + continuation history ──────────────
     let mut history_score = info.history[color_idx][from][to];
+
+    // Continuation history: bonus conditioned on the previous move's destination
+    // and the piece type being moved now — rewards same-direction continuations.
+    if prev_move != Move::NULL {
+        let prev_to = prev_move.to.index() as usize;
+        if let Some(kind) = pos.piece_on(mv.from, pos.side_to_move) {
+            let piece_idx = kind as usize * 2 + color_idx;
+            history_score += info.get_cont_hist(prev_to, piece_idx, to);
+        }
+    }
 
     // ⚠️ Pet Dragon: bonus for pawn double-steps from rank 1
     // These moves develop position AND open rank 1 simultaneously
