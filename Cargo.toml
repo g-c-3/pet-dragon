@@ -72,6 +72,15 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# Benchmark-tests profile — release optimisations but with panic=unwind
+# Required because cargo test needs unwinding to catch test panics.
+# Used by the "Node Count Bench" CI job: cargo test --profile bench-tests
+[profile.bench-tests]
+inherits      = "release"
+panic         = "unwind"   # cargo test needs this — do NOT change to abort
+lto           = false       # faster CI compile; NPS is clock-wall anyway
+strip         = false       # keep test binary symbols for readable output
+
 # WASM release — minimum file size
 [profile.release-wasm]
 inherits = "release"
