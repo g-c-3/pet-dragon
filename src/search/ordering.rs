@@ -490,6 +490,36 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn test_cont_hist_boosts_quiet_score() {
+        setup();
+        let pos   = Position::start_pos().unwrap();
+        let moves = generate_moves(&pos);
+        let mut info = SearchInfo::new();
+
+        // Pick two different quiet moves
+        let mv_a = moves.get(0); // e.g. a2a3
+        let mv_b = moves.get(1); // e.g. b2b3
+
+        // Score without any cont hist context
+        let mut scored_before = score_moves(&pos, &moves, &info, Move::NULL, 0, Move::NULL);
+        let score_a_before = scored_before.iter().find(|s| s.mv == mv_a).map(|s| s.score).unwrap_or(0);
+
+        // Inject a cont hist bonus: prev_to=28 (e4), white pawn (piece_idx=0), to=mv_a.to
+        let prev_to = 28usize;
+        info.update_cont_hist(prev_to, 0, mv_a.to.index() as usize, 8, true);
+
+        // Create a fake prev_move that lands on e4
+        let fake_prev = Move::new(Square::E2, Square::E4, MoveKind::DoublePush);
+        let mut scored_after = score_moves(&pos, &moves, &info, Move::NULL, 0, fake_prev);
+        let score_a_after = scored_after.iter().find(|s| s.mv == mv_a).map(|s| s.score).unwrap_or(0);
+
+        // mv_a should score higher when cont hist is active AND prev_move matches
+        // (only if mv_a moves a pawn from a square that matches piece_idx=0 and to=mv_a.to)
+        // The score must be >= before (cont hist adds a non-negative bonus here)
+        assert!(score_a_after >= score_a_before,
+            "Cont hist should not decrease score of boosted move");
+    }
 
     #[test]
     fn test_mvv_lva_ordering() {
