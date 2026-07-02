@@ -839,4 +839,81 @@ mod tests {
             "Best move should be legal"
         );
     }
+
+    // ── Phase 13.5: Quiescence search improvements ────────────────────────────
+
+    #[test]
+    fn test_qsearch_in_check_generates_evasions() {
+        setup();
+        // White King on e1, Black Rook on e8 — King is in check.
+        // Old qsearch would stand-pat (wrong); new one generates all evasions.
+        let fen = "4r3/8/8/8/8/8/8/4K3 w - - 0 1";
+        let mut pos  = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt       = TranspositionTable::new(4);
+        info.time_allocated_ms = 60_000;
+
+        assert!(pos.in_check(Color::White), "Setup: King must be in check");
+
+        let score = quiescence(&mut pos, -INFINITY, INFINITY, 0, 0, &mut info, &tt);
+
+        // Down a rook with king in check — score must be negative
+        assert!(score < -200,
+            "In-check qsearch should score negatively: {}", score);
+        // Must have searched nodes — never just stand-patted
+        assert!(info.nodes > 0, "Must search nodes when in check");
+    }
+
+    #[test]
+    fn test_qsearch_checkmate_detection() {
+        setup();
+        // Fool's-mate position: White has no legal moves and is in check.
+        // qsearch must return a mate score, not stand-pat.
+        let fen =
+            "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
+        let pos = Position::from_fen(fen).unwrap();
+        if pos.in_check(Color::White)
+            && crate::movegen::generate_moves(&pos).is_empty()
+        {
+            let mut pos2 = pos.clone();
+            let mut info = SearchInfo::new();
+            let tt       = TranspositionTable::new(4);
+            info.time_allocated_ms = 60_000;
+
+            let score = quiescence(
+                &mut pos2, -INFINITY, INFINITY, 0, 0, &mut info, &tt
+            );
+            assert!(crate::search::is_mate_score(score),
+                "qsearch must return a mate score for checkmate: {}", score);
+        }
+    }
+
+    #[test]
+    fn test_qsearch_qs_depth_parameter_no_panic() {
+        setup();
+        // Verify the new qs_depth parameter works without panicking across
+        // multiple positions and both qs_depth values (0 and -1).
+        for seed in 0..10u64 {
+            let mut pos  = Position::generate_with_seed(seed);
+            let mut info = SearchInfo::new();
+            let tt       = TranspositionTable::new(4);
+            info.time_allocated_ms = 1000;
+
+            // qs_depth = 0  → checks in qsearch enabled
+            let s0 = quiescence(
+                &mut pos, -INFINITY, INFINITY, 0, 0, &mut info, &tt
+            );
+            // qs_depth = -1 → captures only (classic behaviour)
+            let mut info2 = SearchInfo::new();
+            info2.time_allocated_ms = 1000;
+            let s1 = quiescence(
+                &mut pos, -INFINITY, INFINITY, 0, -1, &mut info2, &tt
+            );
+
+            assert!(s0.abs() <= INFINITY,
+                "qs_depth=0 score out of bounds (seed {}): {}", seed, s0);
+            assert!(s1.abs() <= INFINITY,
+                "qs_depth=-1 score out of bounds (seed {}): {}", seed, s1);
+        }
+    }
 }
