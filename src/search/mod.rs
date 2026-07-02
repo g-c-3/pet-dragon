@@ -110,6 +110,12 @@ pub struct SearchInfo {
     pub history: HistoryTable,
     /// Countermove table [from][to]
     pub countermoves: CountermoveTable,
+    /// Continuation history: cont_hist[prev_to][piece_idx][curr_to]
+    /// piece_idx = piece_kind as usize * 2 + color as usize (0..11)
+    /// Conditions move quality on the previous move's destination square
+    /// and the currently-moving piece — captures same-direction continuations.
+    /// Boxed because 64×12×64×4 = 192KB would overflow the stack as a bare array.
+    pub cont_hist: Box<[[[i32; 64]; 12]; 64]>,
 
     // ── Search limits ─────────────────────────────────────────────────────────
     /// Maximum depth to search
