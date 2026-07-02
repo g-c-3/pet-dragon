@@ -194,6 +194,14 @@ impl SearchInfo {
         self.killers     = [[Move::NULL; KILLER_COUNT]; MAX_PLY];
         // Note: history and countermoves kept between searches
         // They improve move ordering over multiple moves in the game
+
+        // Cont hist is reset each search — it is position-dependent and
+        // goes stale more quickly than regular history across moves.
+        for row in self.cont_hist.iter_mut() {
+            for col in row.iter_mut() {
+                *col = [0i32; 64];
+            }
+        }
     }
 
     /// Age history scores (reduce by half between moves)
