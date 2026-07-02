@@ -208,10 +208,11 @@ pub fn try_probcut(
 
         pos.make_move_with_history(mv);
 
-        // Shallow search to verify
+        // Shallow search to verify — captures only (qs_depth = -1)
+        // Probcut doesn't benefit from quiet check generation overhead
         let score = -quiescence(
             pos, -probcut_beta, -probcut_beta + 1,
-            ply + 1, info, tt,
+            ply + 1, -1, info, tt,
         );
 
         pos.unmake_move_with_history(mv);
