@@ -333,7 +333,30 @@ pub fn update_ordering_on_cutoff(
     // Update history — bonus for the move that caused cutoff
     info.update_history(color_idx, from, to, depth, true);
 
-    // Penalise quiet moves that were tried before this one
+    // Update continuation history when we have a previous-move context
+    if prev_move != Move::NULL {
+        let prev_to = prev_move.to.index() as usize;
+        // Bonus for the cutoff move
+        if let Some(kind) = pos.piece_on(mv.from, color) {
+            info.update_cont_hist(prev_to, kind as usize * 2 + color_idx, to, depth, true);
+        }
+        // Penalty for quiets searched before the cutoff move
+        for &tried in quiets_tried {
+            if tried == mv { continue; }
+            if tried.kind.is_capture() || tried.kind.is_promotion() { continue; }
+            if let Some(tried_kind) = pos.piece_on(tried.from, color) {
+                info.update_cont_hist(
+                    prev_to,
+                    tried_kind as usize * 2 + color_idx,
+                    tried.to.index() as usize,
+                    depth,
+                    false,
+                );
+            }
+        }
+    }
+
+    // Penalise quiet moves that were tried before this one (regular history)
     for &tried in quiets_tried {
         if tried == mv { continue; }
         if tried.kind.is_capture() || tried.kind.is_promotion() { continue; }
@@ -346,6 +369,7 @@ pub fn update_ordering_on_cutoff(
         );
     }
 }
+                    
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
