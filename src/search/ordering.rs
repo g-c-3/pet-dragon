@@ -119,7 +119,8 @@ pub fn score_moves(
     scored
 }
 
-/// Score a single move
+/// Score a single move, optionally conditioned on the previous move for
+/// continuation history lookup.
 fn score_move(
     pos:         &Position,
     mv:          Move,
@@ -130,7 +131,9 @@ fn score_move(
     countermove: Move,
     color_idx:   usize,
     _ply:        usize,
+    prev_move:   Move,
 ) -> i32 {
+    
     // ── TT move — highest priority ────────────────────────────────────────────
     if mv == tt_move {
         return TT_MOVE_SCORE;
