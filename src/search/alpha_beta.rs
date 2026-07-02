@@ -845,9 +845,9 @@ mod tests {
     #[test]
     fn test_qsearch_in_check_generates_evasions() {
         setup();
-        // White King on e1, Black Rook on e8 — King is in check.
+        // White King on e1, Black Rook on e8, Black King on h8 — White is in check.
         // Old qsearch would stand-pat (wrong); new one generates all evasions.
-        let fen = "4r3/8/8/8/8/8/8/4K3 w - - 0 1";
+        let fen = "4r2k/8/8/8/8/8/8/4K3 w - - 0 1";
         let mut pos  = Position::from_fen(fen).unwrap();
         let mut info = SearchInfo::new();
         let tt       = TranspositionTable::new(4);
