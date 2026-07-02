@@ -112,6 +112,7 @@ pub fn score_moves(
             pos, mv, info, tt_move,
             killer1, killer2, countermove,
             color_idx, ply,
+            prev_move,
         );
         scored.push(ScoredMove { mv, score });
     }
