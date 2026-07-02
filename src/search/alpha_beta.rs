@@ -618,7 +618,7 @@ fn alpha_beta_with_excluded(
                     bound = Bound::LowerBound;
                     update_ordering_on_cutoff(
                         info, mv, prev_move, ply, depth,
-                        pos.side_to_move, &quiets_tried,
+                        pos.side_to_move, &quiets_tried, pos,
                     );
                     break;
                 }
