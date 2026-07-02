@@ -47,16 +47,38 @@ use crate::types::{Color, Move, PieceKind};
 
 // ── Quiescence search ─────────────────────────────────────────────────────────
 
-/// Quiescence search — search captures until position is "quiet"
-/// Prevents the horizon effect (stopping search in the middle of exchanges)
+/// Piece values for per-capture delta pruning in quiescence search.
+/// More precise than a global delta: checks whether THIS specific capture
+/// can raise alpha before even making the move.
+const QS_CAPTURE_VALUES: [i32; 6] = [
+    100,  // Pawn
+    320,  // Knight
+    330,  // Bishop
+    500,  // Rook
+    975,  // Queen (capped at DELTA_MARGIN to match global pruning)
+    0,    // King  (never captured in legal play)
+];
+
+/// Quiescence search — search captures (and checks) until position is quiet.
+/// Prevents the horizon effect (stopping mid-exchange or missing a check win).
+///
+/// `qs_depth` controls what gets searched beyond captures:
+///   ≥ 0 → also search quiet moves that give check with positive SEE
+///    < 0 → captures only (recursive calls and probcut use this)
+///
+/// Improvements over basic capture search:
+///   - In check: generates ALL legal evasions, no stand-pat.
+///     Detects checkmate when no evasion exists.
+///   - Not in check: per-capture delta pruning, then quiet checks at depth 0.
 ///
 /// ⚠️ Pet Dragon: MUST be called even at root — starting positions can
-/// have immediate captures. Never assume opening position is quiet.
+/// have immediate captures. Never assume the opening position is quiet.
 pub fn quiescence(
-    pos:   &mut Position,
+    pos:       &mut Position,
     mut alpha: i32,
     beta:      i32,
     ply:       usize,
+    qs_depth:  i32,
     info:      &mut SearchInfo,
     tt:        &TranspositionTable,
 ) -> i32 {
@@ -70,22 +92,63 @@ pub fn quiescence(
         return evaluate(pos);
     }
 
-    // Update seldepth
     if ply > info.seldepth {
         info.seldepth = ply;
     }
 
-    // Stand-pat: evaluate current position without making a move
-    // If current position is already >= beta, no need to search captures
+    // ── Check detection ───────────────────────────────────────────────────────
+    let in_check = pos.in_check(pos.side_to_move);
+
+    // ── In-check evasion path ─────────────────────────────────────────────────
+    // When in check we CANNOT stand pat — the check demands an answer.
+    // Generate ALL legal moves (evasions) and search every one of them.
+    // Captures, quiet evasions, and interpositions are all considered.
+    if in_check {
+        let evasions = generate_moves(pos);
+        if evasions.is_empty() {
+            // Checkmate — return exact mate-distance score
+            return -(MATE_SCORE - ply as i32);
+        }
+
+        let tt_move = tt.probe(pos.hash).map(|e| e.mv).unwrap_or(Move::NULL);
+        let mut scored = score_moves(pos, &evasions, info, tt_move, ply, Move::NULL);
+        let mut best_score = -INFINITY;
+
+        for i in 0..scored.len() {
+            let mv = match next_move(&mut scored, i) {
+                Some(m) => m,
+                None    => break,
+            };
+
+            pos.make_move_with_history(mv);
+            let score = -quiescence(pos, -beta, -alpha, ply + 1, qs_depth - 1, info, tt);
+            pos.unmake_move_with_history(mv);
+
+            if info.stop { return 0; }
+
+            if score > best_score {
+                best_score = score;
+                if score > alpha {
+                    alpha = score;
+                    if score >= beta {
+                        return beta;
+                    }
+                }
+            }
+        }
+        return best_score;
+    }
+
+    // ── Stand-pat (not in check) ──────────────────────────────────────────────
+    // Static evaluation — we can always choose not to capture anything.
     let stand_pat = evaluate(pos);
 
     if stand_pat >= beta {
-        return beta; // Beta cutoff
+        return beta;
     }
 
-    // Delta pruning: if even the best possible capture can't raise alpha,
-    // skip this node entirely
-    const DELTA_MARGIN: i32 = 975; // Approximately queen value
+    // Global delta pruning: if even a queen gain can't raise alpha, bail out.
+    const DELTA_MARGIN: i32 = 975;
     if stand_pat + DELTA_MARGIN < alpha {
         return alpha;
     }
@@ -94,15 +157,12 @@ pub fn quiescence(
         alpha = stand_pat;
     }
 
-    // TT probe for quiescence
-    let tt_move = tt.probe(pos.hash)
-        .map(|e| e.mv)
-        .unwrap_or(Move::NULL);
+    // ── TT probe ──────────────────────────────────────────────────────────────
+    let tt_move = tt.probe(pos.hash).map(|e| e.mv).unwrap_or(Move::NULL);
 
-    // Generate and score captures only
+    // ── Capture search ────────────────────────────────────────────────────────
     let captures = generate_captures(pos);
     let mut scored = score_captures(pos, &captures, tt_move);
-
     let mut best_score = stand_pat;
 
     for i in 0..scored.len() {
@@ -111,13 +171,24 @@ pub fn quiescence(
             None    => break,
         };
 
-        // SEE pruning: skip losing captures in quiescence
+        // Per-capture delta pruning: skip if capturing this specific piece
+        // still leaves us too far below alpha to matter.
+        if !mv.kind.is_promotion() {
+            let captured_val = mv.captured
+                .map(|k| QS_CAPTURE_VALUES[k as usize])
+                .unwrap_or(0);
+            if stand_pat + captured_val + 200 < alpha {
+                continue;
+            }
+        }
+
+        // SEE pruning: skip captures that lose material on the exchange
         if !see(pos, mv, 0) {
             continue;
         }
 
         pos.make_move_with_history(mv);
-        let score = -quiescence(pos, -beta, -alpha, ply + 1, info, tt);
+        let score = -quiescence(pos, -beta, -alpha, ply + 1, qs_depth - 1, info, tt);
         pos.unmake_move_with_history(mv);
 
         if info.stop { return 0; }
@@ -127,7 +198,47 @@ pub fn quiescence(
             if score > alpha {
                 alpha = score;
                 if score >= beta {
-                    return beta; // Beta cutoff
+                    return beta;
+                }
+            }
+        }
+    }
+
+    // ── Quiet checks (first qsearch level only) ───────────────────────────────
+    // At qs_depth ≥ 0 (called from main search), also search quiet moves that
+    // give check with non-negative SEE. These catch tactical checkmates that
+    // occur one move after the horizon — the most common form of missed tactics.
+    // Recursive calls use qs_depth = -1 so this section never runs below.
+    if qs_depth >= 0 {
+        let all_moves = generate_moves(pos);
+        for i in 0..all_moves.len() {
+            let mv = all_moves.get(i);
+            // Captures and promotions already handled above
+            if mv.kind.is_capture() || mv.kind.is_promotion() {
+                continue;
+            }
+            // Only free or winning checks — paying for a check is usually wrong
+            if !see(pos, mv, 0) {
+                continue;
+            }
+            if !move_gives_check(pos, mv) {
+                continue;
+            }
+
+            pos.make_move_with_history(mv);
+            // Recurse with qs_depth = -1: captures only below this point
+            let score = -quiescence(pos, -beta, -alpha, ply + 1, -1, info, tt);
+            pos.unmake_move_with_history(mv);
+
+            if info.stop { return 0; }
+
+            if score > best_score {
+                best_score = score;
+                if score > alpha {
+                    alpha = score;
+                    if score >= beta {
+                        return beta;
+                    }
                 }
             }
         }
