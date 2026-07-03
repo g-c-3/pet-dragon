@@ -360,6 +360,37 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         tt.new_search();
     }
 
+    // ── DTZ root probe (Phase 15.5) ───────────────────────────────────────────
+    // Must run BEFORE spawning any threads — probe_root is not thread-safe.
+    // If the position is in the tablebases, output bestmove and return early.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(ref tb) = state.syzygy {
+        if state.pos.all_occupied.count() <= tb.max_pieces() {
+            if let Some((from_idx, to_idx, _promo, wdl)) = tb.probe_root(&state.pos) {
+                if let (Some(from_sq), Some(to_sq)) = (
+                    Square::from_index(from_idx),
+                    Square::from_index(to_idx),
+                ) {
+                    let legal = generate_moves(&state.pos);
+                    if let Some(mv) = legal.iter().find(|m| m.from == from_sq && m.to == to_sq) {
+                        let outcome = if wdl > 0 { "win" } else if wdl < 0 { "loss" } else { "draw" };
+                        println!(
+                            "info depth 0 score cp {} tbhits 1 nodes 0 nps 0 pv {} string TB {}",
+                            wdl, mv.to_uci(), outcome
+                        );
+                        println!("bestmove {}", mv.to_uci());
+                        state.search_handle = None;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // Clone syzygy handle for search threads (WDL probing during search, Phase 15.3/15.4)
+    #[cfg(not(target_arch = "wasm32"))]
+    let syzygy_for_threads = state.syzygy.clone();
+
     let pos       = state.pos.clone();
     let threads   = state.threads.max(1);
     let stop_flag = Arc::clone(&state.stop_flag);
