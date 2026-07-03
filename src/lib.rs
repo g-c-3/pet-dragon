@@ -37,6 +37,10 @@ pub mod tt;
 pub mod search;
 pub mod eval;
 
+// Syzygy endgame tablebases — native only (pyrrhic-rs needs libc, not wasm32-safe)
+#[cfg(not(target_arch = "wasm32"))]
+pub mod syzygy;
+
 // ── WASM entry point ──────────────────────────────────────────────────────────
 
 /// Called automatically when the WASM module loads in the browser.
