@@ -212,6 +212,8 @@ fn cmd_uci() {
     );
     // Some GUIs send this; we accept it to avoid complaints
     println!("option name UCI_Chess960 type check default false");
+    // Phase 15: Syzygy tablebase path (native only; WASM builds ignore this)
+    println!("option name SyzygyPath type string default <empty>");
     println!();
     println!("uciok");
 }
