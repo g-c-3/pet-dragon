@@ -98,6 +98,8 @@ impl EngineState {
             threads:       1,
             stop_flag,
             search_handle: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            syzygy: None,
         }
     }
 
