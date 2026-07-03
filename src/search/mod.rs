@@ -143,6 +143,12 @@ pub struct SearchInfo {
     /// Shared stop flag — set by UCI `stop` command or when time expires.
     /// All threads sharing this Arc terminate as soon as the flag is set.
     pub stop_flag: Arc<AtomicBool>,
+
+    /// Syzygy tablebase handle — native only (Phase 15).
+    /// Set by main.rs when a SyzygyPath is configured. None = no tablebases.
+    /// Arc makes it cheap to clone into helper threads.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub syzygy: Option<std::sync::Arc<crate::syzygy::SyzygyProber>>,
 }
 
 impl SearchInfo {
