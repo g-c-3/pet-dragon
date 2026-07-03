@@ -248,6 +248,30 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
             }
         }
         "uci_chess960" => { /* ignored */ }
+        "syzygypath" => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if value.is_empty() || value == "<empty>" {
+                    state.syzygy = None;
+                    eprintln!("info string Syzygy tablebases disabled");
+                } else {
+                    match SyzygyProber::new(value) {
+                        Ok(prober) => {
+                            let max_pc = prober.max_pieces();
+                            state.syzygy = Some(std::sync::Arc::new(prober));
+                            eprintln!(
+                                "info string Syzygy tablebases loaded: {} path={} max_pieces={}",
+                                value, value, max_pc
+                            );
+                        }
+                        Err(e) => {
+                            state.syzygy = None;
+                            eprintln!("info string Syzygy load failed: {}", e);
+                        }
+                    }
+                }
+            }
+        }
         _ => { /* unknown options silently ignored */ }
     }
 }
