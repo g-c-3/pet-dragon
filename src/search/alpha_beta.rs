@@ -333,6 +333,23 @@ fn alpha_beta_with_excluded(
         return DRAW_SCORE;
     }
 
+    // ── Syzygy WDL probe (Phase 15.3 / 15.4) ─────────────────────────────────
+    // Probe all interior nodes when piece count ≤ loaded tablebase size.
+    // WDL is reliable only when halfmove_clock == 0 (checked inside probe_wdl).
+    // DTZ at root is handled separately in main.rs before spawning threads.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(ref tb) = info.syzygy {
+        if pos.all_occupied.count() <= tb.max_pieces() {
+            if let Some(tb_score) = tb.probe_wdl(pos) {
+                let bound = if tb_score >= beta       { Bound::LowerBound }
+                            else if tb_score <= alpha { Bound::UpperBound }
+                            else                      { Bound::Exact };
+                tt.store(pos.hash, depth as i8, tb_score, bound, Move::NULL);
+                return tb_score;
+            }
+        }
+    }
+
     // ── Transposition table probe ─────────────────────────────────────────────
     let tt_move;
     let tt_hit = tt.probe(pos.hash);
