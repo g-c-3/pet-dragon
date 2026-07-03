@@ -51,6 +51,9 @@ use pet_dragon_lib::search::time::TimeControl;
 use pet_dragon_lib::tt::TranspositionTable;
 use pet_dragon_lib::types::{Color, Move, PieceKind, Square};
 
+#[cfg(not(target_arch = "wasm32"))]
+use pet_dragon_lib::syzygy::SyzygyProber;
+
 // ── Engine metadata ───────────────────────────────────────────────────────────
 
 const ENGINE_NAME:    &str = "Pet Dragon";
