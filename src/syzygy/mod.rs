@@ -245,12 +245,24 @@ fn pyrrhic_piece_to_pd(p: pyrrhic_rs::Piece) -> PieceKind {
 mod tests {
     use super::*;
 
-    /// SyzygyProber::new with a nonexistent path must return Err, never panic.
-    /// (Returns BadPath or AlreadyInitialized — both are error variants.)
+    /// SyzygyProber::new with a nonexistent path must never panic, and must
+    /// never report usable tablebase coverage.
+    ///
+    /// NOTE: pyrrhic-rs's `TableBases` is a process-wide singleton (guarded by
+    /// a global `TB_INITIALIZED` static in the underlying C library). For some
+    /// invalid paths `tb_init()` still returns Ok with `TB_LARGEST` reflecting
+    /// only trivial (fileless) endgame classes, so `Err` is not guaranteed —
+    /// we only assert that no real tablebase files were picked up.
     #[test]
     fn test_syzygy_bad_path_returns_err() {
-        let result = SyzygyProber::new("/nonexistent/syzygy/path/for/test");
-        assert!(result.is_err(), "Expected Err for nonexistent TB path, got Ok");
+        match SyzygyProber::new("/nonexistent/syzygy/path/for/test") {
+            Err(_) => {} // expected outcome
+            Ok(prober) => assert_eq!(
+                prober.max_pieces(),
+                0,
+                "Nonexistent path should never yield usable tablebase coverage"
+            ),
+        }
     }
 
     /// extract_position_bits must produce non-overlapping white/black masks
