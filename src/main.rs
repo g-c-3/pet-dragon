@@ -418,6 +418,8 @@ fn cmd_go(state: &mut EngineState, line: &str) {
             h_tc.infinite  = true; // helpers are time-unlimited; stop flag kills them
             helper_handles.push(std::thread::spawn(move || {
                 let mut h_info = SearchInfo::new_with_stop(h_stop);
+                #[cfg(not(target_arch = "wasm32"))]
+                { h_info.syzygy = syzygy_for_threads.clone(); }
                 iterative_deepening(&mut h_pos, &h_tc, &mut h_info, &*h_tt)
             }));
         }
