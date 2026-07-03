@@ -79,6 +79,9 @@ struct EngineState {
     /// Handle to active search thread. None when engine is idle.
     /// Returns the main SearchInfo so history can be preserved.
     search_handle: Option<JoinHandle<SearchInfo>>,
+    /// Syzygy tablebase handle — set on setoption SyzygyPath. None = disabled.
+    #[cfg(not(target_arch = "wasm32"))]
+    syzygy: Option<std::sync::Arc<SyzygyProber>>,
 }
 
 impl EngineState {
