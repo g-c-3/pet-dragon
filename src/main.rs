@@ -430,6 +430,8 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.history      = history;
         main_info.countermoves = countermoves;
         main_info.correction_history = correction;
+        #[cfg(not(target_arch = "wasm32"))]
+        { main_info.syzygy = syzygy_for_threads; }
 
         let result = iterative_deepening(&mut main_pos, &tc, &mut main_info, &*tt);
 
