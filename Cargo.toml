@@ -35,6 +35,14 @@ js-sys = { version = "0.3", optional = true }
 # Also optional — only needed for WASM target
 getrandom = { version = "0.2", features = ["std"] }
 
+# ── Platform-specific dependencies ────────────────────────────────────────────
+# pyrrhic-rs: Syzygy tablebase probing — native targets only.
+# pyrrhic-rs uses libc, which is incompatible with wasm32.
+# Original C code: Fathom © 2015 basil; mods © 2016-2019 Jon Dart;
+#                  mods © 2020 Andrew Grant. Rust port © Algorhythm-sxv (MIT).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pyrrhic-rs = "0.2"
+
 # ── Dev dependencies ──────────────────────────────────────────────────────────
 
 [dev-dependencies]
