@@ -174,6 +174,8 @@ impl SearchInfo {
             seldepth:          0,
             correction_history: crate::search::pruning::CorrectionHistory::new(),
             stop_flag: Arc::new(AtomicBool::new(false)),
+            #[cfg(not(target_arch = "wasm32"))]
+            syzygy: None,
         }
     }
 
