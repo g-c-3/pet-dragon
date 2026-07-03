@@ -372,7 +372,9 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                     Square::from_index(to_idx),
                 ) {
                     let legal = generate_moves(&state.pos);
-                    if let Some(&mv) = legal.iter().find(|m| m.from == from_sq && m.to == to_sq) {
+                    let found_move: Option<Move> =
+                        legal.iter().find(|m| m.from == from_sq && m.to == to_sq).copied();
+                    if let Some(mv) = found_move {
                         let outcome = if wdl > 0 { "win" } else if wdl < 0 { "loss" } else { "draw" };
                         println!(
                             "info depth 0 score cp {} tbhits 1 nodes 0 nps 0 pv {} string TB {}",
