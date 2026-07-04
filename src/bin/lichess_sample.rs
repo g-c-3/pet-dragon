@@ -49,12 +49,13 @@
 
 use std::env;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 
 use pet_dragon_lib::nnue::features::extract_stm_nstm_features;
 use pet_dragon_lib::position::Position;
 use pet_dragon_lib::types::Color;
 
+use ruzstd::decoding::errors::{FrameDecoderError, ReadFrameHeaderError};
 use ruzstd::decoding::StreamingDecoder;
 
 /// Default dataset URL — CC0-1.0, confirmed live in Session 24.
