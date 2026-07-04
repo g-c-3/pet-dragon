@@ -196,7 +196,7 @@ impl SearchInfo {
         self.best_score  = -INFINITY;
         self.best_move   = Move::NULL;
         self.seldepth    = 0;
-        self.start_time  = std::time::Instant::now();
+        self.start_time  = web_time::Instant::now();
         self.pv_length   = [0; MAX_PLY];
         self.pv_table    = [[Move::NULL; MAX_PLY]; MAX_PLY];
         self.killers     = [[Move::NULL; KILLER_COUNT]; MAX_PLY];
