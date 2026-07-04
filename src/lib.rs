@@ -59,12 +59,13 @@ pub fn wasm_main() {
     position::zobrist::init_zobrist();
 }
 
-/// Set up panic hook only when the optional dep is available.
-/// Wrapped so we can easily add console_error_panic_hook later.
+/// Set up panic hook so Rust panics print a real message + stack trace to
+/// the browser console instead of an unreported WASM trap. This was the
+/// reason the original Instant::now() bug hung the UI with zero visible
+/// error (Session 25) — any future wasm-side panic will now be diagnosable.
 #[cfg(feature = "wasm")]
 fn console_error_panic_hook_setup() {
-    // Phase 12+: add console_error_panic_hook crate here for better debugging
-    // For now: default panic behaviour (WASM trap)
+    console_error_panic_hook::set_once();
 }
 
 // ── WASM engine identity exports ──────────────────────────────────────────────
