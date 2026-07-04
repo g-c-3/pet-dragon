@@ -114,30 +114,6 @@ fn normalise_fen(fen: &str) -> Option<String> {
     }
 }
 
-/// Open the next zstd content frame on `response`, transparently skipping
-/// any zstd "skippable frames" (metadata headers) encountered along the
-/// way. Returns `None` when the underlying stream has genuinely ended
-/// (no more frames of any kind) — the normal, expected way this dataset's
-/// download finishes once the whole file has been read.
-fn open_next_zstd_frame(
-    response: &mut reqwest::blocking::Response,
-) -> Option<StreamingDecoder<&mut reqwest::blocking::Response>> {
-    loop {
-        match StreamingDecoder::new(&mut *response) {
-            Ok(d) => return Some(d),
-            Err(FrameDecoderError::ReadFrameHeaderError(ReadFrameHeaderError::SkipFrame {
-                length,
-                magic_number,
-            })) => {
-                eprintln!("skipping zstd skippable frame: magic={magic_number} length={length}");
-                std::io::copy(&mut (&mut *response).take(length as u64), &mut std::io::sink())
-                    .expect("failed to skip zstd skippable frame");
-            }
-            Err(_) => return None,
-        }
-    }
-}
-
 fn main() {
     pet_dragon_lib::bitboard::masks::init_masks();
     pet_dragon_lib::bitboard::magic::init_magic();
