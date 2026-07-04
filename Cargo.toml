@@ -89,6 +89,7 @@ wasm = [
     "wasm-bindgen",
     "js-sys",
     "getrandom/js",
+    "console_error_panic_hook",
 ]
 
 # ── wasm-pack config ──────────────────────────────────────────────────────────
