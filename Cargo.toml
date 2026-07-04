@@ -61,6 +61,19 @@ getrandom = { version = "0.2", features = ["std"] }
 # lives in ordinary [dependencies], no wasm32 exclusion needed.
 noru = "2.2"
 
+# Phase 16.4b: streaming Lichess CC0 eval-dataset sampler (src/bin/lichess_sample.rs).
+# All three are optional and gated behind the "lichess-sample" feature below —
+# never pulled into the default native build, the wasm build, or cargo test —
+# so they cannot affect the browser bundle size or break wasm32 compilation.
+# ruzstd: pure-Rust zstd decoder (MIT), no C/libc dependency — avoids adding a
+#   system zstd requirement to the GitHub Actions runner (unlike the `zstd` crate).
+# reqwest (blocking + rustls-tls): streams the dataset over HTTPS without
+#   pulling in an async runtime; rustls avoids a native TLS/OpenSSL dependency.
+# serde_json: parses each JSONL line's "fen"/"evals" fields.
+ruzstd = { version = "0.8", optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
 # ── Platform-specific dependencies ────────────────────────────────────────────
 # pyrrhic-rs: Syzygy tablebase probing — native targets only.
 # pyrrhic-rs uses libc, which is incompatible with wasm32.
