@@ -1,0 +1,62 @@
+name: Self-Play Data Generation
+
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed.
+on:
+  workflow_dispatch:
+    inputs:
+      num_games:
+        description: "Number of self-play games to generate"
+        required: false
+        default: "20"
+        type: string
+      seed_start:
+        description: "Starting seed (change this between runs to get different games, otherwise reruns regenerate the same games)"
+        required: false
+        default: "0"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  selfplay:
+    name: Generate Self-Play Data
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: selfplay-release
+
+      - name: Build selfplay binary
+        run: cargo build --release --bin selfplay
+
+      - name: Run self-play generation
+        run: >
+          ./target/release/selfplay
+          ${{ inputs.num_games }}
+          selfplay_data.txt
+          ${{ inputs.seed_start }}
+
+      - name: Report output size
+        run: |
+          wc -l selfplay_data.txt
+          ls -lh selfplay_data.txt
+
+      - name: Upload training data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfplay-data-seed${{ inputs.seed_start }}-n${{ inputs.num_games }}
+          path: selfplay_data.txt
+          retention-days: 30
