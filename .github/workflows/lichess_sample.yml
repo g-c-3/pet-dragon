@@ -1,0 +1,69 @@
+name: Lichess Eval Sample (Phase 16.4b)
+
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed.
+on:
+  workflow_dispatch:
+    inputs:
+      skip_lines:
+        description: "Decompressed lines to skip before sampling starts"
+        required: false
+        default: "0"
+        type: string
+      sample_size:
+        description: "Number of samples to keep"
+        required: false
+        default: "50000"
+        type: string
+      stride:
+        description: "Keep 1 line in every N after the skip (spreads the sample across a wider prefix of the file)"
+        required: false
+        default: "200"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  lichess-sample:
+    name: Sample Lichess CC0 Eval Dataset
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: lichess-sample-release
+
+      - name: Build lichess_sample binary
+        run: cargo build --release --features lichess-sample --bin lichess_sample
+
+      - name: Run sampler
+        run: >
+          ./target/release/lichess_sample
+          https://database.lichess.org/lichess_db_eval.jsonl.zst
+          lichess_sample.txt
+          ${{ inputs.skip_lines }}
+          ${{ inputs.sample_size }}
+          ${{ inputs.stride }}
+
+      - name: Report output size
+        run: |
+          wc -l lichess_sample.txt
+          ls -lh lichess_sample.txt
+
+      - name: Upload sample as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lichess-sample-skip${{ inputs.skip_lines }}-n${{ inputs.sample_size }}-stride${{ inputs.stride }}
+          path: lichess_sample.txt
+          retention-days: 30
