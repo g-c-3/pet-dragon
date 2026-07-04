@@ -178,7 +178,26 @@ fn main() {
     // sample request stopped after 57,169 lines / ~2 seconds — the first
     // frame's worth of data, not the whole multi-GB file.
     'frames: loop {
-        let decoder = match open_next_zstd_frame(&mut response) {
+        // Open the next zstd content frame, transparently skipping any
+        // "skippable frames" (metadata headers) encountered along the way.
+        // Inlined (rather than a named helper) so the StreamingDecoder's
+        // two generic parameters (READ, DEC) are fully inferred from usage
+        // instead of needing to be spelled out in a function signature.
+        let decoder = loop {
+            match StreamingDecoder::new(&mut response) {
+                Ok(d) => break Some(d),
+                Err(FrameDecoderError::ReadFrameHeaderError(ReadFrameHeaderError::SkipFrame {
+                    length,
+                    magic_number,
+                })) => {
+                    eprintln!("skipping zstd skippable frame: magic={magic_number} length={length}");
+                    std::io::copy(&mut (&mut response).take(length as u64), &mut std::io::sink())
+                        .expect("failed to skip zstd skippable frame");
+                }
+                Err(_) => break None,
+            }
+        };
+        let decoder = match decoder {
             Some(d) => d,
             None => {
                 eprintln!("no more zstd frames at line {line_index} (true end of stream)");
