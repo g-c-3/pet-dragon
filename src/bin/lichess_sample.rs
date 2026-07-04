@@ -130,12 +130,31 @@ fn main() {
         "lichess_sample: url={url} skip_lines={skip_lines} sample_size={sample_size} stride={stride}"
     );
 
-    let response = reqwest::blocking::get(&url).expect("HTTP request failed");
+    let mut response = reqwest::blocking::get(&url).expect("HTTP request failed");
     if !response.status().is_success() {
         panic!("HTTP request returned status {}", response.status());
     }
 
-    let decoder = StreamingDecoder::new(response).expect("failed to init zstd stream");
+    // The Lichess .zst file has one or more zstd "skippable frames" (e.g. a
+    // metadata header) before the real compressed frame. StreamingDecoder
+    // doesn't skip these itself — per ruzstd's own docs, the caller must
+    // catch ReadFrameHeaderError::SkipFrame and discard `length` bytes, then
+    // retry. This mirrors Rust std's own gimli/elf.rs zstd-debuginfo decoder,
+    // adapted from a &[u8] slice source to our streaming HTTP reader.
+    let decoder = loop {
+        match StreamingDecoder::new(&mut response) {
+            Ok(d) => break d,
+            Err(FrameDecoderError::ReadFrameHeaderError(ReadFrameHeaderError::SkipFrame {
+                length,
+                magic_number,
+            })) => {
+                eprintln!("skipping zstd skippable frame: magic={magic_number} length={length}");
+                std::io::copy(&mut (&mut response).take(length as u64), &mut std::io::sink())
+                    .expect("failed to skip zstd skippable frame");
+            }
+            Err(e) => panic!("failed to init zstd stream: {e:?}"),
+        }
+    };
     let mut reader = BufReader::new(decoder);
 
     let out_file = File::create(&output_path).expect("failed to create output file");
