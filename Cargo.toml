@@ -71,7 +71,7 @@ noru = "2.2"
 #   pulling in an async runtime; rustls avoids a native TLS/OpenSSL dependency.
 # serde_json: parses each JSONL line's "fen"/"evals" fields.
 ruzstd = { version = "0.8", optional = true }
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"], optional = true }
 serde_json = { version = "1.0", optional = true }
 
 # ── Platform-specific dependencies ────────────────────────────────────────────
