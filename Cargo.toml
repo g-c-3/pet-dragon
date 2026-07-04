@@ -16,6 +16,14 @@ categories = ["game-engines"]
 name = "pet_dragon"
 path = "src/main.rs"
 
+# Phase 16.4b — only builds when the "lichess-sample" feature is explicitly
+# requested (see [features] below), so `cargo build`/`cargo test` with
+# default features never touches this binary or its extra dependencies.
+[[bin]]
+name = "lichess_sample"
+path = "src/bin/lichess_sample.rs"
+required-features = ["lichess-sample"]
+
 [lib]
 name = "pet_dragon_lib"
 path = "src/lib.rs"
