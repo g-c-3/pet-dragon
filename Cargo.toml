@@ -30,6 +30,19 @@ wasm-bindgen = { version = "0.2", optional = true }
 # JavaScript interop types — also optional, only needed for WASM
 js-sys = { version = "0.3", optional = true }
 
+# Panic hook forwarding Rust panics to the browser console — without this,
+# a wasm32 panic is a silent trap and the UI hangs with no error anywhere.
+# Optional, wasm-only.
+console_error_panic_hook = { version = "0.1", optional = true }
+
+# std::time::Instant::now() panics at runtime on wasm32-unknown-unknown (no
+# clock source). web-time is a drop-in replacement: real std::time on every
+# other target, Performance.now()-backed Instant on wasm32. This was the
+# root cause of the browser engine hanging on "Engine thinking..." forever
+# (Session 25 bug fix) — used unconditionally in search/mod.rs so native
+# and browser search behave identically.
+web-time = "1.1"
+
 # Random number generation
 # "js" feature makes it work in the browser via Math.random()
 # Also optional — only needed for WASM target
