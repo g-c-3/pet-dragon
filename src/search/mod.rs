@@ -156,7 +156,7 @@ impl SearchInfo {
     pub fn new() -> Self {
         SearchInfo {
             time_allocated_ms: 5000,
-            start_time:        std::time::Instant::now(),
+            start_time:        web_time::Instant::now(),
             stop:              false,
             nodes:             0,
             nps:               0,
