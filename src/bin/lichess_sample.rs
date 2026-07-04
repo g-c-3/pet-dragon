@@ -114,6 +114,30 @@ fn normalise_fen(fen: &str) -> Option<String> {
     }
 }
 
+/// Open the next zstd content frame on `response`, transparently skipping
+/// any zstd "skippable frames" (metadata headers) encountered along the
+/// way. Returns `None` when the underlying stream has genuinely ended
+/// (no more frames of any kind) — the normal, expected way this dataset's
+/// download finishes once the whole file has been read.
+fn open_next_zstd_frame(
+    response: &mut reqwest::blocking::Response,
+) -> Option<StreamingDecoder<&mut reqwest::blocking::Response>> {
+    loop {
+        match StreamingDecoder::new(&mut *response) {
+            Ok(d) => return Some(d),
+            Err(FrameDecoderError::ReadFrameHeaderError(ReadFrameHeaderError::SkipFrame {
+                length,
+                magic_number,
+            })) => {
+                eprintln!("skipping zstd skippable frame: magic={magic_number} length={length}");
+                std::io::copy(&mut (&mut *response).take(length as u64), &mut std::io::sink())
+                    .expect("failed to skip zstd skippable frame");
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
 fn main() {
     pet_dragon_lib::bitboard::masks::init_masks();
     pet_dragon_lib::bitboard::magic::init_magic();
@@ -135,28 +159,6 @@ fn main() {
         panic!("HTTP request returned status {}", response.status());
     }
 
-    // The Lichess .zst file has one or more zstd "skippable frames" (e.g. a
-    // metadata header) before the real compressed frame. StreamingDecoder
-    // doesn't skip these itself — per ruzstd's own docs, the caller must
-    // catch ReadFrameHeaderError::SkipFrame and discard `length` bytes, then
-    // retry. This mirrors Rust std's own gimli/elf.rs zstd-debuginfo decoder,
-    // adapted from a &[u8] slice source to our streaming HTTP reader.
-    let decoder = loop {
-        match StreamingDecoder::new(&mut response) {
-            Ok(d) => break d,
-            Err(FrameDecoderError::ReadFrameHeaderError(ReadFrameHeaderError::SkipFrame {
-                length,
-                magic_number,
-            })) => {
-                eprintln!("skipping zstd skippable frame: magic={magic_number} length={length}");
-                std::io::copy(&mut (&mut response).take(length as u64), &mut std::io::sink())
-                    .expect("failed to skip zstd skippable frame");
-            }
-            Err(e) => panic!("failed to init zstd stream: {e:?}"),
-        }
-    };
-    let mut reader = BufReader::new(decoder);
-
     let out_file = File::create(&output_path).expect("failed to create output file");
     let mut writer = BufWriter::new(out_file);
 
@@ -165,47 +167,68 @@ fn main() {
     let mut kept: u64 = 0;
     let mut parse_failures: u64 = 0;
 
-    loop {
-        if kept >= sample_size {
-            break;
-        }
-        line.clear();
-        let bytes_read = match reader.read_line(&mut line) {
-            Ok(n) => n,
-            Err(e) => {
-                eprintln!("stream read error at line {line_index}: {e} — stopping early");
-                break;
+    // Large zstd archives are often split into multiple sequential content
+    // frames (e.g. produced by pzstd/parallel compression), not just one.
+    // StreamingDecoder only ever decodes a single frame and then reports
+    // EOF — even if more frames (and megabytes of real data) follow on the
+    // same still-open connection. So we loop at the frame level: read the
+    // current frame to its end, then try opening another frame on the same
+    // `response`; only stop for real when that also fails (true end of
+    // stream). Confirmed necessary in Session 27: without this, a 500-line
+    // sample request stopped after 57,169 lines / ~2 seconds — the first
+    // frame's worth of data, not the whole multi-GB file.
+    'frames: loop {
+        let decoder = match open_next_zstd_frame(&mut response) {
+            Some(d) => d,
+            None => {
+                eprintln!("no more zstd frames at line {line_index} (true end of stream)");
+                break 'frames;
             }
         };
-        if bytes_read == 0 {
-            eprintln!("reached end of stream at line {line_index} (dataset exhausted before sample_size reached)");
-            break;
-        }
-        line_index += 1;
+        let mut reader = BufReader::new(decoder);
 
-        if line_index <= skip_lines {
-            continue;
-        }
-        if (line_index - skip_lines - 1) % stride != 0 {
-            continue;
-        }
-
-        match process_line(&line) {
-            Some(sample_line) => {
-                writer.write_all(sample_line.as_bytes()).expect("write failed");
-                kept += 1;
+        loop {
+            if kept >= sample_size {
+                break 'frames;
             }
-            None => parse_failures += 1,
-        }
+            line.clear();
+            let bytes_read = match reader.read_line(&mut line) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("stream read error at line {line_index}: {e} — stopping early");
+                    break 'frames;
+                }
+            };
+            if bytes_read == 0 {
+                // End of THIS frame only — go back to 'frames to try the next one.
+                break;
+            }
+            line_index += 1;
 
-        if kept % 5_000 == 0 && kept > 0 {
-            eprintln!("progress: {kept}/{sample_size} samples kept, line {line_index}");
+            if line_index <= skip_lines {
+                continue;
+            }
+            if (line_index - skip_lines - 1) % stride != 0 {
+                continue;
+            }
+
+            match process_line(&line) {
+                Some(sample_line) => {
+                    writer.write_all(sample_line.as_bytes()).expect("write failed");
+                    kept += 1;
+                }
+                None => parse_failures += 1,
+            }
+
+            if kept % 5_000 == 0 && kept > 0 {
+                eprintln!("progress: {kept}/{sample_size} samples kept, line {line_index}");
+            }
         }
     }
 
     writer.flush().expect("failed to flush output file");
-    // `reader` (and the underlying HTTP response) drops here, closing the
-    // connection — bytes beyond this point in the dataset are never fetched.
+    // `response` drops here, closing the connection — bytes beyond this
+    // point in the dataset are never fetched.
 
     eprintln!(
         "done: {kept} samples written to {output_path}, {parse_failures} lines failed to parse, {line_index} lines read total"
