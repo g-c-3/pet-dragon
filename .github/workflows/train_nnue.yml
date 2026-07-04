@@ -1,0 +1,134 @@
+name: NNUE Training (Phase 16.5)
+
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed (D15).
+#
+# Prerequisite: you need the Run IDs of a completed selfplay.yml run and a
+# completed lichess_sample.yml run. Find these on the Actions tab: open the
+# run, the Run ID is the number in the URL
+# (.../actions/runs/<RUN_ID>) or shown under the run title.
+on:
+  workflow_dispatch:
+    inputs:
+      selfplay_run_id:
+        description: "Run ID of the selfplay.yml run to pull selfplay_data.txt from"
+        required: true
+        type: string
+      lichess_run_id:
+        description: "Run ID of the lichess_sample.yml run to pull lichess_sample.txt from"
+        required: true
+        type: string
+      epochs:
+        description: "Training epochs"
+        required: false
+        default: "10"
+        type: string
+      learning_rate:
+        description: "Adam learning rate"
+        required: false
+        default: "0.001"
+        type: string
+      batch_size:
+        description: "Minibatch size"
+        required: false
+        default: "256"
+        type: string
+      hidden_size:
+        description: "Hidden layer width"
+        required: false
+        default: "32"
+        type: string
+      accumulator_size:
+        description: "Accumulator (feature transform output) width"
+        required: false
+        default: "256"
+        type: string
+      lambda:
+        description: "D14 blend weight: eval-target vs game-result-target (1.0 = eval only, self-play rows only affected)"
+        required: false
+        default: "0.7"
+        type: string
+      seed:
+        description: "RNG seed for weight init and shuffling"
+        required: false
+        default: "42"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  train:
+    name: Train NORU NNUE
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: train-nnue-release
+
+      - name: Download self-play data artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.selfplay_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/selfplay
+
+      - name: Download Lichess sample artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.lichess_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: data/lichess
+
+      - name: Locate downloaded data files
+        id: locate
+        run: |
+          SELFPLAY_FILE=$(find data/selfplay -name '*.txt' | head -n1)
+          LICHESS_FILE=$(find data/lichess -name '*.txt' | head -n1)
+          if [ -z "$SELFPLAY_FILE" ] || [ -z "$LICHESS_FILE" ]; then
+            echo "ERROR: could not find a .txt data file in one of the downloaded artifacts"
+            find data -type f
+            exit 1
+          fi
+          echo "selfplay_file=$SELFPLAY_FILE" >> "$GITHUB_OUTPUT"
+          echo "lichess_file=$LICHESS_FILE" >> "$GITHUB_OUTPUT"
+          wc -l "$SELFPLAY_FILE" "$LICHESS_FILE"
+
+      - name: Build train_nnue binary
+        run: cargo build --release --bin train_nnue
+
+      - name: Run training
+        run: >
+          ./target/release/train_nnue
+          nnue_pet_dragon
+          "${{ steps.locate.outputs.selfplay_file }},${{ steps.locate.outputs.lichess_file }}"
+          ${{ inputs.epochs }}
+          ${{ inputs.learning_rate }}
+          ${{ inputs.batch_size }}
+          ${{ inputs.hidden_size }}
+          ${{ inputs.accumulator_size }}
+          ${{ inputs.lambda }}
+          ${{ inputs.seed }}
+
+      - name: Report output sizes
+        run: ls -lh nnue_pet_dragon_fp32.bin nnue_pet_dragon_quantized.bin
+
+      - name: Upload trained network as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nnue-pet-dragon-h${{ inputs.hidden_size }}-a${{ inputs.accumulator_size }}-e${{ inputs.epochs }}
+          path: |
+            nnue_pet_dragon_fp32.bin
+            nnue_pet_dragon_quantized.bin
+          retention-days: 30
