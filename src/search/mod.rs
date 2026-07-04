@@ -93,7 +93,7 @@ pub struct SearchInfo {
     /// Time allocated for this move in milliseconds
     pub time_allocated_ms: u64,
     /// Time when search started
-    pub start_time: std::time::Instant,
+    pub start_time: web_time::Instant,
     /// Hard stop flag — set when time runs out or stop command received
     pub stop: bool,
 
