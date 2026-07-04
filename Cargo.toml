@@ -35,6 +35,11 @@ js-sys = { version = "0.3", optional = true }
 # Also optional — only needed for WASM target
 getrandom = { version = "0.2", features = ["std"] }
 
+# NNUE training + inference (Phase 16). Zero-dependency, pure Rust; upstream
+# confirms WASM support out of the box (unlike pyrrhic-rs, no libc dep) —
+# lives in ordinary [dependencies], no wasm32 exclusion needed.
+noru = "2.2"
+
 # ── Platform-specific dependencies ────────────────────────────────────────────
 # pyrrhic-rs: Syzygy tablebase probing — native targets only.
 # pyrrhic-rs uses libc, which is incompatible with wasm32.
