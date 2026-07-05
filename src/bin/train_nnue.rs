@@ -38,7 +38,7 @@
 
 use std::env;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::time::Instant;
 
 use noru::config::{Activation, NnueConfig};
