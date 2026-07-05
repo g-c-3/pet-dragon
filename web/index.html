@@ -103,8 +103,6 @@
     width: 100%;
   }
 
-WHERE: web/index.html
-
   /* ── Coordinates ────────────────────────────────────────────────────── */
   .coords-rank {
     position: absolute;
@@ -132,7 +130,7 @@ WHERE: web/index.html
     color: #555;
     font-weight: 600;
   }
-
+  
   /* ── Board ──────────────────────────────────────────────────────────── */
   #board {
     width: 100%;
@@ -140,9 +138,10 @@ WHERE: web/index.html
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     border: 2px solid #333;
-    border-radius: 4px;
+    border-radius: 6px;
     overflow: hidden;
     user-select: none;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.5);
   }
 
   .sq {
