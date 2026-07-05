@@ -112,7 +112,21 @@ fn load_rows(input_files: &str) -> Vec<Row> {
         let mut kept = 0usize;
         let mut skipped = 0usize;
         for line in reader.lines() {
-            let line = line.unwrap_or_else(|e| panic!("read error in {path}: {e}"));
+            // A read error here (most commonly invalid UTF-8 in a truncated
+            // final line, e.g. from a process killed mid-write by a Kaggle
+            // session time limit) is treated as a single bad row, not a
+            // fatal error — an interrupted writer producing one garbled
+            // tail line says nothing about the integrity of the rest of
+            // the file, and panicking here would discard every good row
+            // already read over one recoverable tail issue.
+            let line = match line {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("{path}: skipping unreadable line ({e})");
+                    skipped += 1;
+                    continue;
+                }
+            };
             match parse_line(&line) {
                 Some(row) => {
                     kept += 1;
