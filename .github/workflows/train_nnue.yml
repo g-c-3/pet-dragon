@@ -152,7 +152,7 @@ WHERE: .github/workflows/train_nnue.yml
         run: >
           ./target/release/train_nnue
           nnue_pet_dragon
-          "${{ steps.locate.outputs.selfplay_file }},${{ steps.locate.outputs.lichess_file }}"
+          "${{ steps.locate.outputs.selfplay_files }},${{ steps.locate.outputs.lichess_file }}"
           ${{ inputs.epochs }}
           ${{ inputs.learning_rate }}
           ${{ inputs.batch_size }}
