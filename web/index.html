@@ -9,20 +9,20 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
-    background: #0d0d0d;
+    background: #0a0a0a;
     color: #e8e8e8;
     font-family: 'Segoe UI', system-ui, sans-serif;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 16px 8px 32px;
+    padding: 20px 8px 32px;
   }
 
   /* ── Header ─────────────────────────────────────────────────────────── */
   header {
     text-align: center;
-    margin-bottom: 18px;
+    margin-bottom: 16px;
   }
   header h1 {
     font-size: clamp(1.4rem, 5vw, 2rem);
@@ -39,6 +39,53 @@
     margin-top: 3px;
   }
 
+  /* ── App card ───────────────────────────────────────────────────────── */
+  /* Elevated panel wrapping players/status/board/controls, giving the page
+     a "designed app" feel instead of loose elements on a flat background. */
+  #app-card {
+    width: min(92vw, 480px);
+    background: #141414;
+    border: 1px solid #262626;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    padding: 18px 16px 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* ── Player panels ──────────────────────────────────────────────────── */
+  #players {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .player-panel {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #1b1b1b;
+    border: 1px solid #2a2a2a;
+    border-radius: 10px;
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  }
+  .player-panel.active {
+    border-color: #c8a96e;
+    background: #201a10;
+    box-shadow: 0 0 0 1px rgba(200,169,110,0.25) inset;
+  }
+  .player-icon { font-size: 1.25rem; line-height: 1; }
+  .player-name {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: #bbb;
+    transition: color 0.2s;
+  }
+  .player-panel.active .player-name { color: #f0d08a; }
+
   /* ── Status bar ─────────────────────────────────────────────────────── */
   #status {
     font-size: 0.92rem;
@@ -53,8 +100,10 @@
   /* ── Board wrapper ──────────────────────────────────────────────────── */
   #board-wrap {
     position: relative;
-    width: min(92vw, 480px);
+    width: 100%;
   }
+
+WHERE: web/index.html
 
   /* ── Coordinates ────────────────────────────────────────────────────── */
   .coords-rank {
