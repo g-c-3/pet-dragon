@@ -105,20 +105,45 @@ jobs:
           run-id: ${{ inputs.lichess_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/lichess
-
-      - name: Locate downloaded data files
+          
+      - name: Locate self-play data files
         id: locate
+        # Combines two sources: (a) GH Actions artifacts downloaded above
+        # (if selfplay_run_id was given) and (b) self-play files already
+        # committed to the repo, e.g. from the Kaggle notebook (if
+        # selfplay_paths was given). At least one source must yield files.
         run: |
-          SELFPLAY_FILE=$(find data/selfplay -name '*.txt' | head -n1)
+          FILES=()
+          if [ -d data/selfplay ]; then
+            while IFS= read -r f; do FILES+=("$f"); done < <(find data/selfplay -name '*.txt')
+          fi
+          if [ -n "${{ inputs.selfplay_paths }}" ]; then
+            IFS=',' read -ra PATHS <<< "${{ inputs.selfplay_paths }}"
+            for p in "${PATHS[@]}"; do
+              p=$(echo "$p" | xargs)
+              if [ ! -f "$p" ]; then
+                echo "ERROR: committed self-play path not found in checkout: $p"
+                exit 1
+              fi
+              FILES+=("$p")
+            done
+          fi
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "ERROR: no self-play data files found — provide selfplay_run_id and/or selfplay_paths"
+            exit 1
+          fi
+          SELFPLAY_FILES=$(IFS=,; echo "${FILES[*]}")
           LICHESS_FILE=$(find data/lichess -name '*.txt' | head -n1)
-          if [ -z "$SELFPLAY_FILE" ] || [ -z "$LICHESS_FILE" ]; then
-            echo "ERROR: could not find a .txt data file in one of the downloaded artifacts"
+          if [ -z "$LICHESS_FILE" ]; then
+            echo "ERROR: could not find lichess data file"
             find data -type f
             exit 1
           fi
-          echo "selfplay_file=$SELFPLAY_FILE" >> "$GITHUB_OUTPUT"
+          echo "selfplay_files=$SELFPLAY_FILES" >> "$GITHUB_OUTPUT"
           echo "lichess_file=$LICHESS_FILE" >> "$GITHUB_OUTPUT"
-          wc -l "$SELFPLAY_FILE" "$LICHESS_FILE"
+          wc -l $(echo "$SELFPLAY_FILES" | tr ',' ' ') "$LICHESS_FILE"
+
+WHERE: .github/workflows/train_nnue.yml
 
       - name: Build train_nnue binary
         run: cargo build --release --bin train_nnue
