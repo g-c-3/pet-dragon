@@ -428,13 +428,48 @@ function getStatus(fen, board) {
   return side === 'w' ? "White to move" : "Black to move";
 }
 
+// ── Coordinate labels ───────────────────────────────────────────────────────
+// Derived directly from the same square-iteration order render() uses to fill
+// the grid (display=63..0, sq = flipped ? 63-display : display), rather than
+// hardcoded a..h/1..8, so labels stay correct even if that iteration order
+// is ever changed.
+function renderCoords() {
+  const rankEl = document.getElementById('coords-rank');
+  const fileEl = document.getElementById('coords-file');
+  rankEl.innerHTML = '';
+  fileEl.innerHTML = '';
+
+  for (let row = 0; row < 8; row++) {
+    const k  = row * 8;
+    const sq = flipped ? k : 63 - k;
+    const el = document.createElement('div');
+    el.className   = 'coord';
+    el.textContent = String(rank(sq) + 1);
+    rankEl.appendChild(el);
+  }
+  for (let col = 0; col < 8; col++) {
+    const k  = 56 + col;
+    const sq = flipped ? k : 63 - k;
+    const el = document.createElement('div');
+    el.className   = 'coord';
+    el.textContent = 'abcdefgh'[file(sq)];
+    fileEl.appendChild(el);
+  }
+}
+
 // ── Board render ──────────────────────────────────────────────────────────────
 function render() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
+  renderCoords();
 
   const board    = parseFen(fen);
   const side     = sideToMove(fen);
+
+  document.getElementById('panel-engine').classList.toggle('active', side !== humanSide);
+  document.getElementById('panel-human').classList.toggle('active', side === humanSide);
+  document.getElementById('panel-human').querySelector('.player-name').textContent =
+    humanSide === 'w' ? 'You (White)' : 'You (Black)';
   const legal    = legal_moves_from_fen(fen).split(' ').filter(Boolean);
   const legalTo  = selected !== null
     ? new Set(legal.filter(m => m.slice(0,2) === sqName(selected)).map(m => m.slice(2,4)))
