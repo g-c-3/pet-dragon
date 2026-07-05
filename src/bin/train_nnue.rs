@@ -201,6 +201,15 @@ fn main() {
         total / idx.len() as f32
     };
 
+    // Track the best-validation snapshot separately from the live training
+    // state — a network trained past its generalization point (val_loss
+    // rising while train_loss keeps falling) is the classic small-dataset
+    // overfit failure mode, and shipping the *final* epoch unconditionally
+    // would ship the most-overfit checkpoint rather than the best one.
+    let mut best_val_loss = f32::INFINITY;
+    let mut best_epoch = 0usize;
+    let mut best_weights: Option<TrainableWeights> = None;
+
     let start = Instant::now();
     for epoch in 0..epochs {
         let mut order = train_idx.to_vec();
@@ -215,25 +224,35 @@ fn main() {
                 let s = &samples[i];
                 let fwd = weights.forward(&s.stm_features, &s.nstm_features, &[]);
                 weights.backward_bce(s, &fwd, &mut grad);
-            }
+                }
             weights.adam_update(&grad, &mut state, lr, batch.len() as f32);
         }
 
         let train_loss = bce_loss(&weights, train_idx);
         let val_loss = bce_loss(&weights, val_idx);
+        let marker = if val_loss < best_val_loss { " (new best)" } else { "" };
         eprintln!(
-            "epoch {}/{epochs}: train_loss={train_loss:.5} val_loss={val_loss:.5} elapsed={:.1}s",
+            "epoch {}/{epochs}: train_loss={train_loss:.5} val_loss={val_loss:.5} elapsed={:.1}s{marker}",
             epoch + 1,
             start.elapsed().as_secs_f32()
         );
+        if val_loss < best_val_loss {
+            best_val_loss = val_loss;
+            best_epoch = epoch + 1;
+            best_weights = Some(weights.clone());
+        }
     }
 
-    let fp32_path = format!("{output_prefix}_fp32.bin");
-    fs::write(&fp32_path, weights.save_to_bytes()).expect("failed to write fp32 checkpoint");
+    eprintln!("best epoch: {best_epoch}/{epochs} (val_loss={best_val_loss:.5}) — saving this checkpoint");
+    let best_weights = best_weights.expect("at least one epoch must have run");
+
+let fp32_path = format!("{output_prefix}_fp32.bin");
+    fs::write(&fp32_path, best_weights.save_to_bytes()).expect("failed to write fp32 checkpoint");
     eprintln!("wrote {fp32_path}");
 
-    let quantized = weights.quantize();
+    let quantized = best_weights.quantize();
     let quant_path = format!("{output_prefix}_quantized.bin");
     fs::write(&quant_path, quantized.save_to_bytes()).expect("failed to write quantized weights");
     eprintln!("wrote {quant_path}");
+
 }
