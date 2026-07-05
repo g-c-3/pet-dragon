@@ -289,6 +289,7 @@
   #info a { color: #777; }
 </style>
 </head>
+  
 <body>
 
 <header>
@@ -296,43 +297,58 @@
   <p>Original chess variant · Every game starts differently</p>
 </header>
 
-<div id="status">Loading engine…</div>
+<div id="app-card">
 
-<div id="board-wrap">
-  <!-- Rank labels injected by JS -->
-  <div id="board"></div>
-  <!-- File labels injected by JS -->
-</div>
-
-<div id="controls">
-  <button id="btn-new">New Game</button>
-  <button id="btn-flip">Flip Board</button>
-  <button id="btn-undo">Undo</button>
-  <div id="side-select">
-    Play as:
-    <label><input type="radio" name="side" value="w" checked> White</label>
-    <label><input type="radio" name="side" value="b"> Black</label>
+  <div id="players">
+    <div class="player-panel" id="panel-engine">
+      <span class="player-icon">🐉</span>
+      <span class="player-name">Pet Dragon Engine</span>
+    </div>
+    <div class="player-panel" id="panel-human">
+      <span class="player-icon">🧑</span>
+      <span class="player-name">You</span>
+    </div>
   </div>
-  <div id="time-wrap">
-    Engine:
-    <select id="time-sel">
-      <option value="500">0.5s</option>
-      <option value="1000" selected>1s</option>
-      <option value="2000">2s</option>
-      <option value="5000">5s</option>
-      <option value="10000">10s</option>
-    </select>
+
+  <div id="status">Loading engine…</div>
+
+  <div id="board-wrap">
+    <div class="coords-rank" id="coords-rank"></div>
+    <div id="board"></div>
+    <div class="coords-file" id="coords-file"></div>
   </div>
-</div>
 
-<!-- Promotion picker -->
-<div id="promo-modal">
-  <div id="promo-box"></div>
-</div>
+  <div id="controls">
+    <button id="btn-new">🆕 New Game</button>
+    <button id="btn-flip">🔁 Flip Board</button>
+    <button id="btn-undo">↩️ Undo</button>
+    <div id="side-select">
+      Play as:
+      <label><input type="radio" name="side" value="w" checked> White</label>
+      <label><input type="radio" name="side" value="b"> Black</label>
+    </div>
+    <div id="time-wrap">
+      Engine:
+      <select id="time-sel">
+        <option value="500">0.5s</option>
+        <option value="1000" selected>1s</option>
+        <option value="2000">2s</option>
+        <option value="5000">5s</option>
+        <option value="10000">10s</option>
+      </select>
+    </div>
+  </div>
 
-<div id="info">
-  Pet Dragon by <strong>Gokul Chandar</strong> · Engine: Claude (Anthropic) · GPL v3<br>
-  <a href="https://github.com/g-c-3/pet-dragon">github.com/g-c-3/pet-dragon</a>
+  <!-- Promotion picker -->
+  <div id="promo-modal">
+    <div id="promo-box"></div>
+  </div>
+
+  <div id="info">
+    Pet Dragon by <strong>Gokul Chandar</strong> · Engine: Claude (Anthropic) · GPL v3<br>
+    <a href="https://github.com/g-c-3/pet-dragon">github.com/g-c-3/pet-dragon</a>
+  </div>
+
 </div>
 
 <script type="module">
