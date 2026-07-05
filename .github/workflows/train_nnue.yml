@@ -11,8 +11,14 @@ on:
   workflow_dispatch:
     inputs:
       selfplay_run_id:
-        description: "Run ID of the selfplay.yml run to pull selfplay_data.txt from"
-        required: true
+        description: "Optional: comma-separated Run ID(s) of selfplay.yml runs to include. Leave blank if only using Kaggle-generated files via selfplay_paths below."
+        required: false
+        default: ""
+        type: string
+      selfplay_paths:
+        description: "Optional: comma-separated repo-relative paths to committed self-play .txt files (e.g. data/selfplay/selfplay_data_seed0_n3000.txt from the Kaggle notebook). Leave blank if only using selfplay_run_id above."
+        required: false
+        default: ""
         type: string
       lichess_run_id:
         description: "Run ID of the lichess_sample.yml run to pull lichess_sample.txt from"
