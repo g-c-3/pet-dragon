@@ -83,12 +83,21 @@ jobs:
         with:
           key: train-nnue-release
 
-      - name: Download self-play data artifact
-        uses: actions/download-artifact@v4
-        with:
-          run-id: ${{ inputs.selfplay_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: data/selfplay
+      - name: Download self-play data artifacts
+        # Optional — only runs if selfplay_run_id was provided. Loops over a
+        # comma-separated list so multiple GH Actions self-play batches can
+        # be combined in one training run.
+        if: inputs.selfplay_run_id != ''
+        run: |
+          mkdir -p data/selfplay
+          IFS=',' read -ra RUN_IDS <<< "${{ inputs.selfplay_run_id }}"
+          for rid in "${RUN_IDS[@]}"; do
+            rid=$(echo "$rid" | xargs)
+            echo "Downloading self-play artifact from run $rid"
+            gh run download "$rid" --repo g-c-3/pet-dragon --dir "data/selfplay/run_${rid}"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Lichess sample artifact
         uses: actions/download-artifact@v4
