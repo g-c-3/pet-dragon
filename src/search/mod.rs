@@ -230,7 +230,15 @@ impl SearchInfo {
         if self.stop || self.stop_flag.load(Ordering::Relaxed) {
             return true;
         }
-        self.nodes & 2047 == 0 && self.elapsed_ms() >= self.time_allocated_ms
+        // Sampled every 256 nodes (was 2048) — Phase 16.6's NNUE-blended
+        // eval is heavier per node than pure HCE, so the old interval could
+        // let a single uninterrupted burst run well past the time budget
+        // before the next check (see test_iterative_deepening_respects_time,
+        // Session 33 CI failure: 881-node search never crossed a 2048
+        // boundary, so no mid-search check ever fired). Instant::now() is
+        // cheap enough that checking 8x more often has no measurable search
+        // overhead.
+        self.nodes & 255 == 0 && self.elapsed_ms() >= self.time_allocated_ms
     }
 
     /// Milliseconds elapsed since search started
