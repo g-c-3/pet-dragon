@@ -71,6 +71,28 @@ pub fn evaluate(pos: &Position) -> i32 {
     score
 }
 
+/// Weight given to the NNUE score in `evaluate_blended()`, 0.0=pure HCE,
+/// 1.0=pure NNUE. Conservative starting value (D23) — the first trained
+/// network (Phase 16.5) has val_loss=0.538, still well above a confident
+/// prediction, so HCE (borrowed Ethereal weights, proven to ~2400-2600 Elo)
+/// stays dominant until real Elo testing justifies raising this.
+const NNUE_BLEND_WEIGHT: f32 = 0.25;
+
+/// Evaluate a position blending the full HCE (`evaluate()`) with the
+/// trained Pet Dragon NNUE (Phase 16.6), both already in centipawns from
+/// the side-to-move's perspective.
+///
+/// This is the function actually wired into search (via
+/// `search::alpha_beta::evaluate()`); `evaluate()` itself stays pure-HCE
+/// and untouched so its existing test suite keeps validating HCE in
+/// isolation.
+pub fn evaluate_blended(pos: &Position) -> i32 {
+    let hce = evaluate(pos);
+    let nnue = crate::nnue::inference::evaluate_nnue(pos);
+    let blended = (1.0 - NNUE_BLEND_WEIGHT) * hce as f32 + NNUE_BLEND_WEIGHT * nnue as f32;
+    blended.round() as i32
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
