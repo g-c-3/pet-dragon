@@ -23,3 +23,4 @@
 
 pub mod features;
 pub mod delta;
+pub mod inference;
