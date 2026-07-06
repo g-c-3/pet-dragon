@@ -50,6 +50,14 @@ pub fn iterative_deepening(
 
     let mut tm = TimeManager::new(soft_ms, hard_ms);
 
+    // Wire the real hard limit into SearchInfo so alpha_beta's in-search
+    // is_time_up() check (every 256 nodes) has an actual budget to compare
+    // against, instead of SearchInfo::new()'s stale 5000ms default — see
+    // Session 33/34: this was previously dead code for every real search,
+    // masked until NNUE's heavier per-node eval exposed it via
+    // test_iterative_deepening_respects_time.
+    info.time_allocated_ms = hard_ms;
+
     // Override with fixed depth/nodes if set
     let max_depth = if tc.depth > 0 {
         tc.depth
