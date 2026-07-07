@@ -131,6 +131,7 @@ fn play_one_game(seed: u64) -> Vec<Sample> {
         let stm_color = pos.side_to_move;
 
         let mut info = SearchInfo::new();
+        info.print_info = false; // silent — see SearchInfo doc comment (Session 39)
         let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
 
         if result.best_move == Move::NULL {
