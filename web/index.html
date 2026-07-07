@@ -302,15 +302,55 @@
   }
   #info a { color: #777; }
 
-  /* ── AI self-play toggle ────────────────────────────────────────────── */
+  /* ── AI self-play toggle row (split: toggle | win probability) ──────── */
   #ai-toggle-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 12px;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  #ai-toggle-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     font-size: 0.86rem;
     color: #bbb;
     font-weight: 600;
+    flex-shrink: 0;
+  }
+  #ai-toggle-divider {
+    width: 1px;
+    align-self: stretch;
+    background: #2a2a2a;
+  }
+  #winprob {
+    flex: 1;
+    min-width: 130px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  #winprob-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: #999;
+    font-weight: 600;
+  }
+  #winprob-labels b { color: #e8d9b5; font-weight: 700; }
+  #winprob-bar {
+    width: 100%;
+    height: 7px;
+    border-radius: 4px;
+    background: #2a2a2a;
+    overflow: hidden;
+  }
+  #winprob-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #f0d08a, #c8a96e);
+    transition: width 0.4s ease;
   }
   .switch {
     position: relative;
@@ -356,11 +396,21 @@
 <div id="app-card">
 
   <div id="ai-toggle-row">
-    <label class="switch">
-      <input type="checkbox" id="ai-toggle">
-      <span class="slider"></span>
-    </label>
-    <span>AI Self-Play (engine plays both sides)</span>
+    <div id="ai-toggle-left">
+      <label class="switch">
+        <input type="checkbox" id="ai-toggle">
+        <span class="slider"></span>
+      </label>
+      <span>AI Self-Play</span>
+    </div>
+    <div id="ai-toggle-divider"></div>
+    <div id="winprob">
+      <div id="winprob-labels">
+        <span><span id="winprob-left-name">You</span> <b id="winprob-left-pct">50%</b></span>
+        <span><b id="winprob-right-pct">50%</b> <span id="winprob-right-name">Engine</span></span>
+      </div>
+      <div id="winprob-bar"><div id="winprob-fill"></div></div>
+    </div>
   </div>
 
   <div id="players">
@@ -535,6 +585,7 @@ function render() {
   document.getElementById('panel-human').classList.toggle('active', side === humanSide);
   document.getElementById('panel-human').querySelector('.player-name').textContent =
     humanSide === 'w' ? 'You (White)' : 'You (Black)';
+  updateWinProb(board);
   const legal    = legal_moves_from_fen(fen).split(' ').filter(Boolean);
   const legalTo  = selected !== null
     ? new Set(legal.filter(m => m.slice(0,2) === sqName(selected)).map(m => m.slice(2,4)))
@@ -588,7 +639,39 @@ function render() {
   }
 }
 
-// ── Square click handler ──────────────────────────────────────────────────────
+// ── Win probability meter ──────────────────────────────────────────────────────
+// The engine's WASM API only exposes a best move (search_from_fen), not a
+// numeric evaluation score, so this is a material-based estimate rather than
+// a true engine evaluation. It recomputes from the current position every
+// time render() runs, so it updates dynamically after every move — by either
+// side, including engine-vs-engine in AI Self-Play mode.
+const PIECE_VALUE = { p: 100, n: 320, b: 330, r: 500, q: 900 }; // centipawns; king excluded
+
+function updateWinProb(board) {
+  let whiteMaterial = 0, blackMaterial = 0;
+  for (const p of board) {
+    if (!p) continue;
+    const v = PIECE_VALUE[p.toLowerCase()];
+    if (!v) continue; // skip kings
+    if (p === p.toUpperCase()) whiteMaterial += v; else blackMaterial += v;
+  }
+
+  const diff = whiteMaterial - blackMaterial; // positive favours White
+  // Standard-ish logistic curve mapping centipawn diff → win probability.
+  const whitePct = Math.round(100 / (1 + Math.exp(-diff / 300)));
+  const blackPct = 100 - whitePct;
+
+  const leftName  = aiMode ? 'White'  : (humanSide === 'w' ? 'You' : 'Engine');
+  const rightName = aiMode ? 'Black'  : (humanSide === 'w' ? 'Engine' : 'You');
+  const leftPct   = humanSide === 'w' || aiMode ? whitePct : blackPct;
+  const rightPct  = 100 - leftPct;
+
+  document.getElementById('winprob-left-name').textContent  = leftName;
+  document.getElementById('winprob-right-name').textContent = rightName;
+  document.getElementById('winprob-left-pct').textContent   = leftPct + '%';
+  document.getElementById('winprob-right-pct').textContent  = rightPct + '%';
+  document.getElementById('winprob-fill').style.width = whitePct + '%';
+}
 function onSquareClick(sq) {
   if (aiMode) return;
   if (engineBusy) return;
@@ -903,6 +986,7 @@ document.getElementById('btn-undo').addEventListener('click', () => {
 document.getElementById('ai-toggle').addEventListener('change', (e) => {
   aiMode = e.target.checked;
   document.getElementById('side-select').classList.toggle('disabled', aiMode);
+  updateWinProb(parseFen(fen)); // labels (You/Engine vs White/Black) depend on aiMode
 
   if (aiMode) {
     // Turning self-play on: kick off a move if nothing is already running.
