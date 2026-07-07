@@ -145,8 +145,12 @@ pub fn iterative_deepening(
                       } else { 0 },
         };
 
-        // Print UCI info for this depth
-        println!("{}", result.to_uci_info());
+        // Print UCI info for this depth — silent-search callers (selfplay,
+        // match_runner) set print_info = false to avoid flooding stdout
+        // across thousands of internal searches (see SearchInfo doc comment).
+        if info.print_info {
+            println!("{}", result.to_uci_info());
+        }
 
         // Check if we should stop
         if tm.update(elapsed, best_move, best_score, depth) {
