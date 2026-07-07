@@ -1,0 +1,40 @@
+name: NNUE Eval Diagnostic
+
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed.
+#
+# Phase 17.5d: prints HCE vs raw quantized-NNUE eval for a handful of
+# positions with an unambiguous correct evaluation, to check calibration
+# directly rather than inferring it from match_runner Elo results alone.
+# See src/bin/eval_diag.rs for details and D29 for why this was needed.
+on:
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  diagnostic:
+    name: Run NNUE Eval Diagnostic
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: eval-diag-release
+
+      - name: Build eval_diag binary
+        run: cargo build --release --bin eval_diag
+
+      - name: Run diagnostic
+        run: ./target/release/eval_diag
