@@ -285,6 +285,7 @@ fn main() {
                 weights.backward_bce(s, &fwd, &mut grad);
                 }
             weights.adam_update(&grad, &mut state, lr, batch.len() as f32);
+            apply_weight_decay(&mut weights, lr, weight_decay);
         }
 
         let train_loss = bce_loss(&weights, train_idx);
