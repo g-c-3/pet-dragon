@@ -215,6 +215,10 @@ fn cmd_uci() {
     println!("option name UCI_Chess960 type check default false");
     // Phase 15: Syzygy tablebase path (native only; WASM builds ignore this)
     println!("option name SyzygyPath type string default <empty>");
+    // Phase 17: NNUE/HCE blend weight as a percentage — 0 = pure HCE,
+    // 100 = pure NNUE. Default matches D23's fixed constant (25%), now
+    // runtime-adjustable for Elo A/B testing from one binary.
+    println!("option name NNUEWeight type spin default 25 min 0 max 100");
     println!();
     println!("uciok");
 }
