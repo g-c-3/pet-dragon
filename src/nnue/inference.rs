@@ -50,6 +50,18 @@ use std::sync::OnceLock;
 use noru::network::{forward, Accumulator, NnueWeights};
 use noru::quant::OUTPUT_SCALE;
 
+/// Hard ceiling on the magnitude of a raw NNUE evaluation, applied before
+/// blending. Without this, an unregularized network can produce arbitrarily
+/// large logits (BCE loss has no penalty for pushing output-layer weights
+/// toward infinity on cleanly-separable training examples) — Session 43's
+/// eval_diag confirmed exactly this: the Session 42 retrained network
+/// scored the symmetric start position at +2425cp (should be ~0) and a
+/// single queen swing at ~4000cp (HCE: ~976cp), a real, not cosmetic,
+/// miscalibration (D30). 1500cp is comfortably above HCE's typical material
+/// swings (a queen is ~950-1000cp) while still preventing the network from
+/// overriding search with implausible certainty.
+const NNUE_EVAL_CLAMP_CP: i32 = 1500;
+
 use crate::nnue::features::extract_stm_nstm_features;
 use crate::position::Position;
 
