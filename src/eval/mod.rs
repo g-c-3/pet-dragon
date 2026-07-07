@@ -214,6 +214,29 @@ mod tests {
     }
 
     #[test]
+    fn test_nnue_weight_setter_getter_and_blend_at_zero() {
+        // Deliberately one test function, not several: NNUE_BLEND_WEIGHT_PCT
+        // is a process-global atomic and cargo test runs functions in
+        // parallel threads, so interleaved set/read across separate test
+        // functions would be flaky. Exercising set→assert sequentially here
+        // avoids that.
+        setup();
+        set_nnue_weight_pct(0);
+        assert_eq!(nnue_weight(), 0.0);
+
+        let pos = Position::start_pos().unwrap();
+        let hce = evaluate(&pos);
+        let blended = evaluate_blended(&pos);
+        assert_eq!(blended, hce, "weight=0 must equal pure HCE exactly (NNUE skipped)");
+
+        set_nnue_weight_pct(200); // above max
+        assert_eq!(nnue_weight(), 1.0, "should clamp to 100%");
+
+        set_nnue_weight_pct(25); // restore D23 default
+        assert_eq!(nnue_weight(), 0.25);
+    }
+
+    #[test]
     fn test_evaluate_phase_zero_no_king_safety() {
         setup();
         // In phase 0 (KvK), king safety = 0, score dominated by tempo + PST
