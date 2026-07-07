@@ -71,16 +71,35 @@ pub fn evaluate(pos: &Position) -> i32 {
     score
 }
 
-/// Weight given to the NNUE score in `evaluate_blended()`, 0.0=pure HCE,
-/// 1.0=pure NNUE. Conservative starting value (D23) — the first trained
-/// network (Phase 16.5) has val_loss=0.538, still well above a confident
-/// prediction, so HCE (borrowed Ethereal weights, proven to ~2400-2600 Elo)
-/// stays dominant until real Elo testing justifies raising this.
-const NNUE_BLEND_WEIGHT: f32 = 0.25;
+/// Runtime-configurable NNUE blend weight, stored as an integer percentage
+/// (0-100) rather than an f32 so it round-trips exactly through an integer
+/// UCI `spin` option. 0 = pure HCE, 100 = pure NNUE. Was a compile-time
+/// `const` (D23) — Phase 17 needs to A/B pure-HCE vs blended search from
+/// the *same* binary for real Elo testing (cutechess/fastchess-style
+/// matches via `setoption`), which a hardcoded constant can't do without
+/// maintaining two build configurations. Relaxed ordering is fine here —
+/// same benign-race reasoning as the lock-free TT (D4): worst case is one
+/// search node reads a value one `setoption` call stale.
+static NNUE_BLEND_WEIGHT_PCT: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(25);
+
+/// Set the NNUE blend weight as a percentage (0-100). Out-of-range values
+/// are clamped rather than rejected, matching the existing `Hash`/`Threads`
+/// UCI option pattern in `main.rs`. Called from
+/// `setoption name NNUEWeight value <N>`.
+pub fn set_nnue_weight_pct(pct: u32) {
+    NNUE_BLEND_WEIGHT_PCT.store(pct.min(100), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Current NNUE blend weight as a fraction in `0.0..=1.0`.
+pub fn nnue_weight() -> f32 {
+    NNUE_BLEND_WEIGHT_PCT.load(std::sync::atomic::Ordering::Relaxed) as f32 / 100.0
+}
 
 /// Evaluate a position blending the full HCE (`evaluate()`) with the
 /// trained Pet Dragon NNUE (Phase 16.6), both already in centipawns from
-/// the side-to-move's perspective.
+/// the side-to-move's perspective. Blend weight is runtime-configurable
+/// (D23 default 25%, see `set_nnue_weight_pct`).
 ///
 /// This is the function actually wired into search (via
 /// `search::alpha_beta::evaluate()`); `evaluate()` itself stays pure-HCE
@@ -88,8 +107,14 @@ const NNUE_BLEND_WEIGHT: f32 = 0.25;
 /// isolation.
 pub fn evaluate_blended(pos: &Position) -> i32 {
     let hce = evaluate(pos);
+    let weight = nnue_weight();
+    if weight <= 0.0 {
+        // Skip the NNUE forward pass entirely at weight 0 — matters for a
+        // pure-HCE arm in an Elo A/B match, which should pay zero NNUE cost.
+        return hce;
+    }
     let nnue = crate::nnue::inference::evaluate_nnue(pos);
-    let blended = (1.0 - NNUE_BLEND_WEIGHT) * hce as f32 + NNUE_BLEND_WEIGHT * nnue as f32;
+    let blended = (1.0 - weight) * hce as f32 + weight * nnue as f32;
     blended.round() as i32
 }
 
