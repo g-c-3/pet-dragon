@@ -159,10 +159,21 @@ fn main() {
     let accumulator_size: usize = args.get(7).and_then(|s| s.parse().ok()).unwrap_or(256);
     let lambda: f32 = args.get(8).and_then(|s| s.parse().ok()).unwrap_or(0.7);
     let seed: u64 = args.get(9).and_then(|s| s.parse().ok()).unwrap_or(42);
+    // D30/D31: decoupled (AdamW-style) weight decay, applied every batch
+    // step directly to the weight tensors (not biases — standard practice,
+    // biases don't drive the runaway-logit-magnitude failure mode weight
+    // decay is meant to prevent). Session 42's network had none at all,
+    // which let output-layer weights grow unbounded while BCE loss kept
+    // improving (confirmed via eval_diag.rs: +2425cp at the symmetric
+    // start position, ~4000cp queen swing vs HCE's ~976cp). Default 1e-4
+    // is a conservative starting point for this network's small
+    // hidden_size=32 scale — not yet tuned.
+    let weight_decay: f32 = args.get(10).and_then(|s| s.parse().ok()).unwrap_or(1e-4);
 
     eprintln!(
         "config: epochs={epochs} lr={lr} batch_size={batch_size} hidden_size={hidden_size} \
-         accumulator_size={accumulator_size} lambda={lambda} seed={seed}"
+         accumulator_size={accumulator_size} lambda={lambda} seed={seed} \
+         weight_decay={weight_decay}"
     );
 
     let rows = load_rows(input_files);
