@@ -215,6 +215,40 @@ fn main() {
     let mut weights = TrainableWeights::init_random(config.clone(), &mut rng);
     let mut state = AdamState::new(config.clone());
 
+    // Decoupled weight decay (AdamW-style): shrinks every weight tensor by
+    // `(1 - lr * weight_decay)` after each Adam step, applied to weights
+    // only, never biases. noru::trainer::TrainableWeights exposes all
+    // tensors as `pub` fields (verified against noru 2.2.0 source — no
+    // built-in weight_decay param on `adam_update` itself), so this is
+    // implemented here rather than assuming crate support that doesn't
+    // exist.
+    fn apply_weight_decay(w: &mut TrainableWeights, lr: f32, weight_decay: f32) {
+        if weight_decay <= 0.0 {
+            return;
+        }
+        let factor = 1.0 - lr * weight_decay;
+        for row in w.ft_weight.iter_mut() {
+            for v in row.iter_mut() {
+                *v *= factor;
+            }
+        }
+        for layer in w.hidden_weights.iter_mut() {
+            for row in layer.iter_mut() {
+                for v in row.iter_mut() {
+                    *v *= factor;
+                }
+            }
+        }
+        for v in w.output_weight.iter_mut() {
+            *v *= factor;
+        }
+        for row in w.dense_to_acc.iter_mut() {
+            for v in row.iter_mut() {
+                *v *= factor;
+            }
+        }
+    }
+
     let bce_loss = |weights: &TrainableWeights, idx: &[usize]| -> f32 {
         let mut total = 0.0f32;
         for &i in idx {
