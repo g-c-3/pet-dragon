@@ -81,7 +81,7 @@ pub fn evaluate(pos: &Position) -> i32 {
 /// same benign-race reasoning as the lock-free TT (D4): worst case is one
 /// search node reads a value one `setoption` call stale.
 static NNUE_BLEND_WEIGHT_PCT: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(25);
+    std::sync::atomic::AtomicU32::new(0);
 
 /// Set the NNUE blend weight as a percentage (0-100). Out-of-range values
 /// are clamped rather than rejected, matching the existing `Hash`/`Threads`
