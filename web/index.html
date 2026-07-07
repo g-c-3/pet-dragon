@@ -86,6 +86,26 @@
   }
   .player-panel.active .player-name { color: #f0d08a; }
 
+  /* ── Captured pieces tray ───────────────────────────────────────────── */
+  .captured {
+    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-content: center;
+    gap: 2px;
+    max-width: 58%;
+  }
+  .cap-piece {
+    width: clamp(13px, 4.2vw, 18px);   /* ≈33% of the on-board piece size */
+    aspect-ratio: 1;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    flex-shrink: 0;
+    opacity: 0.92;
+  }
+
   /* ── Status bar ─────────────────────────────────────────────────────── */
   #status {
     font-size: 0.92rem;
@@ -423,10 +443,12 @@
     <div class="player-panel" id="panel-engine">
       <span class="player-icon">🐉</span>
       <span class="player-name">Pet Dragon Engine</span>
+      <div class="captured" id="captured-engine"></div>
     </div>
     <div class="player-panel" id="panel-human">
       <span class="player-icon">🧑</span>
       <span class="player-name">You</span>
+      <div class="captured" id="captured-human"></div>
     </div>
   </div>
 
@@ -592,6 +614,7 @@ function render() {
   document.getElementById('panel-human').querySelector('.player-name').textContent =
     humanSide === 'w' ? 'You (White)' : 'You (Black)';
   updateWinProb(board);
+  renderCaptured(board);
   const legal    = legal_moves_from_fen(fen).split(' ').filter(Boolean);
   const legalTo  = selected !== null
     ? new Set(legal.filter(m => m.slice(0,2) === sqName(selected)).map(m => m.slice(2,4)))
@@ -643,6 +666,64 @@ function render() {
     document.getElementById('status').textContent =
       side === 'w' ? 'White to move' : 'Black to move';
   }
+}
+
+// ── Captured pieces tray ────────────────────────────────────────────────────────
+// Pet Dragon randomizes the starting position every game, so we can't assume
+// standard counts (8 pawns, 2 rooks, etc.) — captures are found by diffing
+// each side's piece counts against that game's own startFen, not a fixed
+// standard start.
+const CAP_ORDER = ['q', 'r', 'b', 'n', 'p']; // display order, most valuable first
+
+function getPieceCounts(board) {
+  const counts = { w: {}, b: {} };
+  for (const p of board) {
+    if (!p) continue;
+    const color = p === p.toUpperCase() ? 'w' : 'b';
+    const t = p.toLowerCase();
+    counts[color][t] = (counts[color][t] || 0) + 1;
+  }
+  return counts;
+}
+
+// Pieces of `color` that were present at game start but are missing now
+// (i.e. have been captured), in CAP_ORDER, most valuable first.
+function lostPieces(color, initialCounts, currentCounts) {
+  const out = [];
+  for (const t of CAP_ORDER) {
+    const had  = (initialCounts[color] && initialCounts[color][t]) || 0;
+    const have = (currentCounts[color] && currentCounts[color][t]) || 0;
+    for (let i = 0; i < Math.max(0, had - have); i++) out.push(t);
+  }
+  return out;
+}
+
+function fillCaptured(elId, letters, color) {
+  const el = document.getElementById(elId);
+  el.innerHTML = '';
+  for (const t of letters) {
+    const d = document.createElement('div');
+    const glyph = color === 'w' ? t.toUpperCase() : t; // render in the captured piece's own color
+    d.className = 'cap-piece piece-' + glyph;
+    el.appendChild(d);
+  }
+}
+
+function renderCaptured(board) {
+  if (!startFen) return;
+  const initialCounts = getPieceCounts(parseFen(startFen));
+  const currentCounts = getPieceCounts(board);
+
+  const humanColor  = humanSide;
+  const engineColor = humanSide === 'w' ? 'b' : 'w';
+
+  // Engine's tray shows the human's pieces it has captured; the human's
+  // tray shows the engine's pieces they've captured.
+  const capturedByEngine = lostPieces(humanColor,  initialCounts, currentCounts);
+  const capturedByHuman  = lostPieces(engineColor, initialCounts, currentCounts);
+
+  fillCaptured('captured-engine', capturedByEngine, humanColor);
+  fillCaptured('captured-human',  capturedByHuman,  engineColor);
 }
 
 // ── Win probability meter ──────────────────────────────────────────────────────
