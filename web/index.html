@@ -180,15 +180,25 @@
   .piece {
     width: 88%;
     height: 88%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: clamp(1.4rem, 5.5vw, 2.6rem);
-    line-height: 1;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
     pointer-events: none;
-    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
     z-index: 1;
   }
+  .piece-K { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_klt45.svg'); }
+  .piece-Q { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_qlt45.svg'); }
+  .piece-R { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_rlt45.svg'); }
+  .piece-B { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_blt45.svg'); }
+  .piece-N { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_nlt45.svg'); }
+  .piece-P { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_plt45.svg'); }
+  .piece-k { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_kdt45.svg'); }
+  .piece-q { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_qdt45.svg'); }
+  .piece-r { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_rdt45.svg'); }
+  .piece-b { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_bdt45.svg'); }
+  .piece-n { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_ndt45.svg'); }
+  .piece-p { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_pdt45.svg'); }
 
   /* ── Controls ───────────────────────────────────────────────────────── */
   #controls {
@@ -504,8 +514,7 @@ function render() {
     // Piece
     if (board[sq]) {
       const p = document.createElement('div');
-      p.className = 'piece';
-      p.textContent = PIECES[board[sq]] || board[sq];
+      p.className = 'piece piece-' + board[sq];
       cell.appendChild(p);
     }
 
