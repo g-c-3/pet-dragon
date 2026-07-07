@@ -169,6 +169,7 @@ impl SearchInfo {
             time_allocated_ms: 5000,
             start_time:        web_time::Instant::now(),
             stop:              false,
+            print_info:        true,
             nodes:             0,
             nps:               0,
             killers:           [[Move::NULL; KILLER_COUNT]; MAX_PLY],
