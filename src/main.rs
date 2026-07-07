@@ -253,6 +253,11 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
             }
         }
         "uci_chess960" => { /* ignored */ }
+        "nnueweight" => {
+            if let Ok(pct) = value.parse::<u32>() {
+                set_nnue_weight_pct(pct);
+            }
+        }
         "syzygypath" => {
             #[cfg(not(target_arch = "wasm32"))]
             {
