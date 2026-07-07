@@ -44,6 +44,7 @@ use pet_dragon_lib::movegen::legal::apply_move_for_legality_pub;
 use pet_dragon_lib::position::Position;
 use pet_dragon_lib::position::fen::STANDARD_START_FEN;
 use pet_dragon_lib::position::zobrist::init_zobrist;
+use pet_dragon_lib::eval::set_nnue_weight_pct;
 use pet_dragon_lib::search::{
     iterative::iterative_deepening, SearchInfo,
 };
