@@ -297,6 +297,48 @@
     max-width: 480px;
   }
   #info a { color: #777; }
+
+  /* ── AI self-play toggle ────────────────────────────────────────────── */
+  #ai-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-size: 0.86rem;
+    color: #bbb;
+    font-weight: 600;
+  }
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 42px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #2a2a2a;
+    border: 1px solid #444;
+    transition: background-color 0.2s, border-color 0.2s;
+    border-radius: 24px;
+  }
+  .slider::before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 2px;
+    bottom: 2px;
+    background-color: #ccc;
+    transition: transform 0.2s, background-color 0.2s;
+    border-radius: 50%;
+  }
+  .switch input:checked + .slider { background-color: #c8a96e; border-color: #c8a96e; }
+  .switch input:checked + .slider::before { transform: translateX(18px); background-color: #141414; }
+  #side-select.disabled { opacity: 0.45; pointer-events: none; }
 </style>
 </head>
   
@@ -308,6 +350,14 @@
 </header>
 
 <div id="app-card">
+
+  <div id="ai-toggle-row">
+    <label class="switch">
+      <input type="checkbox" id="ai-toggle">
+      <span class="slider"></span>
+    </label>
+    <span>AI Self-Play (engine plays both sides)</span>
+  </div>
 
   <div id="players">
     <div class="player-panel" id="panel-engine">
@@ -383,6 +433,7 @@ let flipped    = false;       // board orientation
 let humanSide  = 'w';         // 'w' or 'b'
 let history    = [];          // stack of FEN strings for undo
 let engineBusy = false;
+let aiMode     = false;        // true = engine plays both sides (self-play)
 let pendingPromo = null;      // {from, to} awaiting promotion choice
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -535,6 +586,7 @@ function render() {
 
 // ── Square click handler ──────────────────────────────────────────────────────
 function onSquareClick(sq) {
+  if (aiMode) return;
   if (engineBusy) return;
   const side = sideToMove(fen);
   if (side !== humanSide) return; // not player's turn
@@ -761,8 +813,14 @@ function showPromoModal(isWhite) {
 
 // ── Engine move ───────────────────────────────────────────────────────────────
 async function maybeEngineMove() {
+  // Re-entrancy guard: never let two searches overlap (e.g. a toggle click
+  // landing while a search from the previous move is still resolving).
+  if (engineBusy) return;
+
   const side = sideToMove(fen);
-  if (side === humanSide) return;
+  // In normal mode the engine only moves for the non-human side.
+  // In AI self-play mode it moves for whichever side is to move, always.
+  if (!aiMode && side === humanSide) return;
 
   const legal = legal_moves_from_fen(fen).trim();
   if (!legal) return; // game over
@@ -790,6 +848,15 @@ async function maybeEngineMove() {
   fen        = applyMoveToFen(fen, bestmove);
 
   render();
+
+  // Self-play: keep going for the next side too, as long as AI mode is
+  // still on. If the switch got flipped off while this move was being
+  // calculated, this check simply stops the loop here — no crash, no
+  // orphaned timers — and control passes back to whichever side is human
+  // via the normal (side !== humanSide) path on the next move.
+  if (aiMode) {
+    setTimeout(maybeEngineMove, 10);
+  }
 }
 
 // ── New game ──────────────────────────────────────────────────────────────────
@@ -804,8 +871,9 @@ function startNewGame() {
   engineBusy = false;
   render();
 
-  // If human plays black, engine moves first
-  if (humanSide === 'b') {
+  // If human plays black, engine moves first — and in AI self-play mode
+  // the engine always moves first regardless of chosen side.
+  if (aiMode || humanSide === 'b') {
     maybeEngineMove();
   }
 }
@@ -826,6 +894,23 @@ document.getElementById('btn-undo').addEventListener('click', () => {
   lastMove = null;
   selected = null;
   render();
+});
+
+document.getElementById('ai-toggle').addEventListener('change', (e) => {
+  aiMode = e.target.checked;
+  document.getElementById('side-select').classList.toggle('disabled', aiMode);
+
+  if (aiMode) {
+    // Turning self-play on: kick off a move if nothing is already running.
+    // If a search from the previous (human/engine) turn is still in
+    // flight, maybeEngineMove's own re-entrancy guard will simply skip
+    // this call, and the loop picks up naturally once that move lands.
+    maybeEngineMove();
+  }
+  // Turning self-play off requires no action here: the in-flight search
+  // (if any) finishes normally, and the `if (aiMode)` check at the end of
+  // maybeEngineMove stops the loop right there, handing the board back to
+  // whichever side is human on the next move.
 });
 
 document.querySelectorAll('input[name=side]').forEach(r => {
