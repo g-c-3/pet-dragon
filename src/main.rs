@@ -218,7 +218,7 @@ fn cmd_uci() {
     // Phase 17: NNUE/HCE blend weight as a percentage — 0 = pure HCE,
     // 100 = pure NNUE. Default matches D23's fixed constant (25%), now
     // runtime-adjustable for Elo A/B testing from one binary.
-    println!("option name NNUEWeight type spin default 25 min 0 max 100");
+    println!("option name NNUEWeight type spin default 0 min 0 max 100");
     println!();
     println!("uciok");
 }
