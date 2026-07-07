@@ -131,13 +131,31 @@ mod tests {
         setup();
         let pos = Position::start_pos().unwrap();
         let score = evaluate_nnue(&pos);
-        // Sanity bound only — see the scale-derivation note above. A wildly
-        // out-of-range value here (not just "not exactly 0") is the signal
-        // that CP_TO_WINPROB_SCALE/OUTPUT_SCALE needs re-deriving via
-        // audit_against_fp32 rather than another guess.
+        // Tightened post-D30 (was < 5000, which the Session 42 network's
+        // actual +2425cp start-pos bug passed easily). This bound is now
+        // NNUE_EVAL_CLAMP_CP itself, so it directly enforces the clamp
+        // rather than allowing any value the clamp would already reject.
         assert!(
-            score.abs() < 5000,
-            "start pos NNUE eval implausibly large: {score}"
+            score.abs() <= NNUE_EVAL_CLAMP_CP,
+            "start pos NNUE eval exceeds clamp ceiling: {score}"
+        );
+    }
+
+    #[test]
+    fn test_evaluate_nnue_clamp_enforced() {
+        // Confirms the clamp itself is wired correctly regardless of what
+        // any particular trained network outputs — construct a position
+        // with maximal material imbalance (most likely to hit extreme raw
+        // output) and check the result never exceeds the documented ceiling.
+        setup();
+        let pos = Position::from_fen(
+            "QQQQQQQQ/QQQQQQQQ/8/8/8/8/8/k6K w - - 0 1",
+        )
+        .expect("valid FEN");
+        let score = evaluate_nnue(&pos);
+        assert!(
+            score.abs() <= NNUE_EVAL_CLAMP_CP,
+            "clamp not enforced: {score} exceeds {NNUE_EVAL_CLAMP_CP}"
         );
     }
 
