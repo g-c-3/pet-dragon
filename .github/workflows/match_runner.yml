@@ -1,1 +1,78 @@
+name: Elo A/B Match
 
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed.
+on:
+  workflow_dispatch:
+    inputs:
+      num_games:
+        description: "Number of games to play"
+        required: false
+        default: "20"
+        type: string
+      weight_a:
+        description: "Engine A NNUE blend weight percent (0-100)"
+        required: false
+        default: "0"
+        type: string
+      weight_b:
+        description: "Engine B NNUE blend weight percent (0-100)"
+        required: false
+        default: "25"
+        type: string
+      movetime_ms:
+        description: "Milliseconds of think time per move"
+        required: false
+        default: "100"
+        type: string
+      seed_start:
+        description: "Starting seed (change between runs for different games, otherwise reruns replay the same games)"
+        required: false
+        default: "0"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  match:
+    name: Run Elo A/B Match
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: match-runner-release
+
+      - name: Build match_runner binary
+        run: cargo build --release --bin match_runner
+
+      - name: Run Elo A/B match
+        run: >
+          ./target/release/match_runner
+          ${{ inputs.num_games }}
+          ${{ inputs.weight_a }}
+          ${{ inputs.weight_b }}
+          ${{ inputs.movetime_ms }}
+          ${{ inputs.seed_start }}
+          match_results.txt
+
+      - name: Print summary
+        run: cat match_results.txt
+
+      - name: Upload match results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: match-results-a${{ inputs.weight_a }}-b${{ inputs.weight_b }}-n${{ inputs.num_games }}-seed${{ inputs.seed_start }}
+          path: match_results.txt
+          retention-days: 30
