@@ -107,7 +107,8 @@ pub fn evaluate_nnue(pos: &Position) -> i32 {
     let raw = forward(&acc, w);
 
     let fp32_equivalent = raw as f32 / OUTPUT_SCALE as f32;
-    (fp32_equivalent * CP_TO_WINPROB_SCALE).round() as i32
+    let cp = (fp32_equivalent * CP_TO_WINPROB_SCALE).round() as i32;
+    cp.clamp(-NNUE_EVAL_CLAMP_CP, NNUE_EVAL_CLAMP_CP)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
