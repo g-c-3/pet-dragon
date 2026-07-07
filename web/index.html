@@ -154,7 +154,7 @@
     transition: background 0.1s;
   }
   .sq.light { background: #976c49; }
-  .sq.dark  { background: #413216; }
+  .sq.dark  { background: #5a4423; }
 
   .sq.selected       { background: #f6f669 !important; }
   .sq.last-from      { background: #cdd16a !important; }
@@ -199,6 +199,13 @@
   .piece-b { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_bdt45.svg'); }
   .piece-n { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_ndt45.svg'); }
   .piece-p { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_pdt45.svg'); }
+
+  .piece-k, .piece-q, .piece-r, .piece-b, .piece-n, .piece-p {
+    filter:
+      drop-shadow(0 0 1px rgba(255,255,255,0.85))
+      drop-shadow(0 0 1.5px rgba(255,255,255,0.6))
+      drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  }
 
   /* ── Controls ───────────────────────────────────────────────────────── */
   #controls {
