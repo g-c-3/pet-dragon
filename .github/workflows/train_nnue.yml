@@ -64,6 +64,11 @@ on:
         required: false
         default: "42"
         type: string
+      weight_decay:
+        description: "D30/D31: AdamW-style decoupled weight decay, applied to weight tensors (not biases) every batch step. Prevents unbounded output-logit growth (see DECISIONS.md D30). 0 disables."
+        required: false
+        default: "0.0001"
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
