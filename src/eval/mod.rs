@@ -232,8 +232,8 @@ mod tests {
         set_nnue_weight_pct(200); // above max
         assert_eq!(nnue_weight(), 1.0, "should clamp to 100%");
 
-        set_nnue_weight_pct(25); // restore D23 default
-        assert_eq!(nnue_weight(), 0.25);
+        set_nnue_weight_pct(0); // restore D25 default (0% — see DECISIONS.md)
+        assert_eq!(nnue_weight(), 0.0);
     }
 
     #[test]
