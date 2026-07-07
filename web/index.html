@@ -188,6 +188,12 @@
     z-index: 1;
   }
   .piece-K { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_klt45.svg'); }
+  .piece-K {
+    filter:
+      drop-shadow(0 0 1px rgba(255,255,255,0.95))
+      drop-shadow(0 0 1.5px rgba(255,255,255,0.7))
+      drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+  }
   .piece-Q { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_qlt45.svg'); }
   .piece-R { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_rlt45.svg'); }
   .piece-B { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_blt45.svg'); }
@@ -406,8 +412,8 @@
     <div id="ai-toggle-divider"></div>
     <div id="winprob">
       <div id="winprob-labels">
-        <span><span id="winprob-left-name">You</span> <b id="winprob-left-pct">50%</b></span>
-        <span><b id="winprob-right-pct">50%</b> <span id="winprob-right-name">Engine</span></span>
+        <span><span id="winprob-left-name">Engine</span> <b id="winprob-left-pct">50%</b></span>
+        <span><b id="winprob-right-pct">50%</b> <span id="winprob-right-name">You</span></span>
       </div>
       <div id="winprob-bar"><div id="winprob-fill"></div></div>
     </div>
@@ -641,30 +647,106 @@ function render() {
 
 // ── Win probability meter ──────────────────────────────────────────────────────
 // The engine's WASM API only exposes a best move (search_from_fen), not a
-// numeric evaluation score, so this is a material-based estimate rather than
-// a true engine evaluation. It recomputes from the current position every
-// time render() runs, so it updates dynamically after every move — by either
-// side, including engine-vs-engine in AI Self-Play mode.
-const PIECE_VALUE = { p: 100, n: 320, b: 330, r: 500, q: 900 }; // centipawns; king excluded
+// numeric evaluation score, so this is a heuristic estimate rather than a
+// true engine evaluation. It blends three signals so the percentage moves
+// even without captures:
+//   1. Material   — standard piece values.
+//   2. Board control — central squares are worth more, weighted per piece
+//      type (knights/bishops prize the center most; pawns are scored on
+//      advancement instead); recomputed for every piece on every move.
+//   3. Mobility   — how many legal moves each side currently has. White's
+//      count comes straight from legal_moves_from_fen(fen) when it's White's
+//      turn; the other side's count is approximated by flipping the side-
+//      to-move field and querying the same function. This is a mobility
+//      approximation only (it can include moves that would leave that side's
+//      own king in check), not a legality check — it's just used as an eval
+//      signal, never to actually move a piece.
+// All three are combined into a centipawn-ish score, then passed through a
+// logistic curve to get a 0–100% split. It recomputes from scratch on every
+// render(), so it updates after every move by either side.
+
+const PIECE_VALUE = { p: 100, n: 320, b: 330, r: 500, q: 900 }; // king excluded
+const CENTRAL_WEIGHT = { n: 6, b: 4, q: 2, r: 1.5 };            // cp per centralisation unit
+
+function centralization(sq) {
+  const df = Math.abs(file(sq) - 3.5), dr = Math.abs(rank(sq) - 3.5);
+  return (3.5 - df) + (3.5 - dr); // 0 (edge) .. 7 (center four squares)
+}
+
+function flipSideFen(fenStr) {
+  const parts = fenStr.split(' ');
+  parts[1] = parts[1] === 'w' ? 'b' : 'w';
+  parts[3] = '-'; // en-passant target isn't meaningful once we've hand-flipped the side
+  return parts.join(' ');
+}
+
+function countLegalMoves(fenStr) {
+  try {
+    const s = (legal_moves_from_fen(fenStr) || '').trim();
+    return s ? s.split(' ').filter(Boolean).length : 0;
+  } catch (e) {
+    return 0;
+  }
+}
 
 function updateWinProb(board) {
-  let whiteMaterial = 0, blackMaterial = 0;
-  for (const p of board) {
-    if (!p) continue;
-    const v = PIECE_VALUE[p.toLowerCase()];
-    if (!v) continue; // skip kings
-    if (p === p.toUpperCase()) whiteMaterial += v; else blackMaterial += v;
-  }
+  const sideNow      = sideToMove(fen);
+  const mobilityNow   = countLegalMoves(fen);
 
-  const diff = whiteMaterial - blackMaterial; // positive favours White
-  // Standard-ish logistic curve mapping centipawn diff → win probability.
-  const whitePct = Math.round(100 / (1 + Math.exp(-diff / 300)));
+  // Checkmate (per this app's convention: no legal moves = the side to move
+  // has lost) — show 100% for the winner instead of the previous running
+  // estimate.
+  let whitePct;
+  if (!mobilityNow) {
+    whitePct = sideNow === 'w' ? 0 : 100;
+  } else {
+    let whiteMaterial = 0, blackMaterial = 0;
+    let whitePositional = 0, blackPositional = 0;
+
+    for (let sq = 0; sq < 64; sq++) {
+      const p = board[sq];
+      if (!p) continue;
+      const lower  = p.toLowerCase();
+      const isWhite = p === p.toUpperCase();
+      const matVal = PIECE_VALUE[lower] || 0;
+
+      let posVal;
+      if (lower === 'p') {
+        const advanced = isWhite ? rank(sq) : (7 - rank(sq)); // 0..7, 0 = start rank
+        posVal = advanced * 6 + centralization(sq) * 1.5;
+      } else if (lower === 'k') {
+        posVal = 0; // no king-safety modeling here
+      } else {
+        posVal = centralization(sq) * (CENTRAL_WEIGHT[lower] || 0);
+      }
+
+      if (isWhite) { whiteMaterial += matVal; whitePositional += posVal; }
+      else         { blackMaterial += matVal; blackPositional += posVal; }
+    }
+
+    const mobilityOther = countLegalMoves(flipSideFen(fen));
+    const whiteMobility  = sideNow === 'w' ? mobilityNow : mobilityOther;
+    const blackMobility  = sideNow === 'w' ? mobilityOther : mobilityNow;
+
+    const diff =
+      (whiteMaterial   - blackMaterial) +
+      (whitePositional - blackPositional) +
+      (whiteMobility   - blackMobility) * 8; // ~8cp per extra legal move
+
+    whitePct = Math.round(100 / (1 + Math.exp(-diff / 300)));
+  }
   const blackPct = 100 - whitePct;
 
-  const leftName  = aiMode ? 'White'  : (humanSide === 'w' ? 'You' : 'Engine');
-  const rightName = aiMode ? 'Black'  : (humanSide === 'w' ? 'Engine' : 'You');
-  const leftPct   = humanSide === 'w' || aiMode ? whitePct : blackPct;
-  const rightPct  = 100 - leftPct;
+  // Display order: Engine first, then You (swapped from White/Black-first).
+  // In AI Self-Play there's no "you", so it stays White-first/Black-second.
+  const engineSide = humanSide === 'w' ? 'b' : 'w';
+  const enginePct  = engineSide === 'w' ? whitePct : blackPct;
+  const playerPct  = 100 - enginePct;
+
+  const leftName  = aiMode ? 'White'  : 'Engine';
+  const rightName = aiMode ? 'Black'  : 'You';
+  const leftPct   = aiMode ? whitePct : enginePct;
+  const rightPct  = aiMode ? blackPct : playerPct;
 
   document.getElementById('winprob-left-name').textContent  = leftName;
   document.getElementById('winprob-right-name').textContent = rightName;
