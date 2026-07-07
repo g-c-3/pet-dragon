@@ -97,6 +97,17 @@ pub struct SearchInfo {
     /// Hard stop flag — set when time runs out or stop command received
     pub stop: bool,
 
+    // ── Output control ────────────────────────────────────────────────────────
+    /// When true (default), iterative_deepening() prints UCI "info depth ..."
+    /// lines to stdout every iteration — required for the real UCI loop
+    /// (main.rs). Silent-search callers (selfplay.rs, match_runner.rs) run
+    /// thousands of searches per invocation and must set this false, or the
+    /// resulting stdout volume (tens of thousands of lines) can overwhelm a
+    /// subprocess-output relay with a hard timeout — e.g. Kaggle's papermill
+    /// execution hit exactly this via a 4s IOPub timeout on a fully-successful
+    /// 750-game run (Session 39).
+    pub print_info: bool,
+
     // ── Node counting ─────────────────────────────────────────────────────────
     /// Total nodes searched this iteration
     pub nodes: u64,
