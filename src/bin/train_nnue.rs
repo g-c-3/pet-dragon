@@ -160,20 +160,28 @@ fn main() {
     let lambda: f32 = args.get(8).and_then(|s| s.parse().ok()).unwrap_or(0.7);
     let seed: u64 = args.get(9).and_then(|s| s.parse().ok()).unwrap_or(42);
     // D30/D31: decoupled (AdamW-style) weight decay, applied every batch
-    // step directly to the weight tensors (not biases — standard practice,
-    // biases don't drive the runaway-logit-magnitude failure mode weight
-    // decay is meant to prevent). Session 42's network had none at all,
-    // which let output-layer weights grow unbounded while BCE loss kept
-    // improving (confirmed via eval_diag.rs: +2425cp at the symmetric
-    // start position, ~4000cp queen swing vs HCE's ~976cp). Default 1e-4
-    // is a conservative starting point for this network's small
-    // hidden_size=32 scale — not yet tuned.
-    let weight_decay: f32 = args.get(10).and_then(|s| s.parse().ok()).unwrap_or(1e-4);
+    // step directly to the weight tensors (not biases). D33: 1e-4 was
+    // confirmed insufficient — the corrected in-distribution eval_diag
+    // (real Position::generate_with_seed positions, not the flawed
+    // classic-chess test) showed seed=2/seed=3 both fully saturated at the
+    // 1500cp clamp ceiling even WITH weight_decay=1e-4 applied. Raised
+    // default 100x. Still not empirically tuned past this one jump — may
+    // need to go higher again.
+    let weight_decay: f32 = args.get(10).and_then(|s| s.parse().ok()).unwrap_or(1e-2);
+    // D33: global-norm gradient clipping, applied to the raw gradient
+    // BEFORE the Adam step (standard combination alongside weight decay —
+    // decay bounds steady-state weight magnitude, clipping bounds how far
+    // any single batch can push it). Added because weight decay alone,
+    // even at a meaningfully large value, may not be enough by itself:
+    // decay only pulls weights toward zero passively each step, while
+    // clipping directly caps the update that caused the blowup in the
+    // first place.
+    let grad_clip_norm: f32 = args.get(11).and_then(|s| s.parse().ok()).unwrap_or(1.0);
 
     eprintln!(
         "config: epochs={epochs} lr={lr} batch_size={batch_size} hidden_size={hidden_size} \
          accumulator_size={accumulator_size} lambda={lambda} seed={seed} \
-         weight_decay={weight_decay}"
+         weight_decay={weight_decay} grad_clip_norm={grad_clip_norm}"
     );
 
     let rows = load_rows(input_files);
