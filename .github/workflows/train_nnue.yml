@@ -86,7 +86,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -133,7 +133,7 @@ jobs:
           done
 
       - name: Download Lichess sample artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           run-id: ${{ inputs.lichess_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -203,7 +203,7 @@ jobs:
         run: ls -lh nnue_pet_dragon_fp32.bin nnue_pet_dragon_quantized.bin
 
       - name: Upload trained network as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: nnue-pet-dragon-h${{ inputs.hidden_size }}-a${{ inputs.accumulator_size }}-e${{ inputs.epochs }}
           path: |
