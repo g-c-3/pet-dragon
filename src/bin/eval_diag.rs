@@ -33,6 +33,7 @@ use pet_dragon_lib::eval::{evaluate, evaluate_blended, set_nnue_weight_pct};
 use pet_dragon_lib::nnue::inference::evaluate_nnue;
 use pet_dragon_lib::position::zobrist::init_zobrist;
 use pet_dragon_lib::position::Position;
+use pet_dragon_lib::types::{Color, PieceKind};
 
 /// One labeled test position: a FEN string plus a human description of what
 /// the "obviously correct" evaluation sign/magnitude should be, from
@@ -44,22 +45,11 @@ struct TestCase {
     expectation: &'static str,
 }
 
+// Only generic, start-distribution-independent endgame checks stay static —
+// by the time a real game reaches a simplified K+P vs K endgame, how it
+// started is irrelevant. See the dynamic section in main() for the cases
+// that actually matter for calibration.
 const CASES: &[TestCase] = &[
-    TestCase {
-        label: "Start position",
-        fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        expectation: "should be close to 0 (roughly balanced)",
-    },
-    TestCase {
-        label: "White up a queen",
-        fen: "rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        expectation: "should be strongly positive (White massively ahead)",
-    },
-    TestCase {
-        label: "White down a queen",
-        fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1",
-        expectation: "should be strongly negative (White massively behind)",
-    },
     TestCase {
         label: "Trivial K+P vs K win for White",
         fen: "8/8/8/4k3/8/4P3/4K3/8 w - - 0 1",
@@ -73,6 +63,18 @@ const CASES: &[TestCase] = &[
                        White's POV (Black has the winning extra pawn)",
     },
 ];
+
+/// Remove the first (only, in a fresh Pet Dragon start) queen of the given
+/// color from `pos`, returning true if one was found and removed.
+fn remove_queen(pos: &mut Position, color: Color) -> bool {
+    match pos.piece_bb(color, PieceKind::Queen).lsb() {
+        Some(sq) => {
+            pos.remove_piece(color, PieceKind::Queen, sq);
+            true
+        }
+        None => false,
+    }
+}
 
 /// Convert a side-to-move-relative eval into a White-POV eval for
 /// consistent, human-readable comparison across test cases regardless of
