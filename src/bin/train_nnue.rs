@@ -146,7 +146,8 @@ fn main() {
         eprintln!(
             "usage: train_nnue <output_prefix> <input_file1[,input_file2,...]> \
              [epochs=10] [lr=0.001] [batch_size=256] [hidden_size=32] \
-             [accumulator_size=256] [lambda=0.7] [seed=42] [weight_decay=0.0001]"
+             [accumulator_size=256] [lambda=0.7] [seed=42] [weight_decay=0.01] \
+             [grad_clip_norm=1.0]"
         );
         std::process::exit(1);
     }
