@@ -197,6 +197,7 @@ jobs:
           ${{ inputs.lambda }}
           ${{ inputs.seed }}
           ${{ inputs.weight_decay }}
+          ${{ inputs.grad_clip_norm }}
 
       - name: Report output sizes
         run: ls -lh nnue_pet_dragon_fp32.bin nnue_pet_dragon_quantized.bin
