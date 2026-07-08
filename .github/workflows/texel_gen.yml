@@ -1,1 +1,67 @@
+name: Texel Tuning Data Generation
 
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed.
+#
+# Phase 14.2: generates a (FEN, game_result) database for HCE Texel tuning,
+# via src/bin/texel_gen.rs. Uses actions/checkout@v6 and
+# actions/upload-artifact@v6 (Node24-native, per Session 48's deprecation
+# bump) — kept consistent with selfplay.yml's structure.
+on:
+  workflow_dispatch:
+    inputs:
+      num_games:
+        description: "Number of games to generate"
+        required: false
+        default: "20"
+        type: string
+      seed_start:
+        description: "Starting seed (change this between runs to get different games, otherwise reruns regenerate the same games)"
+        required: false
+        default: "0"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  texel_gen:
+    name: Generate Texel Tuning Data
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: texel-gen-release
+
+      - name: Build texel_gen binary
+        run: cargo build --release --bin texel_gen
+
+      - name: Run Texel tuning data generation
+        run: >
+          ./target/release/texel_gen
+          ${{ inputs.num_games }}
+          texel_data.txt
+          ${{ inputs.seed_start }}
+
+      - name: Report output size
+        run: |
+          wc -l texel_data.txt
+          ls -lh texel_data.txt
+
+      - name: Upload tuning data as artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: texel-data-seed${{ inputs.seed_start }}-n${{ inputs.num_games }}
+          path: texel_data.txt
+          retention-days: 30
