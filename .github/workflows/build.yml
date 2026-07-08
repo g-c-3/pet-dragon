@@ -98,7 +98,7 @@ jobs:
              dist/${{ matrix.asset_name }}
 
       - name: Upload binary as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.asset_name }}
           path: dist/${{ matrix.asset_name }}
