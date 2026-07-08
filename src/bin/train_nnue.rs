@@ -368,6 +368,7 @@ fn main() {
                 let fwd = weights.forward(&s.stm_features, &s.nstm_features, &[]);
                 weights.backward_bce(s, &fwd, &mut grad);
                 }
+            clip_gradients(&mut grad, grad_clip_norm);
             weights.adam_update(&grad, &mut state, lr, batch.len() as f32);
             apply_weight_decay(&mut weights, lr, weight_decay);
         }
