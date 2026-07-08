@@ -8,6 +8,14 @@
   /* ── Reset & base ───────────────────────────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  html {
+    /* Every rem-based size in this file scales off this, so the whole UI
+       scales proportionally with viewport width instead of being pinned to
+       fixed pixel values. Bounded on both ends so it neither shrinks below
+       legibility on tiny phones nor grows unbounded on large screens. */
+    font-size: clamp(14px, 3.6vw, 17px);
+  }
+
   body {
     background: #0a0a0a;
     color: #e8e8e8;
@@ -16,13 +24,13 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 20px 8px 32px;
+    padding: 1.25rem 0.5rem 2rem;
   }
 
   /* ── Header ─────────────────────────────────────────────────────────── */
   header {
     text-align: center;
-    margin-bottom: 16px;
+    margin-bottom: 1rem;
   }
   header h1 {
     font-size: clamp(1.4rem, 5vw, 2rem);
@@ -36,7 +44,7 @@
   header p {
     font-size: 0.78rem;
     color: #777;
-    margin-top: 3px;
+    margin-top: 0.2rem;
   }
 
   /* ── Game-end celebration overlay ───────────────────────────────────── */
@@ -53,12 +61,12 @@
   /* Elevated panel wrapping players/status/board/controls, giving the page
      a "designed app" feel instead of loose elements on a flat background. */
   #app-card {
-    width: min(92vw, 480px);
+    width: min(92vw, 30rem);
     background: #141414;
     border: 1px solid #262626;
-    border-radius: 16px;
+    border-radius: 1rem;
     box-shadow: 0 10px 30px rgba(0,0,0,0.45);
-    padding: 18px 16px 22px;
+    padding: 1.125rem 1rem 1.375rem;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -69,17 +77,17 @@
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    margin-bottom: 14px;
+    gap: 0.5rem;
+    margin-bottom: 0.875rem;
   }
   .player-panel {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
+    gap: 0.625rem;
+    padding: 0.625rem 0.875rem;
     background: #1b1b1b;
     border: 1px solid #2a2a2a;
-    border-radius: 10px;
+    border-radius: 0.625rem;
     transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
   }
   .player-panel.active {
@@ -103,21 +111,21 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     align-content: center;
-    gap: 3px;
+    gap: 0.2rem;
     max-width: 58%;
   }
   .cap-item {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 0.15rem;
     background: #1c1c1c;
     border: 1px solid #383838;
-    border-radius: 4px;
-    padding: 1px 4px 1px 2px;
+    border-radius: 0.25rem;
+    padding: 0.05rem 0.3rem 0.05rem 0.15rem;
     flex-shrink: 0;
   }
   .cap-piece {
-    width: clamp(13px, 4.2vw, 18px);   /* ≈33% of the on-board piece size */
+    width: clamp(17px, 5.4vw, 24px);   /* bigger, still ≈33–40% of the on-board piece size */
     aspect-ratio: 1;
     background-repeat: no-repeat;
     background-position: center;
@@ -126,7 +134,7 @@
     opacity: 0.92;
   }
   .cap-count {
-    font-size: 0.66rem;
+    font-size: 0.7rem;
     font-weight: 700;
     color: #ccc;
     line-height: 1;
@@ -138,7 +146,7 @@
     font-weight: 500;
     color: #c8a96e;
     min-height: 1.4em;
-    margin-bottom: 10px;
+    margin-bottom: 0.625rem;
     text-align: center;
     letter-spacing: 0.02em;
   }
@@ -147,24 +155,25 @@
   #board-wrap {
     position: relative;
     width: 100%;
+    --coord-size: clamp(0.9rem, 4.2vw, 1.2rem);
   }
 
   /* ── Coordinates ────────────────────────────────────────────────────── */
   .coords-rank {
     position: absolute;
-    left: -18px;
+    left: calc(-1 * var(--coord-size));
     top: 0;
-    width: 18px;
+    width: var(--coord-size);
     height: 100%;
     display: flex;
     flex-direction: column;
   }
   .coords-file {
     position: absolute;
-    bottom: -18px;
+    bottom: calc(-1 * var(--coord-size));
     left: 0;
     width: 100%;
-    height: 18px;
+    height: var(--coord-size);
     display: flex;
   }
   .coord {
@@ -184,10 +193,11 @@
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     border: 2px solid #333;
-    border-radius: 6px;
+    border-radius: 0.375rem;
     overflow: hidden;
     user-select: none;
     box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+    transition: filter 0.15s;
   }
 
   .sq {
@@ -260,15 +270,16 @@
   #controls {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 20px;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
     justify-content: center;
+    align-items: center;
     width: 100%;
   }
   button {
-    padding: 9px 20px;
+    padding: 0.5625rem 1.25rem;
     border: none;
-    border-radius: 6px;
+    border-radius: 0.375rem;
     cursor: pointer;
     font-size: 0.88rem;
     font-weight: 600;
@@ -282,13 +293,13 @@
   #nav-controls {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 0.25rem;
   }
   #nav-controls button {
     background: #2a2a2a;
     color: #ccc;
     border: 1px solid #444;
-    padding: 9px 12px;
+    padding: 0.5625rem 0.75rem;
     font-size: 1rem;
     line-height: 1;
   }
@@ -297,24 +308,90 @@
     cursor: default;
   }
   #nav-controls button:disabled:active { transform: none; }
+
+  /* ── Move counter (its own row, boxed) ───────────────────────────────── */
+  #move-counter-row {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin-top: 0.5rem;
+  }
   #move-counter {
-    font-size: 0.74rem;
-    color: #777;
-    min-width: 52px;
-    text-align: center;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: #aaa;
+    background: #1c1c1c;
+    border: 1px solid #333;
+    border-radius: 0.375rem;
+    padding: 0.3rem 0.75rem;
+  }
+  #move-counter b { color: #e8d9b5; }
+
+  /* ── Board appearance popover ────────────────────────────────────────── */
+  #board-settings-wrap { position: relative; }
+  #btn-board-settings {
+    background: #2a2a2a;
+    color: #ccc;
+    border: 1px solid #444;
+    padding: 0.5625rem 0.75rem;
+    font-size: 1rem;
+    line-height: 1;
+  }
+  #board-settings-popover {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 0.5rem);
+    right: 0;
+    z-index: 20;
+    background: #1c1c1c;
+    border: 1px solid #383838;
+    border-radius: 0.5rem;
+    padding: 0.75rem 0.9rem;
+    box-shadow: 0 0.5rem 1.5rem rgba(0,0,0,0.5);
+    width: 12rem;
+  }
+  #board-settings-popover.show { display: flex; flex-direction: column; gap: 0.6rem; }
+  #board-settings-popover label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.72rem;
+    color: #999;
+  }
+  #board-settings-popover input[type=range] {
+    width: 100%;
+    accent-color: #c8a96e;
+  }
+  #board-settings-reset {
+    background: #2a2a2a;
+    color: #ccc;
+    border: 1px solid #444;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.72rem;
+  }
+
+  /* ── Secondary controls row (Play as / Engine time) ──────────────────── */
+  #controls-secondary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    margin-top: 0.75rem;
   }
 
   #side-select {
     display: flex;
-    gap: 6px;
+    gap: 0.375rem;
     align-items: center;
     font-size: 0.82rem;
     color: #888;
-    border-radius: 6px;
-    padding: 3px 7px;
+    border-radius: 0.375rem;
+    padding: 0.2rem 0.45rem;
     transition: opacity 0.3s;
   }
-  #side-select label { cursor: pointer; display: flex; align-items: center; gap: 4px; }
+  #side-select label { cursor: pointer; display: flex; align-items: center; gap: 0.25rem; }
   #side-select input[type=radio] { accent-color: #c8a96e; }
 
   @keyframes side-select-glow {
@@ -334,14 +411,14 @@
     color: #777;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 0.5rem;
   }
   #time-wrap select {
     background: #1e1e1e;
     color: #ccc;
     border: 1px solid #444;
-    border-radius: 4px;
-    padding: 4px 6px;
+    border-radius: 0.25rem;
+    padding: 0.25rem 0.375rem;
     font-size: 0.82rem;
   }
 
@@ -359,22 +436,22 @@
   #promo-box {
     background: #1e1e1e;
     border: 1px solid #444;
-    border-radius: 10px;
-    padding: 20px;
+    border-radius: 0.625rem;
+    padding: 1.25rem;
     display: flex;
-    gap: 12px;
+    gap: 0.75rem;
     flex-wrap: wrap;
     justify-content: center;
   }
   .promo-choice {
-    width: 60px;
-    height: 60px;
+    width: 3.75rem;
+    height: 3.75rem;
     font-size: 2.4rem;
     display: flex;
     align-items: center;
     justify-content: center;
     background: #2a2a2a;
-    border-radius: 8px;
+    border-radius: 0.5rem;
     cursor: pointer;
     border: 2px solid transparent;
     transition: border-color 0.15s;
@@ -383,12 +460,12 @@
 
   /* ── Info panel ─────────────────────────────────────────────────────── */
   #info {
-    margin-top: 18px;
+    margin-top: 1.125rem;
     font-size: 0.75rem;
     color: #555;
     text-align: center;
     line-height: 1.8;
-    max-width: 480px;
+    max-width: 30rem;
   }
   #info a { color: #777; }
 
@@ -396,15 +473,15 @@
   #ai-toggle-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
     width: 100%;
     flex-wrap: wrap;
   }
   #ai-toggle-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 0.625rem;
     font-size: 0.86rem;
     color: #bbb;
     font-weight: 600;
@@ -417,10 +494,10 @@
   }
   #winprob {
     flex: 1;
-    min-width: 130px;
+    min-width: 8rem;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 0.25rem;
   }
   #winprob-labels {
     display: flex;
@@ -429,24 +506,34 @@
     color: #999;
     font-weight: 600;
   }
-  #winprob-labels b { color: #e8d9b5; font-weight: 700; }
+  /* ── Win-probability push bar: gold (left) vs neon green (right), each
+     side's width tracks its own win% so they visibly push against each
+     other and meet at the split point. ── */
   #winprob-bar {
     width: 100%;
-    height: 7px;
-    border-radius: 4px;
+    height: 0.5rem;
+    border-radius: 0.25rem;
     background: #2a2a2a;
     overflow: hidden;
+    display: flex;
   }
-  #winprob-fill {
+  #winprob-fill-left {
     height: 100%;
-    background: linear-gradient(90deg, #f0d08a, #c8a96e);
+    background: linear-gradient(90deg, #c8a96e, #f0d08a);
+    transition: width 0.4s ease;
+  }
+  #winprob-fill-right {
+    height: 100%;
+    margin-left: auto;
+    background: linear-gradient(90deg, #39ff14, #0bde6b);
+    box-shadow: 0 0 6px rgba(57,255,20,0.55);
     transition: width 0.4s ease;
   }
   .switch {
     position: relative;
     display: inline-block;
-    width: 42px;
-    height: 24px;
+    width: 2.625rem;
+    height: 1.5rem;
     flex-shrink: 0;
   }
   .switch input { opacity: 0; width: 0; height: 0; }
@@ -457,13 +544,13 @@
     background-color: #2a2a2a;
     border: 1px solid #444;
     transition: background-color 0.2s, border-color 0.2s;
-    border-radius: 24px;
+    border-radius: 1.5rem;
   }
   .slider::before {
     position: absolute;
     content: "";
-    height: 18px;
-    width: 18px;
+    height: 1.125rem;
+    width: 1.125rem;
     left: 2px;
     bottom: 2px;
     background-color: #ccc;
@@ -471,7 +558,7 @@
     border-radius: 50%;
   }
   .switch input:checked + .slider { background-color: #c8a96e; border-color: #c8a96e; }
-  .switch input:checked + .slider::before { transform: translateX(18px); background-color: #141414; }
+  .switch input:checked + .slider::before { transform: translateX(1.125rem); background-color: #141414; }
   #side-select.disabled { opacity: 0.45; pointer-events: none; }
 </style>
 </head>
@@ -498,10 +585,13 @@
     <div id="ai-toggle-divider"></div>
     <div id="winprob">
       <div id="winprob-labels">
-        <span><span id="winprob-left-name">Engine</span> <b id="winprob-left-pct">50%</b></span>
-        <span><b id="winprob-right-pct">50%</b> <span id="winprob-right-name">You</span></span>
+        <span id="winprob-left-name">Engine</span>
+        <span id="winprob-right-name">You</span>
       </div>
-      <div id="winprob-bar"><div id="winprob-fill"></div></div>
+      <div id="winprob-bar">
+        <div id="winprob-fill-left"></div>
+        <div id="winprob-fill-right"></div>
+      </div>
     </div>
   </div>
 
@@ -535,7 +625,25 @@
       <button id="btn-next" title="Next move">❯</button>
       <button id="btn-last" title="Last move (live)">⏭</button>
     </div>
-    <span id="move-counter">0 / 0</span>
+    <div id="board-settings-wrap">
+      <button id="btn-board-settings" title="Board appearance">🎨</button>
+      <div id="board-settings-popover">
+        <label>Hue
+          <input type="range" id="board-hue" min="-180" max="180" value="0" step="1">
+        </label>
+        <label>Brightness
+          <input type="range" id="board-brightness" min="60" max="140" value="100" step="1">
+        </label>
+        <button id="board-settings-reset" type="button">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="move-counter-row">
+    <span id="move-counter">Move 0 · Ply 0</span>
+  </div>
+
+  <div id="controls-secondary">
     <div id="side-select">
       Play as:
       <label><input type="radio" name="side" value="w" checked> White</label>
@@ -596,6 +704,12 @@ let gameEnded  = false;        // true once the LIVE game has actually concluded
 let gameEndMessage = null;     // the final status text (checkmate/draw) to show at the live position
 let aiMode     = false;        // true = engine plays both sides (self-play)
 let pendingPromo = null;      // {from, to} awaiting promotion choice
+
+// Board appearance (hue-rotate + brightness filter on the #board element).
+// Deliberately NOT reset in startNewGame() — it's meant to persist across
+// "+ New Game" clicks and only return to defaults on an actual page reload.
+let boardHue        = 0;    // degrees, -180..180
+let boardBrightness = 100;  // percent, 60..140
 
 // The move navigator lets you browse every position played so far without
 // touching the real game: `history` + the live `fen` together form the full
@@ -944,9 +1058,8 @@ function updateWinProb(board, viewFen) {
 
   document.getElementById('winprob-left-name').textContent  = leftName;
   document.getElementById('winprob-right-name').textContent = rightName;
-  document.getElementById('winprob-left-pct').textContent   = leftPct + '%';
-  document.getElementById('winprob-right-pct').textContent  = rightPct + '%';
-  document.getElementById('winprob-fill').style.width = whitePct + '%';
+  document.getElementById('winprob-fill-left').style.width  = leftPct + '%';
+  document.getElementById('winprob-fill-right').style.width = rightPct + '%';
 }
 function onSquareClick(sq) {
   if (aiMode) return;
@@ -1402,6 +1515,48 @@ function startNewGame() {
 // ── Controls ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-new').addEventListener('click', startNewGame);
 
+// ── Board appearance popover ─────────────────────────────────────────────────
+function applyBoardFilter() {
+  document.getElementById('board').style.filter =
+    `hue-rotate(${boardHue}deg) brightness(${boardBrightness}%)`;
+}
+applyBoardFilter(); // reflect defaults immediately on load
+
+const boardSettingsPopover = document.getElementById('board-settings-popover');
+
+document.getElementById('btn-board-settings').addEventListener('click', (e) => {
+  e.stopPropagation();
+  boardSettingsPopover.classList.toggle('show');
+});
+
+// Close the popover on any click outside it (but not on its own controls).
+document.addEventListener('click', (e) => {
+  if (!boardSettingsPopover.classList.contains('show')) return;
+  if (e.target.closest('#board-settings-wrap')) return;
+  boardSettingsPopover.classList.remove('show');
+});
+
+document.getElementById('board-hue').value = boardHue;
+document.getElementById('board-brightness').value = boardBrightness;
+
+document.getElementById('board-hue').addEventListener('input', (e) => {
+  boardHue = parseInt(e.target.value);
+  applyBoardFilter();
+});
+
+document.getElementById('board-brightness').addEventListener('input', (e) => {
+  boardBrightness = parseInt(e.target.value);
+  applyBoardFilter();
+});
+
+document.getElementById('board-settings-reset').addEventListener('click', () => {
+  boardHue = 0;
+  boardBrightness = 100;
+  document.getElementById('board-hue').value = boardHue;
+  document.getElementById('board-brightness').value = boardBrightness;
+  applyBoardFilter();
+});
+
 // ── Move navigator ──────────────────────────────────────────────────────────
 // Pure viewing controls: stepping through history never touches the real
 // game state (fen/history/engine) — it only changes which position render()
@@ -1424,7 +1579,9 @@ function startPlayback() {
 
 function updateNavControls() {
   const total = history.length;
-  document.getElementById('move-counter').textContent = `${viewIndex} / ${total}`;
+  const fullMove = Math.floor(viewIndex / 2); // completed full-moves (both sides moved)
+  document.getElementById('move-counter').innerHTML =
+    `Move <b>${fullMove}</b> &middot; Ply <b>${viewIndex}</b>`;
   document.getElementById('btn-first').disabled      = viewIndex === 0;
   document.getElementById('btn-prev').disabled       = viewIndex === 0;
   document.getElementById('btn-next').disabled       = viewIndex === total;
@@ -1478,19 +1635,28 @@ document.getElementById('btn-playpause').addEventListener('click', () => {
 document.getElementById('ai-toggle').addEventListener('change', (e) => {
   aiMode = e.target.checked;
   updateSideSelectState();
-  updateWinProb(parseFen(displayedFen()), displayedFen()); // labels (You/Engine vs White/Black) depend on aiMode
 
   if (aiMode) {
-    // Turning self-play on: kick off a move if nothing is already running.
-    // If a search from the previous (human/engine) turn is still in
-    // flight, maybeEngineMove's own re-entrancy guard will simply skip
-    // this call, and the loop picks up naturally once that move lands.
+    // Turning self-play on is a deliberate action (unlike a background
+    // engine reply while you're mid-review), so jump the view to the live
+    // position and follow along, rather than leaving you stranded on an
+    // old position while the game keeps playing.
+    stopPlayback();
+    viewIndex = history.length;
+    render();
+
+    // Kick off a move if nothing is already running. If a search from the
+    // previous (human/engine) turn is still in flight, maybeEngineMove's
+    // own re-entrancy guard will simply skip this call, and the loop picks
+    // up naturally once that move lands.
     maybeEngineMove();
+  } else {
+    updateWinProb(parseFen(displayedFen()), displayedFen()); // labels (You/Engine vs White/Black) depend on aiMode
   }
-  // Turning self-play off requires no action here: the in-flight search
-  // (if any) finishes normally, and the `if (aiMode)` check at the end of
-  // maybeEngineMove stops the loop right there, handing the board back to
-  // whichever side is human on the next move.
+  // Turning self-play off requires no further action here: the in-flight
+  // search (if any) finishes normally, and the `if (aiMode)` check at the
+  // end of maybeEngineMove stops the loop right there, handing the board
+  // back to whichever side is human on the next move.
 });
 
 document.querySelectorAll('input[name=side]').forEach(r => {
