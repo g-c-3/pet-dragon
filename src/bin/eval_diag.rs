@@ -87,45 +87,102 @@ fn white_pov(eval_stm: i32, pos: &Position) -> i32 {
     }
 }
 
+/// Print one HCE/NNUE/blended comparison line for `pos`, from White's POV.
+fn report(label: &str, expectation: &str, pos: &Position) {
+    let hce_stm = evaluate(pos);
+    let nnue_stm = evaluate_nnue(pos);
+
+    set_nnue_weight_pct(100);
+    let blended_100_stm = evaluate_blended(pos);
+    set_nnue_weight_pct(0);
+
+    let hce = white_pov(hce_stm, pos);
+    let nnue = white_pov(nnue_stm, pos);
+    let blended_100 = white_pov(blended_100_stm, pos);
+
+    println!("== {label} ==");
+    println!("  Expectation: {expectation}");
+    println!("  HCE (White POV):          {:>6} cp", hce);
+    println!("  NNUE raw (White POV):     {:>6} cp", nnue);
+    println!("  Blended @ 100% (White POV): {:>6} cp", blended_100);
+    let agree = (hce >= 0) == (nnue >= 0);
+    println!(
+        "  HCE/NNUE agree on sign: {}\n",
+        if agree { "YES" } else { "NO — MISCALIBRATION SUSPECT" }
+    );
+}
+
 fn main() {
     init_masks();
     init_magic();
     init_zobrist();
 
-    println!("Pet Dragon NNUE calibration diagnostic (Phase 17.5d)");
+    println!("Pet Dragon NNUE calibration diagnostic (Phase 17.5d, revised)");
     println!("All evals shown from White's POV. HCE and NNUE are both");
-    println!("independently in centipawns before any blending.\n");
+    println!("independently in centipawns before any blending.");
+    println!(
+        "Random-start cases use Position::generate_with_seed(N) — the SAME \
+         generator selfplay.rs/match_runner.rs use for every real game, so \
+         these are in-distribution, unlike a classic-chess-layout FEN would \
+         be (astronomically rare under random rank-1/2 piece scatter, per \
+         setup.rs — see D32).\n"
+    );
 
-    for case in CASES {
-        let pos = match Position::from_fen(case.fen) {
-            Ok(p) => p,
-            Err(e) => {
-                println!("{}: FEN PARSE ERROR: {:?}", case.label, e);
-                continue;
-            }
-        };
-
-        let hce_stm = evaluate(&pos);
-        let nnue_stm = evaluate_nnue(&pos);
-
-        set_nnue_weight_pct(100);
-        let blended_100_stm = evaluate_blended(&pos);
-        set_nnue_weight_pct(0);
-
-        let hce = white_pov(hce_stm, &pos);
-        let nnue = white_pov(nnue_stm, &pos);
-        let blended_100 = white_pov(blended_100_stm, &pos);
-
-        println!("== {} ==", case.label);
-        println!("  FEN: {}", case.fen);
-        println!("  Expectation: {}", case.expectation);
-        println!("  HCE (White POV):          {:>6} cp", hce);
-        println!("  NNUE raw (White POV):     {:>6} cp", nnue);
-        println!("  Blended @ 100% (White POV): {:>6} cp", blended_100);
-        let agree = (hce >= 0) == (nnue >= 0);
-        println!(
-            "  HCE/NNUE agree on sign: {}\n",
-            if agree { "YES" } else { "NO — MISCALIBRATION SUSPECT" }
+    // ── Primary signal: real Pet Dragon random starts ──────────────────────
+    // Black exactly mirrors White's arrangement (setup.rs Step 6), so these
+    // are genuinely symmetric positions — "~0" remains the right expectation
+    // despite being far more materially varied than a classic chess start.
+    for seed in 1..=3u64 {
+        let pos = Position::generate_with_seed(seed);
+        report(
+            &format!("Random Pet Dragon start (seed={seed})"),
+            "should be close to 0 (Black exactly mirrors White)",
+            &pos,
         );
+    }
+
+    // Material-imbalance cases derived from a REAL random start (seed=1),
+    // not a hand-built classic-chess FEN — removing a queen from an actual
+    // in-distribution position.
+    let mut up_a_queen = Position::generate_with_seed(1);
+    if remove_queen(&mut up_a_queen, Color::Black) {
+        report(
+            "Random start (seed=1), White up a queen",
+            "should be strongly positive (White massively ahead)",
+            &up_a_queen,
+        );
+    }
+
+    let mut down_a_queen = Position::generate_with_seed(1);
+    if remove_queen(&mut down_a_queen, Color::White) {
+        report(
+            "Random start (seed=1), White down a queen",
+            "should be strongly negative (White massively behind)",
+            &down_a_queen,
+        );
+    }
+
+    // ── Secondary/informational: the classic chess layout ──────────────────
+    // Still a technically-valid Pet Dragon position (VARIANT_ARCHITECTURE.md
+    // notes this explicitly), but essentially never occurs under real random
+    // generation — treat any miscalibration here as informational, not the
+    // primary signal.
+    if let Ok(pos) =
+        Position::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    {
+        report(
+            "Classic chess layout (OUT-OF-DISTRIBUTION — informational only)",
+            "technically valid but ~never hit by real random generation; \
+             a miscalibration here alone doesn't confirm an in-game problem",
+            &pos,
+        );
+    }
+
+    // ── Generic, start-independent endgame checks ───────────────────────────
+    for case in CASES {
+        match Position::from_fen(case.fen) {
+            Ok(pos) => report(case.label, case.expectation, &pos),
+            Err(e) => println!("{}: FEN PARSE ERROR: {:?}", case.label, e),
+        }
     }
 }
