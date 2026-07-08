@@ -251,8 +251,32 @@
   button:active { transform: scale(0.96); }
 
   #btn-new  { background: #c8a96e; color: #111; }
-  #btn-flip { background: #2a2a2a; color: #ccc; border: 1px solid #444; }
-  #btn-undo { background: #2a2a2a; color: #ccc; border: 1px solid #444; }
+
+  /* ── Move navigator ─────────────────────────────────────────────────── */
+  #nav-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  #nav-controls button {
+    background: #2a2a2a;
+    color: #ccc;
+    border: 1px solid #444;
+    padding: 9px 12px;
+    font-size: 1rem;
+    line-height: 1;
+  }
+  #nav-controls button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  #nav-controls button:disabled:active { transform: none; }
+  #move-counter {
+    font-size: 0.74rem;
+    color: #777;
+    min-width: 52px;
+    text-align: center;
+  }
 
   #side-select {
     display: flex;
@@ -462,8 +486,14 @@
 
   <div id="controls">
     <button id="btn-new">+ New Game</button>
-    <button id="btn-flip">⇄ Flip Board</button>
-    <button id="btn-undo">← Undo</button>
+    <div id="nav-controls">
+      <button id="btn-first" title="First move">⏮</button>
+      <button id="btn-prev" title="Previous move">❮</button>
+      <button id="btn-playpause" title="Play/Pause">▶</button>
+      <button id="btn-next" title="Next move">❯</button>
+      <button id="btn-last" title="Last move (live)">⏭</button>
+    </div>
+    <span id="move-counter">0 / 0</span>
     <div id="side-select">
       Play as:
       <label><input type="radio" name="side" value="w" checked> White</label>
@@ -507,16 +537,29 @@ const PIECES = {
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let fen        = '';          // current FEN
+let fen        = '';          // current (live) FEN — the actual, real game position
 let selected   = null;        // selected square index (0-63) or null
 let legalMoves = [];          // legal move strings from current position
-let lastMove   = null;        // {from, to} squares of last move
+let lastMove   = null;        // {from, to} squares of the most recent live move
 let flipped    = false;       // board orientation
 let humanSide  = 'w';         // 'w' or 'b'
-let history    = [];          // stack of FEN strings for undo
+let history    = [];          // FEN before each move played so far (live game)
+let moveHighlights = [];      // {from,to} for each move played, aligned with `history`
+let viewIndex  = 0;           // which position the board is showing (0..history.length)
+let playTimer  = null;        // interval id while move-by-move autoplay is running
 let engineBusy = false;
 let aiMode     = false;        // true = engine plays both sides (self-play)
 let pendingPromo = null;      // {from, to} awaiting promotion choice
+
+// The move navigator lets you browse every position played so far without
+// touching the real game: `history` + the live `fen` together form the full
+// list of positions (index 0 = start, index history.length = live/current).
+// `viewIndex` picks which one render() shows; the live game itself (fen,
+// history, engine moves) is completely unaffected by browsing.
+function positionsList() { return history.concat([fen]); }
+function displayedFen()  { return positionsList()[viewIndex]; }
+function isLive()        { return viewIndex === history.length; }
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const idx  = (file, rank) => rank * 8 + file; // 0-based, rank 0 = rank 1
@@ -606,16 +649,18 @@ function render() {
   boardEl.innerHTML = '';
   renderCoords();
 
-  const board    = parseFen(fen);
-  const side     = sideToMove(fen);
+  const viewFen  = displayedFen();
+  const board    = parseFen(viewFen);
+  const side     = sideToMove(viewFen);
+  const viewedLastMove = viewIndex > 0 ? moveHighlights[viewIndex - 1] : null;
 
   document.getElementById('panel-engine').classList.toggle('active', side !== humanSide);
   document.getElementById('panel-human').classList.toggle('active', side === humanSide);
   document.getElementById('panel-human').querySelector('.player-name').textContent =
     humanSide === 'w' ? 'You (White)' : 'You (Black)';
-  updateWinProb(board);
+  updateWinProb(board, viewFen);
   renderCaptured(board);
-  const legal    = legal_moves_from_fen(fen).split(' ').filter(Boolean);
+  const legal    = legal_moves_from_fen(viewFen).split(' ').filter(Boolean);
   const legalTo  = selected !== null
     ? new Set(legal.filter(m => m.slice(0,2) === sqName(selected)).map(m => m.slice(2,4)))
     : new Set();
@@ -631,10 +676,10 @@ function render() {
     cell.className = 'sq ' + (isLight ? 'light' : 'dark');
     cell.dataset.sq = sq;
 
-    // Highlight last move
-    if (lastMove) {
-      if (sq === lastMove.from) cell.classList.add('last-from');
-      if (sq === lastMove.to)   cell.classList.add('last-to');
+    // Highlight the move that led to the position being viewed
+    if (viewedLastMove) {
+      if (sq === viewedLastMove.from) cell.classList.add('last-from');
+      if (sq === viewedLastMove.to)   cell.classList.add('last-to');
     }
     // Selected
     if (sq === selected) cell.classList.add('selected');
@@ -658,7 +703,7 @@ function render() {
   }
 
   // Status
-  const legal2 = legal_moves_from_fen(fen).trim();
+  const legal2 = legal_moves_from_fen(viewFen).trim();
   if (!legal2) {
     document.getElementById('status').textContent =
       side === 'w' ? '♔ Checkmate — Black wins!' : '♚ Checkmate — White wins!';
@@ -666,6 +711,8 @@ function render() {
     document.getElementById('status').textContent =
       side === 'w' ? 'White to move' : 'Black to move';
   }
+
+  updateNavControls();
 }
 
 // ── Captured pieces tray ────────────────────────────────────────────────────────
@@ -770,9 +817,9 @@ function countLegalMoves(fenStr) {
   }
 }
 
-function updateWinProb(board) {
-  const sideNow      = sideToMove(fen);
-  const mobilityNow   = countLegalMoves(fen);
+function updateWinProb(board, viewFen) {
+  const sideNow      = sideToMove(viewFen);
+  const mobilityNow   = countLegalMoves(viewFen);
 
   // Checkmate (per this app's convention: no legal moves = the side to move
   // has lost) — show 100% for the winner instead of the previous running
@@ -805,7 +852,7 @@ function updateWinProb(board) {
       else         { blackMaterial += matVal; blackPositional += posVal; }
     }
 
-    const mobilityOther = countLegalMoves(flipSideFen(fen));
+    const mobilityOther = countLegalMoves(flipSideFen(viewFen));
     const whiteMobility  = sideNow === 'w' ? mobilityNow : mobilityOther;
     const blackMobility  = sideNow === 'w' ? mobilityOther : mobilityNow;
 
@@ -838,6 +885,7 @@ function updateWinProb(board) {
 function onSquareClick(sq) {
   if (aiMode) return;
   if (engineBusy) return;
+  if (!isLive()) return; // reviewing history — not interactive
   const side = sideToMove(fen);
   if (side !== humanSide) return; // not player's turn
 
@@ -925,13 +973,16 @@ function applyMove(uciMove) {
   // Instead: implement a JS-side move applier for the subset of moves we need.
   // This is the standard approach in browser chess UIs (e.g., chess.js).
 
+  const wasLive = viewIndex === history.length - 1; // history.length already includes this move's pre-state push
   const prevFen = history[history.length - 1] || startFen;
   const newFen  = applyMoveToFen(prevFen, uciMove);
 
   const from = squareIndex(uciMove.slice(0,2));
   const to   = squareIndex(uciMove.slice(2,4));
   lastMove = { from, to };
+  moveHighlights.push({ from, to });
   fen = newFen;
+  if (wasLive) viewIndex = history.length; // keep the navigator following live play
 
   render();
   maybeEngineMove();
@@ -1091,11 +1142,14 @@ async function maybeEngineMove() {
     return;
   }
 
+  const wasLive = isLive(); // computed before this move's history push, unlike applyMove()
   history.push(fen);
   const from = squareIndex(bestmove.slice(0,2));
   const to   = squareIndex(bestmove.slice(2,4));
   lastMove   = { from, to };
+  moveHighlights.push({ from, to });
   fen        = applyMoveToFen(fen, bestmove);
+  if (wasLive) viewIndex = history.length; // keep the navigator following live play
 
   render();
 
@@ -1112,10 +1166,13 @@ async function maybeEngineMove() {
 // ── New game ──────────────────────────────────────────────────────────────────
 function startNewGame() {
   if (engineBusy) return;
+  stopPlayback();
   fen       = new_game();
   startFen  = fen;
   moveList  = [];
   history   = [];
+  moveHighlights = [];
+  viewIndex = 0;
   lastMove  = null;
   selected  = null;
   engineBusy = false;
@@ -1131,25 +1188,69 @@ function startNewGame() {
 // ── Controls ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-new').addEventListener('click', startNewGame);
 
-document.getElementById('btn-flip').addEventListener('click', () => {
-  flipped = !flipped;
+// ── Move navigator ──────────────────────────────────────────────────────────
+// Pure viewing controls: stepping through history never touches the real
+// game state (fen/history/engine) — it only changes which position render()
+// draws. The live game (including any ongoing AI Self-Play) keeps running
+// underneath exactly as before; hitting "last" always jumps back to it.
+function stopPlayback() {
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  document.getElementById('btn-playpause').textContent = '▶';
+}
+
+function startPlayback() {
+  if (playTimer) return;
+  document.getElementById('btn-playpause').textContent = '⏸';
+  playTimer = setInterval(() => {
+    if (viewIndex >= history.length) { stopPlayback(); return; }
+    viewIndex++;
+    render();
+  }, 700);
+}
+
+function updateNavControls() {
+  const total = history.length;
+  document.getElementById('move-counter').textContent = `${viewIndex} / ${total}`;
+  document.getElementById('btn-first').disabled      = viewIndex === 0;
+  document.getElementById('btn-prev').disabled       = viewIndex === 0;
+  document.getElementById('btn-next').disabled       = viewIndex === total;
+  document.getElementById('btn-last').disabled       = viewIndex === total;
+  document.getElementById('btn-playpause').disabled  = total === 0;
+}
+
+document.getElementById('btn-first').addEventListener('click', () => {
+  stopPlayback();
+  viewIndex = 0;
   render();
 });
 
-document.getElementById('btn-undo').addEventListener('click', () => {
-  if (engineBusy || history.length < 2) return;
-  // Undo two moves: player's and engine's
-  history.pop(); // engine move
-  fen      = history.pop(); // player move
-  lastMove = null;
-  selected = null;
+document.getElementById('btn-prev').addEventListener('click', () => {
+  stopPlayback();
+  if (viewIndex > 0) viewIndex--;
   render();
+});
+
+document.getElementById('btn-next').addEventListener('click', () => {
+  stopPlayback();
+  if (viewIndex < history.length) viewIndex++;
+  render();
+});
+
+document.getElementById('btn-last').addEventListener('click', () => {
+  stopPlayback();
+  viewIndex = history.length;
+  render();
+});
+
+document.getElementById('btn-playpause').addEventListener('click', () => {
+  if (playTimer) stopPlayback();
+  else startPlayback();
 });
 
 document.getElementById('ai-toggle').addEventListener('change', (e) => {
   aiMode = e.target.checked;
   document.getElementById('side-select').classList.toggle('disabled', aiMode);
-  updateWinProb(parseFen(fen)); // labels (You/Engine vs White/Black) depend on aiMode
+  updateWinProb(parseFen(displayedFen()), displayedFen()); // labels (You/Engine vs White/Black) depend on aiMode
 
   if (aiMode) {
     // Turning self-play on: kick off a move if nothing is already running.
