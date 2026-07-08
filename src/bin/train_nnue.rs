@@ -258,6 +258,81 @@ fn main() {
         }
     }
 
+    // D33: global-norm gradient clipping — computed over every gradient
+    // tensor INCLUDING biases (unlike weight decay, clipping conventionally
+    // covers the whole gradient, since the goal is bounding the update
+    // step itself, not selectively shrinking weights toward zero).
+    fn clip_gradients(g: &mut Gradients, max_norm: f32) {
+        if max_norm <= 0.0 {
+            return;
+        }
+        let mut sum_sq = 0.0f64;
+        for row in &g.ft_weight {
+            for &v in row {
+                sum_sq += (v as f64) * (v as f64);
+            }
+        }
+        for &v in &g.ft_bias {
+            sum_sq += (v as f64) * (v as f64);
+        }
+        for layer in &g.hidden_weights {
+            for row in layer {
+                for &v in row {
+                    sum_sq += (v as f64) * (v as f64);
+                }
+            }
+        }
+        for layer in &g.hidden_biases {
+            for &v in layer {
+                sum_sq += (v as f64) * (v as f64);
+            }
+        }
+        for &v in &g.output_weight {
+            sum_sq += (v as f64) * (v as f64);
+        }
+        sum_sq += (g.output_bias as f64) * (g.output_bias as f64);
+        for row in &g.dense_to_acc {
+            for &v in row {
+                sum_sq += (v as f64) * (v as f64);
+            }
+        }
+
+        let norm = sum_sq.sqrt() as f32;
+        if norm <= max_norm || norm == 0.0 {
+            return;
+        }
+        let scale = max_norm / norm;
+        for row in g.ft_weight.iter_mut() {
+            for v in row.iter_mut() {
+                *v *= scale;
+            }
+        }
+        for v in g.ft_bias.iter_mut() {
+            *v *= scale;
+        }
+        for layer in g.hidden_weights.iter_mut() {
+            for row in layer.iter_mut() {
+                for v in row.iter_mut() {
+                    *v *= scale;
+                }
+            }
+        }
+        for layer in g.hidden_biases.iter_mut() {
+            for v in layer.iter_mut() {
+                *v *= scale;
+            }
+        }
+        for v in g.output_weight.iter_mut() {
+            *v *= scale;
+        }
+        g.output_bias *= scale;
+        for row in g.dense_to_acc.iter_mut() {
+            for v in row.iter_mut() {
+                *v *= scale;
+            }
+        }
+    }
+
     let bce_loss = |weights: &TrainableWeights, idx: &[usize]| -> f32 {
         let mut total = 0.0f32;
         for &i in idx {
