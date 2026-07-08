@@ -88,6 +88,7 @@
     background: #1b1b1b;
     border: 1px solid #2a2a2a;
     border-radius: 0.625rem;
+    min-height: 3.1rem;   /* stays constant whether or not captured pieces are shown */
     transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
   }
   .player-panel.active {
@@ -108,12 +109,15 @@
   .captured {
     margin-left: auto;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;      /* never wraps to a 2nd line — panel height stays fixed */
+    overflow-x: auto;
+    scrollbar-width: none;  /* Firefox */
     justify-content: flex-end;
     align-content: center;
     gap: 0.2rem;
     max-width: 58%;
   }
+  .captured::-webkit-scrollbar { display: none; } /* Chrome/Safari/Edge */
   .cap-item {
     display: flex;
     align-items: center;
@@ -209,8 +213,8 @@
     position: relative;
     transition: background 0.1s;
   }
-  .sq.light { background: #976c49; }
-  .sq.dark  { background: #5a4423; }
+  .sq.light { background: #b98f5e; }
+  .sq.dark  { background: #7a5c39; }
 
   .sq.selected       { background: #f6f669 !important; }
   .sq.last-from      { background: #cdd16a !important; }
@@ -342,8 +346,57 @@
     color: #999;
   }
   #board-settings-popover input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
     width: 100%;
-    accent-color: #c8a96e;
+    height: 0.4rem;
+    border-radius: 0.2rem;
+    outline: none;
+    cursor: pointer;
+    background: transparent; /* actual gradient lives on the track pseudo-elements below */
+  }
+  #board-settings-popover input[type=range]::-webkit-slider-runnable-track {
+    height: 0.4rem;
+    border-radius: 0.2rem;
+  }
+  #board-settings-popover input[type=range]::-moz-range-track {
+    height: 0.4rem;
+    border-radius: 0.2rem;
+  }
+  #board-settings-popover input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 0.9rem;
+    height: 0.9rem;
+    margin-top: -0.25rem; /* centers the thumb over the 0.4rem track */
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid #141414;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.4);
+    cursor: pointer;
+  }
+  #board-settings-popover input[type=range]::-moz-range-thumb {
+    width: 0.9rem;
+    height: 0.9rem;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid #141414;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.4);
+    cursor: pointer;
+  }
+  /* Hue slider: full color spectrum so the track itself shows what each
+     position does, instead of a flat accent color. */
+  #board-hue::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+  }
+  #board-hue::-moz-range-track {
+    background: linear-gradient(90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+  }
+  /* Brightness slider: dark → light so the track communicates direction. */
+  #board-brightness::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg, #141414, #f5efe0);
+  }
+  #board-brightness::-moz-range-track {
+    background: linear-gradient(90deg, #141414, #f5efe0);
   }
   #board-settings-buttons {
     display: flex;
