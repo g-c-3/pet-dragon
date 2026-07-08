@@ -62,7 +62,7 @@ jobs:
           ls -lh lichess_sample.txt
 
       - name: Upload sample as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: lichess-sample-skip${{ inputs.skip_lines }}-n${{ inputs.sample_size }}-stride${{ inputs.stride }}
           path: lichess_sample.txt
