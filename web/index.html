@@ -39,6 +39,16 @@
     margin-top: 3px;
   }
 
+  /* ── Game-end celebration overlay ───────────────────────────────────── */
+  #firework-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 9999;
+  }
+
   /* ── App card ───────────────────────────────────────────────────────── */
   /* Elevated panel wrapping players/status/board/controls, giving the page
      a "designed app" feel instead of loose elements on a flat background. */
@@ -93,8 +103,18 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     align-content: center;
-    gap: 2px;
+    gap: 3px;
     max-width: 58%;
+  }
+  .cap-item {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: #1c1c1c;
+    border: 1px solid #383838;
+    border-radius: 4px;
+    padding: 1px 4px 1px 2px;
+    flex-shrink: 0;
   }
   .cap-piece {
     width: clamp(13px, 4.2vw, 18px);   /* ≈33% of the on-board piece size */
@@ -104,6 +124,12 @@
     background-size: contain;
     flex-shrink: 0;
     opacity: 0.92;
+  }
+  .cap-count {
+    font-size: 0.66rem;
+    font-weight: 700;
+    color: #ccc;
+    line-height: 1;
   }
 
   /* ── Status bar ─────────────────────────────────────────────────────── */
@@ -284,9 +310,23 @@
     align-items: center;
     font-size: 0.82rem;
     color: #888;
+    border-radius: 6px;
+    padding: 3px 7px;
+    transition: opacity 0.3s;
   }
   #side-select label { cursor: pointer; display: flex; align-items: center; gap: 4px; }
   #side-select input[type=radio] { accent-color: #c8a96e; }
+
+  @keyframes side-select-glow {
+    0%   { box-shadow: 0 0 6px 1px #ff3b3b; }
+    16%  { box-shadow: 0 0 6px 1px #ff9d3b; }
+    33%  { box-shadow: 0 0 6px 1px #f4ff3b; }
+    50%  { box-shadow: 0 0 6px 1px #3bff5c; }
+    66%  { box-shadow: 0 0 6px 1px #3bd4ff; }
+    83%  { box-shadow: 0 0 6px 1px #6a3bff; }
+    100% { box-shadow: 0 0 6px 1px #ff3b3b; }
+  }
+  #side-select.pulsate { animation: side-select-glow 1.8s linear infinite; }
 
   /* ── Think time ─────────────────────────────────────────────────────── */
   #time-wrap {
@@ -438,6 +478,8 @@
   
 <body>
 
+<canvas id="firework-canvas"></canvas>
+
 <header>
   <h1>🐉 Pet Dragon</h1>
   <p>Original chess variant · Every game starts differently</p>
@@ -543,11 +585,15 @@ let legalMoves = [];          // legal move strings from current position
 let lastMove   = null;        // {from, to} squares of the most recent live move
 let flipped    = false;       // board orientation
 let humanSide  = 'w';         // 'w' or 'b'
+let sideLocked = false;       // true once Play-as is locked in for this game
 let history    = [];          // FEN before each move played so far (live game)
 let moveHighlights = [];      // {from,to} for each move played, aligned with `history`
+let captureLog     = [];      // captured piece letter (or null) for each move, aligned with `history`
 let viewIndex  = 0;           // which position the board is showing (0..history.length)
 let playTimer  = null;        // interval id while move-by-move autoplay is running
 let engineBusy = false;
+let gameEnded  = false;        // true once the LIVE game has actually concluded
+let gameEndMessage = null;     // the final status text (checkmate/draw) to show at the live position
 let aiMode     = false;        // true = engine plays both sides (self-play)
 let pendingPromo = null;      // {from, to} awaiting promotion choice
 
@@ -659,7 +705,7 @@ function render() {
   document.getElementById('panel-human').querySelector('.player-name').textContent =
     humanSide === 'w' ? 'You (White)' : 'You (Black)';
   updateWinProb(board, viewFen);
-  renderCaptured(board);
+  renderCaptured();
   const legal    = legal_moves_from_fen(viewFen).split(' ').filter(Boolean);
   const legalTo  = selected !== null
     ? new Set(legal.filter(m => m.slice(0,2) === sqName(selected)).map(m => m.slice(2,4)))
@@ -704,7 +750,9 @@ function render() {
 
   // Status
   const legal2 = legal_moves_from_fen(viewFen).trim();
-  if (!legal2) {
+  if (gameEnded && isLive()) {
+    document.getElementById('status').textContent = gameEndMessage;
+  } else if (!legal2) {
     document.getElementById('status').textContent =
       side === 'w' ? '♔ Checkmate — Black wins!' : '♚ Checkmate — White wins!';
   } else if (!engineBusy) {
@@ -713,64 +761,82 @@ function render() {
   }
 
   updateNavControls();
+  updateSideSelectState();
 }
 
 // ── Captured pieces tray ────────────────────────────────────────────────────────
-// Pet Dragon randomizes the starting position every game, so we can't assume
-// standard counts (8 pawns, 2 rooks, etc.) — captures are found by diffing
-// each side's piece counts against that game's own startFen, not a fixed
-// standard start.
+// Captures are logged move-by-move as they happen (see detectCapture(), called
+// from applyMove()/maybeEngineMove()), not inferred by diffing piece counts.
+// That matters because of promotion: a diff-based count would misread a
+// promoted pawn as "a captured pawn" the moment it turns into a queen, and
+// would misattribute that queen if it's later captured. Logging the actual
+// piece taken on each move (including en-passant) keeps a promoted queen
+// correctly counted as a queen capture, not a pawn.
 const CAP_ORDER = ['q', 'r', 'b', 'n', 'p']; // display order, most valuable first
 
-function getPieceCounts(board) {
-  const counts = { w: {}, b: {} };
-  for (const p of board) {
-    if (!p) continue;
-    const color = p === p.toUpperCase() ? 'w' : 'b';
-    const t = p.toLowerCase();
-    counts[color][t] = (counts[color][t] || 0) + 1;
+// Returns the piece letter captured by `uciMove` played from `fenStr`, or
+// null if the move captures nothing. Handles normal captures and en passant.
+function detectCapture(fenStr, uciMove) {
+  const parts  = fenStr.split(' ');
+  const board  = parseFen(fenStr);
+  const fromSq = squareIndex(uciMove.slice(0,2));
+  const toSq   = squareIndex(uciMove.slice(2,4));
+  const piece  = board[fromSq];
+  const prevEP = parts[3];
+
+  if (board[toSq]) return board[toSq]; // normal capture
+
+  if ((piece === 'P' || piece === 'p') && prevEP !== '-' && uciMove.slice(2,4) === prevEP) {
+    const capRank = piece === 'P' ? rank(toSq) - 1 : rank(toSq) + 1;
+    return board[idx(file(toSq), capRank)] || null;
   }
-  return counts;
+  return null;
 }
 
-// Pieces of `color` that were present at game start but are missing now
-// (i.e. have been captured), in CAP_ORDER, most valuable first.
-function lostPieces(color, initialCounts, currentCounts) {
-  const out = [];
-  for (const t of CAP_ORDER) {
-    const had  = (initialCounts[color] && initialCounts[color][t]) || 0;
-    const have = (currentCounts[color] && currentCounts[color][t]) || 0;
-    for (let i = 0; i < Math.max(0, had - have); i++) out.push(t);
+// Tally of captures up to (not including) move index `uptoIndex`, i.e. as of
+// whatever position the navigator is currently showing.
+function computeCapturedTallies(uptoIndex) {
+  const tally = { w: { q:0, r:0, b:0, n:0, p:0 }, b: { q:0, r:0, b:0, n:0, p:0 } };
+  for (let i = 0; i < uptoIndex; i++) {
+    const cap = captureLog[i];
+    if (!cap) continue;
+    const color = cap === cap.toUpperCase() ? 'w' : 'b';
+    const t = cap.toLowerCase();
+    if (tally[color][t] !== undefined) tally[color][t]++;
   }
-  return out;
+  return tally;
 }
 
-function fillCaptured(elId, letters, color) {
+function fillCapturedTally(elId, counts, color) {
   const el = document.getElementById(elId);
   el.innerHTML = '';
-  for (const t of letters) {
-    const d = document.createElement('div');
+  for (const t of CAP_ORDER) {
+    const n = counts[t] || 0;
+    if (!n) continue;
+    const item = document.createElement('div');
+    item.className = 'cap-item';
     const glyph = color === 'w' ? t.toUpperCase() : t; // render in the captured piece's own color
-    d.className = 'cap-piece piece-' + glyph;
-    el.appendChild(d);
+    const icon = document.createElement('div');
+    icon.className = 'cap-piece piece-' + glyph;
+    const count = document.createElement('span');
+    count.className = 'cap-count';
+    count.textContent = n;
+    item.appendChild(icon);
+    item.appendChild(count);
+    el.appendChild(item);
   }
 }
 
-function renderCaptured(board) {
-  if (!startFen) return;
-  const initialCounts = getPieceCounts(parseFen(startFen));
-  const currentCounts = getPieceCounts(board);
+function renderCaptured() {
+  const tally = computeCapturedTallies(viewIndex);
 
   const humanColor  = humanSide;
   const engineColor = humanSide === 'w' ? 'b' : 'w';
 
   // Engine's tray shows the human's pieces it has captured; the human's
   // tray shows the engine's pieces they've captured.
-  const capturedByEngine = lostPieces(humanColor,  initialCounts, currentCounts);
-  const capturedByHuman  = lostPieces(engineColor, initialCounts, currentCounts);
-
-  fillCaptured('captured-engine', capturedByEngine, humanColor);
-  fillCaptured('captured-human',  capturedByHuman,  engineColor);
+  fillCapturedTally('captured-engine', tally[humanColor],  humanColor);
+  fillCapturedTally('captured-human',  tally[engineColor], engineColor);
 }
 
 // ── Win probability meter ──────────────────────────────────────────────────────
@@ -885,6 +951,7 @@ function updateWinProb(board, viewFen) {
 function onSquareClick(sq) {
   if (aiMode) return;
   if (engineBusy) return;
+  if (gameEnded) return; // game over — no more moves
   if (!isLive()) return; // reviewing history — not interactive
   const side = sideToMove(fen);
   if (side !== humanSide) return; // not player's turn
@@ -976,6 +1043,7 @@ function applyMove(uciMove) {
   const wasLive = viewIndex === history.length - 1; // history.length already includes this move's pre-state push
   const prevFen = history[history.length - 1] || startFen;
   const newFen  = applyMoveToFen(prevFen, uciMove);
+  captureLog.push(detectCapture(prevFen, uciMove));
 
   const from = squareIndex(uciMove.slice(0,2));
   const to   = squareIndex(uciMove.slice(2,4));
@@ -983,6 +1051,7 @@ function applyMove(uciMove) {
   moveHighlights.push({ from, to });
   fen = newFen;
   if (wasLive) viewIndex = history.length; // keep the navigator following live play
+  checkGameEndAndCelebrate();
 
   render();
   maybeEngineMove();
@@ -1088,6 +1157,132 @@ function applyMoveToFen(fenStr, uciMove) {
   return `${placement} ${newSide} ${castle} ${ep} ${halfmove} ${fullmove}`;
 }
 
+// ── Game-end detection & celebration ───────────────────────────────────────────
+// Checked once after every LIVE move (never while just browsing history via
+// the navigator). Covers: no legal moves (this app's existing convention
+// treats that as checkmate), the 50-move rule, threefold repetition, and
+// insufficient material. First condition met wins and fires the fireworks.
+
+function positionKey(fenStr) {
+  // Placement + side + castling + en-passant — the standard fields used to
+  // compare positions for repetition (halfmove/fullmove counters excluded).
+  return fenStr.split(' ').slice(0, 4).join(' ');
+}
+
+function isInsufficientMaterial(board) {
+  const rest = board.filter(p => p && p.toLowerCase() !== 'k');
+  if (rest.length === 0) return true;                                    // K v K
+  if (rest.length === 1 && /[bn]/i.test(rest[0])) return true;            // K+minor v K
+  if (rest.length === 2 && rest.every(p => p.toLowerCase() === 'b')) {
+    // K+B v K+B is only a dead draw if both bishops are the same square color.
+    const bishopSquares = [];
+    for (let sq = 0; sq < 64; sq++) {
+      if (board[sq] && board[sq].toLowerCase() === 'b') bishopSquares.push(sq);
+    }
+    if (bishopSquares.length === 2) {
+      const colorOf = s => (file(s) + rank(s)) % 2;
+      if (colorOf(bishopSquares[0]) === colorOf(bishopSquares[1])) return true;
+    }
+  }
+  return false;
+}
+
+function checkGameEndAndCelebrate() {
+  if (gameEnded) return;
+
+  const board    = parseFen(fen);
+  const legal    = legal_moves_from_fen(fen).trim();
+  const sideNow  = sideToMove(fen);
+  const halfmove = parseInt(fen.split(' ')[4]) || 0;
+
+  let message = null;
+
+  if (!legal) {
+    // No dedicated "is this side in check" export, so — matching this app's
+    // existing convention — no legal moves is treated as checkmate.
+    message = sideNow === 'w' ? '♔ Checkmate — Black wins!' : '♚ Checkmate — White wins!';
+  } else if (halfmove >= 100) {
+    message = '🤝 Draw — 50-move rule';
+  } else if (isInsufficientMaterial(board)) {
+    message = '🤝 Draw — insufficient material';
+  } else {
+    const counts = {};
+    for (const pos of history.concat([fen])) {
+      const key = positionKey(pos);
+      counts[key] = (counts[key] || 0) + 1;
+      if (counts[key] >= 3) { message = '🤝 Draw — threefold repetition'; break; }
+    }
+  }
+
+  if (message) {
+    gameEnded = true;
+    gameEndMessage = message;
+    launchFireworks();
+  }
+}
+
+function launchFireworks() {
+  const canvas = document.getElementById('firework-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const colors = ['#ff595e', '#ffca3a', '#8ac926', '#1982c4', '#6a4c93', '#ff924c', '#f0d08a'];
+  let particles = [];
+
+  function spawnBurst(x, y) {
+    const count = 46;
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
+      const speed = 2.5 + Math.random() * 4;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 55 + Math.random() * 25,
+        age: 0,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 2 + Math.random() * 2,
+      });
+    }
+  }
+
+  const w = canvas.width, h = canvas.height;
+  const burstPlan = [
+    [w * 0.25, h * 0.32, 0],
+    [w * 0.5,  h * 0.22, 220],
+    [w * 0.75, h * 0.32, 440],
+    [w * (0.2 + Math.random() * 0.6), h * (0.2 + Math.random() * 0.25), 700],
+    [w * (0.2 + Math.random() * 0.6), h * (0.2 + Math.random() * 0.25), 950],
+  ];
+  burstPlan.forEach(([x, y, delay]) => setTimeout(() => spawnBurst(x, y), delay));
+
+  let animFrame;
+  function tick() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const p of particles) {
+      p.age++;
+      p.vy += 0.05; // gravity
+      p.x += p.vx;
+      p.y += p.vy;
+      ctx.globalAlpha = Math.max(0, 1 - p.age / p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    particles = particles.filter(p => p.age < p.life);
+    animFrame = requestAnimationFrame(tick);
+  }
+  tick();
+
+  setTimeout(() => {
+    cancelAnimationFrame(animFrame);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }, 3800);
+}
+
 // ── Promotion modal ───────────────────────────────────────────────────────────
 function showPromoModal(isWhite) {
   const pieces = isWhite
@@ -1117,6 +1312,7 @@ async function maybeEngineMove() {
   // Re-entrancy guard: never let two searches overlap (e.g. a toggle click
   // landing while a search from the previous move is still resolving).
   if (engineBusy) return;
+  if (gameEnded) return; // live game already concluded — nothing more to play
 
   const side = sideToMove(fen);
   // In normal mode the engine only moves for the non-human side.
@@ -1148,17 +1344,20 @@ async function maybeEngineMove() {
   const to   = squareIndex(bestmove.slice(2,4));
   lastMove   = { from, to };
   moveHighlights.push({ from, to });
+  captureLog.push(detectCapture(fen, bestmove));
   fen        = applyMoveToFen(fen, bestmove);
   if (wasLive) viewIndex = history.length; // keep the navigator following live play
+  checkGameEndAndCelebrate();
 
   render();
 
   // Self-play: keep going for the next side too, as long as AI mode is
-  // still on. If the switch got flipped off while this move was being
-  // calculated, this check simply stops the loop here — no crash, no
-  // orphaned timers — and control passes back to whichever side is human
-  // via the normal (side !== humanSide) path on the next move.
-  if (aiMode) {
+  // still on and the game hasn't just ended in checkmate/draw. If the
+  // switch got flipped off while this move was being calculated, this
+  // check simply stops the loop here — no crash, no orphaned timers —
+  // and control passes back to whichever side is human via the normal
+  // (side !== humanSide) path on the next move.
+  if (aiMode && !gameEnded) {
     setTimeout(maybeEngineMove, 10);
   }
 }
@@ -1172,17 +1371,32 @@ function startNewGame() {
   moveList  = [];
   history   = [];
   moveHighlights = [];
+  captureLog = [];
   viewIndex = 0;
+  gameEnded = false;
+  gameEndMessage = null;
   lastMove  = null;
   selected  = null;
   engineBusy = false;
+
+  // Reset "Play as" back to an open, unlocked choice (defaulting to White)
+  // and board orientation to match.
+  humanSide  = 'w';
+  sideLocked = false;
+  flipped    = false;
+  document.querySelector('input[name=side][value="w"]').checked = true;
+  document.querySelector('input[name=side][value="b"]').checked = false;
+
+  // AI Self-Play always starts off on a new game.
+  aiMode = false;
+  document.getElementById('ai-toggle').checked = false;
+
   render();
 
-  // If human plays black, engine moves first — and in AI self-play mode
-  // the engine always moves first regardless of chosen side.
-  if (aiMode || humanSide === 'b') {
-    maybeEngineMove();
-  }
+  // Note: humanSide is always 'w' and aiMode always off at this point (just
+  // reset above), so the engine never needs to move immediately here.
+  // Picking Black or turning on AI Self-Play during the open window is what
+  // triggers the engine's first move — see those two handlers below.
 }
 
 // ── Controls ──────────────────────────────────────────────────────────────────
@@ -1218,6 +1432,20 @@ function updateNavControls() {
   document.getElementById('btn-playpause').disabled  = total === 0;
 }
 
+// "Play as" is only choosable for the game's first two half-moves — it
+// locks the moment either two plies have been played (the player never
+// touched it) or the player explicitly picks a side (locks immediately).
+// Uses the LIVE ply count (history.length), not the navigator's viewIndex,
+// so browsing old positions never re-opens or re-locks it.
+function updateSideSelectState() {
+  if (history.length >= 2) sideLocked = true;
+  const active = !aiMode && !sideLocked;
+  const el = document.getElementById('side-select');
+  el.classList.toggle('disabled', !active);
+  el.classList.toggle('pulsate', active);
+  document.querySelectorAll('input[name=side]').forEach(r => { r.disabled = !active; });
+}
+
 document.getElementById('btn-first').addEventListener('click', () => {
   stopPlayback();
   viewIndex = 0;
@@ -1249,7 +1477,7 @@ document.getElementById('btn-playpause').addEventListener('click', () => {
 
 document.getElementById('ai-toggle').addEventListener('change', (e) => {
   aiMode = e.target.checked;
-  document.getElementById('side-select').classList.toggle('disabled', aiMode);
+  updateSideSelectState();
   updateWinProb(parseFen(displayedFen()), displayedFen()); // labels (You/Engine vs White/Black) depend on aiMode
 
   if (aiMode) {
@@ -1267,8 +1495,12 @@ document.getElementById('ai-toggle').addEventListener('change', (e) => {
 
 document.querySelectorAll('input[name=side]').forEach(r => {
   r.addEventListener('change', () => {
-    humanSide = r.value;
-    startNewGame();
+    if (sideLocked || aiMode) return; // shouldn't fire while disabled, but guard anyway
+    humanSide   = r.value;
+    flipped     = (r.value === 'b'); // auto-flip so your side is at the bottom
+    sideLocked  = true;              // picking a side locks it in immediately
+    render();
+    maybeEngineMove(); // in case it's now the engine's turn under the new side
   });
 });
 
