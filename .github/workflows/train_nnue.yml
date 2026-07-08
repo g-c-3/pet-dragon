@@ -65,9 +65,14 @@ on:
         default: "42"
         type: string
       weight_decay:
-        description: "D30/D31: AdamW-style decoupled weight decay, applied to weight tensors (not biases) every batch step. Prevents unbounded output-logit growth (see DECISIONS.md D30). 0 disables."
+        description: "D30/D31/D33: AdamW-style decoupled weight decay, applied to weight tensors (not biases) every batch step. Prevents unbounded output-logit growth (see DECISIONS.md D30/D33). 0.0001 was confirmed too weak — network still saturated at the clamp ceiling on real in-distribution positions. Raised default 100x. 0 disables."
         required: false
-        default: "0.0001"
+        default: "0.01"
+        type: string
+      grad_clip_norm:
+        description: "D33: global-norm gradient clipping applied before each Adam step, over the whole gradient including biases. Complementary to weight_decay — caps the update magnitude directly rather than only pulling weights toward zero passively. 0 disables."
+        required: false
+        default: "1.0"
         type: string
 
 env:
