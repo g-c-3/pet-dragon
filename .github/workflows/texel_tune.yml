@@ -158,6 +158,7 @@ jobs:
           ${{ inputs.k }}
           ${{ inputs.seed }}
           ${{ inputs.batch_size }}
+          ${{ inputs.weight_decay }}
 
       - name: Report output
         run: cat texel_weights_tuned.txt
