@@ -678,7 +678,7 @@
     body {
       display: grid;
       grid-template-columns: minmax(0, 22rem) auto minmax(0, 22rem);
-      grid-template-rows: repeat(4, auto);
+      grid-template-rows: repeat(3, auto);
       justify-content: center;
       align-content: center;
       column-gap: clamp(1rem, 3vw, 2.75rem);
@@ -700,9 +700,41 @@
        groups breathing directly on the page background. */
     #app-card { display: contents; }
 
-    #ai-toggle-row { grid-column: 1; grid-row: 2; margin-bottom: 0; }
-    #players       { grid-column: 1; grid-row: 3; margin-bottom: 0; }
-    #status        { grid-column: 1; grid-row: 4; margin-bottom: 0; }
+    #players { grid-column: 1; grid-row: 2; margin-bottom: 0; }
+
+    /* AI-toggle and status share one grid cell instead of one row each —
+       two grid items are allowed to occupy the same cell as long as
+       they're pinned to opposite edges (justify-self start/end) rather
+       than stretched, so they sit side by side instead of overlapping.
+       This trades the winprob bar's width for a saved row of vertical
+       space, which is exactly what freed up the room for the taller
+       player panels below. */
+    #ai-toggle-row {
+      grid-column: 1; grid-row: 3;
+      justify-self: start;
+      align-self: center;
+      width: auto;
+      margin-bottom: 0;
+    }
+    #ai-toggle-row #winprob { min-width: 5rem; }
+    #status {
+      grid-column: 1; grid-row: 3;
+      justify-self: end;
+      align-self: center;
+      margin-bottom: 0;
+    }
+
+    /* Captured-piece chips wrap onto a second row instead of scrolling
+       horizontally — a side can capture at most 5 distinct piece types
+       (every type but the king), and 3-over-2 comfortably fits that
+       within the rail's width. The panel itself needs no explicit
+       height change: it's a flex row with align-items:center, so it
+       already grows to match its tallest child once the tray wraps. */
+    .captured {
+      flex-wrap: wrap;
+      overflow-x: visible;
+      max-width: 60%;
+    }
 
     /* The board is meant to dominate the page, so it's sized to fill
        essentially the whole viewport height minus the coordinate-label
