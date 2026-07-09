@@ -36,6 +36,7 @@ pub mod movegen;
 pub mod tt;
 pub mod search;
 pub mod eval;
+pub mod texel;
 pub mod nnue;
 
 // Syzygy endgame tablebases — native only (pyrrhic-rs needs libc, not wasm32-safe)
