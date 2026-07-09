@@ -50,6 +50,11 @@ on:
         required: false
         default: "16384"
         type: string
+      weight_decay:
+        description: "Decoupled weight decay strength, pulling each parameter toward its DEFAULT value each step (not toward zero — see D35 Session 55). 0.0 disables it. Recommended for longer runs (50+ epochs) to keep rare/sparse features (e.g. uncommon king-safety attacker-count buckets) from swinging on noise — try 0.01-0.05."
+        required: false
+        default: "0.0"
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
