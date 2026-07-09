@@ -86,6 +86,13 @@
     align-items: center;
   }
 
+  /* #rail-left/#rail-right only exist to give landscape mode two real,
+     independently-bounded containers (see the landscape media query).
+     In portrait they must be invisible as boxes so #app-card's direct
+     flex children are exactly what they were before these wrappers
+     existed — display:contents does exactly that. */
+  #rail-left, #rail-right { display: contents; }
+
   /* ── Player panels ──────────────────────────────────────────────────── */
   #players {
     width: 100%;
@@ -662,25 +669,30 @@
      ══════════════════════════════════════════════════════════════════ */
   @media (orientation: landscape) {
     /* `vh` on mobile Chrome measures the viewport with its on-screen
-       toolbar collapsed, so a page sized off 100vh renders taller than
-       what's actually visible and the bottom gets clipped by the
-       overflow:hidden below — exactly the cutoff seen in Chrome (Firefox
-       and Opera already report the toolbar-aware size for plain vh).
-       `dvh`/`dvw` are the dynamic-viewport units built for this; every
-       vh/vw pair below is listed twice on purpose — the vh/vw line first
-       as a safe fallback, the dvh/dvw line after it so it wins the
-       cascade in any browser that supports it. Browsers that don't
-       understand dvh/dvw simply ignore that whole (invalid) line and
-       keep the fallback — nothing is hardcoded or duplicated logic,
-       it's the standard progressive-enhancement pattern for this unit. */
+       toolbar collapsed, so a page sized off 100vh can render taller than
+       what's actually visible (Firefox/Opera already report the
+       toolbar-aware size for plain vh). `dvh`/`dvw` are the dynamic-
+       viewport units built for this; every vh/vw pair below is listed
+       twice on purpose — the vh/vw line first as a safe fallback, the
+       dvh/dvw line after it so it wins the cascade in any browser that
+       supports it. Browsers that don't understand dvh/dvw simply ignore
+       that whole (invalid) line and keep the fallback. */
     html, body { height: 100%; overflow: hidden; }
 
+    /* Outer grid: row 1 is exactly as tall as the header, row 2 (1fr) is
+       whatever's left — a `1fr` row can never grow past its share of the
+       container no matter how tall its content wants to be, which is the
+       actual fix for the cross-browser cutoff: previously every row was
+       `auto`, so slightly taller text/rendering in one browser could push
+       the whole grid past 100dvh and get clipped by overflow:hidden. Any
+       column whose content doesn't fit its bounded cell now clips inside
+       that cell (see #rail-left/#rail-right below) instead of inflating
+       the page. */
     body {
       display: grid;
       grid-template-columns: minmax(0, 22rem) auto minmax(0, 22rem);
-      grid-template-rows: repeat(4, auto);
+      grid-template-rows: auto 1fr;
       justify-content: center;
-      align-content: center;
       column-gap: clamp(1rem, 3vw, 2.75rem);
       row-gap: clamp(0.2rem, 1vh, 0.5rem);
       row-gap: clamp(0.2rem, 1dvh, 0.5rem);
@@ -694,37 +706,45 @@
 
     header { grid-column: 1; grid-row: 1; margin-bottom: 0; }
 
-    /* The card's box (background/border/shadow/padding) was a single
+    /* The card's own box (background/border/shadow/padding) was a single
        stacked-column idea — it doesn't make sense split across three
-       tracks, so landscape deliberately drops it in favor of the three
-       groups breathing directly on the page background. */
+       tracks, so landscape drops it in favor of the rails breathing
+       directly on the page background. */
     #app-card { display: contents; }
 
-    #players { grid-column: 1; grid-row: 2; margin-bottom: 0; }
+    /* Each rail is its OWN small grid/flex box with a hard-bounded height
+       (the outer grid's 1fr row, or the full column for the right rail)
+       and `overflow:hidden` — so if a rail's content is ever slightly
+       taller than expected in some browser, THAT rail clips internally
+       instead of the whole page growing past the viewport. This is the
+       main structural fix versus placing every element straight onto one
+       shared page-level grid. */
+    #rail-left {
+      grid-column: 1;
+      grid-row: 2;
+      display: grid;
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto auto;
+      align-content: center;
+      row-gap: clamp(0.25rem, 1.4vh, 0.7rem);
+      row-gap: clamp(0.25rem, 1.4dvh, 0.7rem);
+      min-height: 0;
+      overflow: hidden;
+    }
 
     /* The win-probability bar used to live inside #ai-toggle-row next to
        the "AI Self-Play" switch, but at column width its full-size labels
-       collided with the status text sharing that row. Rather than shrink
-       it into illegibility, #ai-toggle-row is unwrapped (display:contents)
-       so the bar can be pulled out onto its own row, directly under the
-       player panels — the switch stays exactly where it was, next to
-       "White to move". */
+       collided with the status text sharing that row. #ai-toggle-row is
+       unwrapped (display:contents) so the bar can sit on its own row,
+       under the player panels, while the switch stays next to the status
+       text below it, exactly as requested. */
     #ai-toggle-row { display: contents; }
-    #ai-toggle-divider { display: none; } /* was only needed to separate the switch from the bar when they shared a row */
+    #ai-toggle-divider { display: none; } /* only existed to separate the switch from the bar when they shared a row */
 
-    #winprob { grid-column: 1; grid-row: 3; }
-
-    #ai-toggle-left {
-      grid-column: 1; grid-row: 4;
-      justify-self: start;
-      align-self: center;
-    }
-    #status {
-      grid-column: 1; grid-row: 4;
-      justify-self: end;
-      align-self: center;
-      margin-bottom: 0;
-    }
+    #players        { grid-row: 1; grid-column: 1; margin-bottom: 0; }
+    #winprob        { grid-row: 2; grid-column: 1; width: 100%; }
+    #ai-toggle-left { grid-row: 3; grid-column: 1; justify-self: start; align-self: center; max-width: 60%; }
+    #status         { grid-row: 3; grid-column: 1; justify-self: end;   align-self: center; max-width: 38%; margin-bottom: 0; }
 
     /* Captured-piece chips wrap onto a second row instead of scrolling
        horizontally — a side can capture at most 5 distinct piece types
@@ -745,29 +765,38 @@
       min-height: calc(2 * clamp(1.0625rem, 5.4vw, 1.5rem) + 1.3rem);
     }
 
-    /* The board is meant to dominate the page, so it's sized to fill
-       essentially the whole viewport height minus the coordinate-label
-       margin below it — 96dvh (94vh fallback) leaves only that sliver
-       of breathing room top and bottom, edge-to-edge otherwise. The vw
-       ceiling only exists as a safety cap so it can't crowd out the
-       side rails on a very short-but-ultra-wide screen; on any normal
-       landscape aspect ratio the height term is the binding one. The
-       left/bottom margin reuses --coord-size (not a new value) to make
-       room for the rank/file coordinate labels, which sit just outside
-       the board's own box. */
+    /* The board is meant to dominate the page, filling essentially the
+       whole viewport height edge-to-edge. Unlike a flat "94vh" guess,
+       this explicitly subtracts the page's own top+bottom padding and
+       the coordinate-label margin below the board, so the board's actual
+       rendered footprint can never exceed the available space no matter
+       how the padding clamp() resolves on a given screen — the earlier
+       Chrome cutoff was exactly this: a flat vh figure that didn't
+       account for padding, so it occasionally overshot by a few pixels
+       and got clipped. The vw ceiling only exists so it can't crowd the
+       side rails on a very short-but-ultra-wide screen. */
     #board-wrap {
       grid-column: 2;
       grid-row: 1 / -1;
-      width: min(94vh, 46vw);
-      width: min(96dvh, 46vw);
+      width: min(calc(100vh - 2 * clamp(0.3rem, 1.5vh, 1rem) - var(--coord-size)), 46vw);
+      width: min(calc(100dvh - 2 * clamp(0.3rem, 1.5dvh, 1rem) - var(--coord-size)), 46vw);
       margin: 0 0 var(--coord-size) var(--coord-size);
       align-self: center;
       justify-self: center;
     }
 
-    #controls           { grid-column: 3; grid-row: 1; margin-top: 0; }
-    #controls-secondary { grid-column: 3; grid-row: 2; margin-top: 0; }
-    #info               { grid-column: 3; grid-row: 3; margin-top: 0; }
+    #rail-right {
+      grid-column: 3;
+      grid-row: 1 / -1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: clamp(0.4rem, 1.6vh, 0.9rem);
+      gap: clamp(0.4rem, 1.6dvh, 0.9rem);
+      min-height: 0;
+      overflow: hidden;
+    }
+    #controls, #controls-secondary, #info { margin-top: 0; }
   }
 </style>
 </head>
@@ -783,41 +812,43 @@
 
 <div id="app-card">
 
-  <div id="ai-toggle-row">
-    <div id="ai-toggle-left">
-      <label class="switch">
-        <input type="checkbox" id="ai-toggle">
-        <span class="slider"></span>
-      </label>
-      <span>AI Self-Play</span>
-    </div>
-    <div id="ai-toggle-divider"></div>
-    <div id="winprob">
-      <div id="winprob-labels">
-        <span id="winprob-left-name">Engine</span>
-        <span id="winprob-right-name">You</span>
+  <div id="rail-left">
+    <div id="ai-toggle-row">
+      <div id="ai-toggle-left">
+        <label class="switch">
+          <input type="checkbox" id="ai-toggle">
+          <span class="slider"></span>
+        </label>
+        <span>AI Self-Play</span>
       </div>
-      <div id="winprob-bar">
-        <div id="winprob-fill-left"></div>
-        <div id="winprob-fill-right"></div>
+      <div id="ai-toggle-divider"></div>
+      <div id="winprob">
+        <div id="winprob-labels">
+          <span id="winprob-left-name">Engine</span>
+          <span id="winprob-right-name">You</span>
+        </div>
+        <div id="winprob-bar">
+          <div id="winprob-fill-left"></div>
+          <div id="winprob-fill-right"></div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div id="players">
-    <div class="player-panel" id="panel-engine">
-      <span class="player-icon">🐉</span>
-      <span class="player-name">Pet Dragon</span>
-      <div class="captured" id="captured-engine"></div>
+    <div id="players">
+      <div class="player-panel" id="panel-engine">
+        <span class="player-icon">🐉</span>
+        <span class="player-name">Pet Dragon</span>
+        <div class="captured" id="captured-engine"></div>
+      </div>
+      <div class="player-panel" id="panel-human">
+        <span class="player-icon">🧑</span>
+        <span class="player-name">You</span>
+        <div class="captured" id="captured-human"></div>
+      </div>
     </div>
-    <div class="player-panel" id="panel-human">
-      <span class="player-icon">🧑</span>
-      <span class="player-name">You</span>
-      <div class="captured" id="captured-human"></div>
-    </div>
-  </div>
 
-  <div id="status">Loading engine…</div>
+    <div id="status">Loading engine…</div>
+  </div>
 
   <div id="board-wrap">
     <div class="coords-rank" id="coords-rank"></div>
@@ -825,59 +856,61 @@
     <div class="coords-file" id="coords-file"></div>
   </div>
 
-  <div id="controls">
-    <div id="board-settings-wrap">
-      <button id="btn-board-settings" title="Board appearance">🎨</button>
-      <div id="board-settings-popover">
-        <label>Hue
-          <input type="range" id="board-hue" min="0" max="360" value="32" step="1">
-        </label>
-        <label>Brightness
-          <input type="range" id="board-brightness" min="60" max="140" value="100" step="1">
-        </label>
-        <div id="board-settings-buttons">
-          <button id="board-settings-reset" type="button">Reset</button>
-          <button id="board-settings-ok" type="button">OK</button>
+  <div id="rail-right">
+    <div id="controls">
+      <div id="board-settings-wrap">
+        <button id="btn-board-settings" title="Board appearance">🎨</button>
+        <div id="board-settings-popover">
+          <label>Hue
+            <input type="range" id="board-hue" min="0" max="360" value="32" step="1">
+          </label>
+          <label>Brightness
+            <input type="range" id="board-brightness" min="60" max="140" value="100" step="1">
+          </label>
+          <div id="board-settings-buttons">
+            <button id="board-settings-reset" type="button">Reset</button>
+            <button id="board-settings-ok" type="button">OK</button>
+          </div>
         </div>
       </div>
+      <button id="btn-new">+ New Game</button>
+      <div id="nav-controls">
+        <button id="btn-first" title="First move">⏮</button>
+        <button id="btn-prev" title="Previous move">❮</button>
+        <button id="btn-playpause" title="Play/Pause">▶</button>
+        <button id="btn-next" title="Next move">❯</button>
+        <button id="btn-last" title="Last move (live)">⏭</button>
+      </div>
     </div>
-    <button id="btn-new">+ New Game</button>
-    <div id="nav-controls">
-      <button id="btn-first" title="First move">⏮</button>
-      <button id="btn-prev" title="Previous move">❮</button>
-      <button id="btn-playpause" title="Play/Pause">▶</button>
-      <button id="btn-next" title="Next move">❯</button>
-      <button id="btn-last" title="Last move (live)">⏭</button>
+
+    <div id="controls-secondary">
+      <div id="side-select">
+        Play as:
+        <label><input type="radio" name="side" value="w" checked> White</label>
+        <label><input type="radio" name="side" value="b"> Black</label>
+      </div>
+      <div id="time-wrap">
+        Engine:
+        <select id="time-sel">
+          <option value="500">0.5s</option>
+          <option value="1000" selected>1s</option>
+          <option value="2000">2s</option>
+          <option value="5000">5s</option>
+          <option value="10000">10s</option>
+        </select>
+      </div>
+      <span id="move-counter">Move 0 · Ply 0</span>
+    </div>
+
+    <div id="info">
+      Pet Dragon by <strong>Gokul Chandar</strong> · Engine: Claude (Anthropic) · GPL v3<br>
+      <a href="https://github.com/g-c-3/pet-dragon">github.com/g-c-3/pet-dragon</a>
     </div>
   </div>
 
-  <div id="controls-secondary">
-    <div id="side-select">
-      Play as:
-      <label><input type="radio" name="side" value="w" checked> White</label>
-      <label><input type="radio" name="side" value="b"> Black</label>
-    </div>
-    <div id="time-wrap">
-      Engine:
-      <select id="time-sel">
-        <option value="500">0.5s</option>
-        <option value="1000" selected>1s</option>
-        <option value="2000">2s</option>
-        <option value="5000">5s</option>
-        <option value="10000">10s</option>
-      </select>
-    </div>
-    <span id="move-counter">Move 0 · Ply 0</span>
-  </div>
-
-  <!-- Promotion picker -->
+  <!-- Promotion picker: position:fixed overlay, DOM position doesn't matter -->
   <div id="promo-modal">
     <div id="promo-box"></div>
-  </div>
-
-  <div id="info">
-    Pet Dragon by <strong>Gokul Chandar</strong> · Engine: Claude (Anthropic) · GPL v3<br>
-    <a href="https://github.com/g-c-3/pet-dragon">github.com/g-c-3/pet-dragon</a>
   </div>
 
 </div>
