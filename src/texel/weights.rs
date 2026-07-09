@@ -29,7 +29,7 @@ use crate::eval::material::s;
 
 pub const MAX_KING_DANGER: i32 = 2400;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TunableWeights {
     // ── Material ─────────────────────────────────────────────────────────
     /// s(mg, eg) per kind, order: Pawn, Knight, Bishop, Rook, Queen.
