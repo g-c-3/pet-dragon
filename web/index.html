@@ -661,6 +661,18 @@
      across every aspect ratio instead of snapping at a breakpoint.
      ══════════════════════════════════════════════════════════════════ */
   @media (orientation: landscape) {
+    /* `vh` on mobile Chrome measures the viewport with its on-screen
+       toolbar collapsed, so a page sized off 100vh renders taller than
+       what's actually visible and the bottom gets clipped by the
+       overflow:hidden below — exactly the cutoff seen in Chrome (Firefox
+       and Opera already report the toolbar-aware size for plain vh).
+       `dvh`/`dvw` are the dynamic-viewport units built for this; every
+       vh/vw pair below is listed twice on purpose — the vh/vw line first
+       as a safe fallback, the dvh/dvw line after it so it wins the
+       cascade in any browser that supports it. Browsers that don't
+       understand dvh/dvw simply ignore that whole (invalid) line and
+       keep the fallback — nothing is hardcoded or duplicated logic,
+       it's the standard progressive-enhancement pattern for this unit. */
     html, body { height: 100%; overflow: hidden; }
 
     body {
@@ -670,10 +682,14 @@
       justify-content: center;
       align-content: center;
       column-gap: clamp(1rem, 3vw, 2.75rem);
-      row-gap: clamp(0.25rem, 1.1vh, 0.6rem);
+      row-gap: clamp(0.2rem, 1vh, 0.5rem);
+      row-gap: clamp(0.2rem, 1dvh, 0.5rem);
       height: 100vh;
+      height: 100dvh;
       width: 100vw;
-      padding: clamp(0.4rem, 2vh, 1.25rem) clamp(0.6rem, 2vw, 1.5rem);
+      width: 100dvw;
+      padding: clamp(0.3rem, 1.5vh, 1rem) clamp(0.5rem, 2vw, 1.25rem);
+      padding: clamp(0.3rem, 1.5dvh, 1rem) clamp(0.5rem, 2vw, 1.25rem);
     }
 
     header { grid-column: 1; grid-row: 1; margin-bottom: 0; }
@@ -688,15 +704,21 @@
     #players       { grid-column: 1; grid-row: 3; margin-bottom: 0; }
     #status        { grid-column: 1; grid-row: 4; margin-bottom: 0; }
 
-    /* Sized off vh first (landscape is height-constrained) with a vw
-       ceiling so it never crowds the side rails on very short-but-wide
-       screens. The left/bottom margin reuses --coord-size (not a new
-       value) to make room for the rank/file coordinate labels, which
-       sit just outside the board's own box. */
+    /* The board is meant to dominate the page, so it's sized to fill
+       essentially the whole viewport height minus the coordinate-label
+       margin below it — 96dvh (94vh fallback) leaves only that sliver
+       of breathing room top and bottom, edge-to-edge otherwise. The vw
+       ceiling only exists as a safety cap so it can't crowd out the
+       side rails on a very short-but-ultra-wide screen; on any normal
+       landscape aspect ratio the height term is the binding one. The
+       left/bottom margin reuses --coord-size (not a new value) to make
+       room for the rank/file coordinate labels, which sit just outside
+       the board's own box. */
     #board-wrap {
       grid-column: 2;
       grid-row: 1 / -1;
-      width: min(74vh, 42vw);
+      width: min(94vh, 46vw);
+      width: min(96dvh, 46vw);
       margin: 0 0 var(--coord-size) var(--coord-size);
       align-self: center;
       justify-self: center;
