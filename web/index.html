@@ -9,11 +9,17 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   html {
-    /* Every rem-based size in this file scales off this, so the whole UI
-       scales proportionally with viewport width instead of being pinned to
-       fixed pixel values. Bounded on both ends so it neither shrinks below
-       legibility on tiny phones nor grows unbounded on large screens. */
-    font-size: clamp(14px, 3.6vw, 17px);
+    /* Every other size in this file is rem/em/vw/% and therefore scales off
+       this one value — which is the one place an absolute unit is actually
+       unavoidable: rem is defined as "relative to the root font-size", so
+       the root itself has nothing left to be relative to. This is the
+       standard fluid-typography anchor technique, not a missed conversion.
+       The vw term scales it continuously from old/small screens up through
+       tablets; the clamp() floor/ceiling then hold it steady across every
+       larger resolution (1080p, 1440p, 4K, 8K, ...) so the app reads as a
+       comfortably-sized widget rather than growing arbitrarily huge just
+       because the monitor has more pixels. */
+    font-size: clamp(14px, 1.1vw + 10px, 18px);
   }
 
   body {
@@ -63,9 +69,9 @@
   #app-card {
     width: min(92vw, 30rem);
     background: #141414;
-    border: 1px solid #262626;
+    border: 0.0625rem solid #262626;
     border-radius: 1rem;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    box-shadow: 0 0.625rem 1.875rem rgba(0,0,0,0.45);
     padding: 1.125rem 1rem 1.375rem;
     display: flex;
     flex-direction: column;
@@ -77,24 +83,24 @@
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 0.875rem;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
   }
   .player-panel {
     display: flex;
     align-items: center;
-    gap: 0.625rem;
-    padding: 0.625rem 0.875rem;
+    gap: 0.5rem;
+    padding: 0.4rem 0.7rem;
     background: #1b1b1b;
-    border: 1px solid #2a2a2a;
-    border-radius: 0.625rem;
-    min-height: 3.1rem;   /* stays constant whether or not captured pieces are shown */
+    border: 0.0625rem solid #2a2a2a;
+    border-radius: 0.5rem;
+    min-height: 2.6rem;   /* stays constant whether or not captured pieces are shown */
     transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
   }
   .player-panel.active {
     border-color: #c8a96e;
     background: #201a10;
-    box-shadow: 0 0 0 1px rgba(200,169,110,0.25) inset;
+    box-shadow: 0 0 0 0.0625rem rgba(200,169,110,0.25) inset;
   }
   .player-icon { font-size: 1.25rem; line-height: 1; }
   .player-name {
@@ -123,13 +129,13 @@
     align-items: center;
     gap: 0.15rem;
     background: #1c1c1c;
-    border: 1px solid #383838;
+    border: 0.0625rem solid #383838;
     border-radius: 0.25rem;
     padding: 0.05rem 0.3rem 0.05rem 0.15rem;
     flex-shrink: 0;
   }
   .cap-piece {
-    width: clamp(17px, 5.4vw, 24px);   /* bigger, still ≈33–40% of the on-board piece size */
+    width: clamp(1.0625rem, 5.4vw, 1.5rem);   /* bigger, still ≈33–40% of the on-board piece size */
     aspect-ratio: 1;
     background-repeat: no-repeat;
     background-position: center;
@@ -196,12 +202,11 @@
     aspect-ratio: 1;
     display: grid;
     grid-template-columns: repeat(8, 1fr);
-    border: 2px solid #333;
+    border: 0.125rem solid #333;
     border-radius: 0.375rem;
     overflow: hidden;
     user-select: none;
-    box-shadow: 0 4px 18px rgba(0,0,0,0.5);
-    transition: filter 0.15s;
+    box-shadow: 0 0.25rem 1.125rem rgba(0,0,0,0.5);
   }
 
   .sq {
@@ -211,14 +216,27 @@
     justify-content: center;
     cursor: pointer;
     position: relative;
-    transition: background 0.1s;
   }
-  .sq.light { background: #b98f5e; }
-  .sq.dark  { background: #7a5c39; }
+  /* The square's own color (and the board-appearance hue/brightness
+     controls) live entirely on this ::before layer, which sits behind the
+     piece in paint order. Pieces are real DOM children painted after it, so
+     they're never touched by this layer's filter — brightness/hue changes
+     affect only the squares, never the piece art. */
+  .sq::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    filter: brightness(var(--board-brightness, 100%));
+    transition: background 0.15s, filter 0.15s;
+  }
+  .sq.light::before { background: var(--sq-light-color, hsl(32, 39%, 60%)); }
+  .sq.dark::before  { background: var(--sq-dark-color,  hsl(32, 36%, 40%)); }
 
-  .sq.selected       { background: #f6f669 !important; }
-  .sq.last-from      { background: #cdd16a !important; }
-  .sq.last-to        { background: #aab827 !important; }
+  .sq.selected::before       { background: #f6f669 !important; }
+  .sq.last-from::before      { background: #cdd16a !important; }
+  .sq.last-to::before        { background: #aab827 !important; }
+  .sq.in-check::before       { background: #e44 !important; }
   .sq.legal-dot::after {
     content: '';
     position: absolute;
@@ -232,9 +250,8 @@
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    border: 4px solid rgba(0,0,0,0.18);
+    border: 0.25rem solid rgba(0,0,0,0.18);
   }
-  .sq.in-check { background: #e44 !important; }
 
   /* ── Pieces ─────────────────────────────────────────────────────────── */
   .piece {
@@ -244,15 +261,15 @@
     background-position: center;
     background-size: contain;
     pointer-events: none;
-    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+    filter: drop-shadow(0 0.0625rem 0.125rem rgba(0,0,0,0.45));
     z-index: 1;
   }
   .piece-K { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_klt45.svg'); }
   .piece-K {
     filter:
-      drop-shadow(0 0 1px rgba(255,255,255,0.95))
-      drop-shadow(0 0 1.5px rgba(255,255,255,0.7))
-      drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+      drop-shadow(0 0 0.0625rem rgba(255,255,255,0.95))
+      drop-shadow(0 0 0.09375rem rgba(255,255,255,0.7))
+      drop-shadow(0 0.0625rem 0.125rem rgba(0,0,0,0.45));
   }
   .piece-Q { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_qlt45.svg'); }
   .piece-R { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_rlt45.svg'); }
@@ -267,7 +284,7 @@
   .piece-p { background-image: url('https://commons.wikimedia.org/wiki/Special:FilePath/Chess_plt45.svg'); }
 
   .piece-k, .piece-q, .piece-r, .piece-b, .piece-n, .piece-p {
-    filter: invert(1) drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+    filter: invert(1) drop-shadow(0 0.0625rem 0.125rem rgba(0,0,0,0.5));
   }
 
   /* ── Controls ───────────────────────────────────────────────────────── */
@@ -303,7 +320,7 @@
   #nav-controls button {
     background: #2a2a2a;
     color: #ccc;
-    border: 1px solid #444;
+    border: 0.0625rem solid #444;
     padding: 0.5rem 0.55rem;
     font-size: 0.92rem;
     line-height: 1;
@@ -319,7 +336,7 @@
   #btn-board-settings {
     background: #2a2a2a;
     color: #ccc;
-    border: 1px solid #444;
+    border: 0.0625rem solid #444;
     padding: 0.5rem 0.55rem;
     font-size: 0.92rem;
     line-height: 1;
@@ -331,7 +348,7 @@
     left: 0;
     z-index: 20;
     background: #1c1c1c;
-    border: 1px solid #383838;
+    border: 0.0625rem solid #383838;
     border-radius: 0.5rem;
     padding: 0.75rem 0.9rem;
     box-shadow: 0 0.5rem 1.5rem rgba(0,0,0,0.5);
@@ -370,8 +387,8 @@
     margin-top: -0.25rem; /* centers the thumb over the 0.4rem track */
     border-radius: 50%;
     background: #fff;
-    border: 2px solid #141414;
-    box-shadow: 0 0 0 1px rgba(255,255,255,0.4);
+    border: 0.125rem solid #141414;
+    box-shadow: 0 0 0 0.0625rem rgba(255,255,255,0.4);
     cursor: pointer;
   }
   #board-settings-popover input[type=range]::-moz-range-thumb {
@@ -379,8 +396,8 @@
     height: 0.9rem;
     border-radius: 50%;
     background: #fff;
-    border: 2px solid #141414;
-    box-shadow: 0 0 0 1px rgba(255,255,255,0.4);
+    border: 0.125rem solid #141414;
+    box-shadow: 0 0 0 0.0625rem rgba(255,255,255,0.4);
     cursor: pointer;
   }
   /* Hue slider: full color spectrum so the track itself shows what each
@@ -407,7 +424,7 @@
     padding: 0.35rem 0.5rem;
     font-size: 0.72rem;
   }
-  #board-settings-reset { background: #2a2a2a; color: #ccc; border: 1px solid #444; }
+  #board-settings-reset { background: #2a2a2a; color: #ccc; border: 0.0625rem solid #444; }
   #board-settings-ok    { background: #c8a96e; color: #111; }
 
   /* ── Secondary controls row (Play as / Engine time / Move·Ply) ───────── */
@@ -435,13 +452,13 @@
   #side-select input[type=radio] { accent-color: #c8a96e; }
 
   @keyframes side-select-glow {
-    0%   { box-shadow: 0 0 6px 1px #ff3b3b; }
-    16%  { box-shadow: 0 0 6px 1px #ff9d3b; }
-    33%  { box-shadow: 0 0 6px 1px #f4ff3b; }
-    50%  { box-shadow: 0 0 6px 1px #3bff5c; }
-    66%  { box-shadow: 0 0 6px 1px #3bd4ff; }
-    83%  { box-shadow: 0 0 6px 1px #6a3bff; }
-    100% { box-shadow: 0 0 6px 1px #ff3b3b; }
+    0%   { box-shadow: 0 0 0.375rem 0.0625rem #ff3b3b; }
+    16%  { box-shadow: 0 0 0.375rem 0.0625rem #ff9d3b; }
+    33%  { box-shadow: 0 0 0.375rem 0.0625rem #f4ff3b; }
+    50%  { box-shadow: 0 0 0.375rem 0.0625rem #3bff5c; }
+    66%  { box-shadow: 0 0 0.375rem 0.0625rem #3bd4ff; }
+    83%  { box-shadow: 0 0 0.375rem 0.0625rem #6a3bff; }
+    100% { box-shadow: 0 0 0.375rem 0.0625rem #ff3b3b; }
   }
   #side-select.pulsate { animation: side-select-glow 1.8s linear infinite; }
 
@@ -456,7 +473,7 @@
   #time-wrap select {
     background: #1e1e1e;
     color: #ccc;
-    border: 1px solid #444;
+    border: 0.0625rem solid #444;
     border-radius: 0.25rem;
     padding: 0.25rem 0.375rem;
     font-size: 0.82rem;
@@ -468,12 +485,13 @@
     font-weight: 600;
     color: #aaa;
     background: #1c1c1c;
-    border: 1px solid #333;
+    border: 0.0625rem solid #333;
     border-radius: 0.375rem;
     padding: 0.25rem 0.55rem;
     white-space: nowrap;
   }
-  #move-counter b { color: #e8d9b5; }
+  #move-counter .mv-num  { color: #e8d9b5; }
+  #move-counter .ply-num { color: #7ec8e3; }
 
   /* ── Promotion modal ────────────────────────────────────────────────── */
   #promo-modal {
@@ -488,7 +506,7 @@
   #promo-modal.show { display: flex; }
   #promo-box {
     background: #1e1e1e;
-    border: 1px solid #444;
+    border: 0.0625rem solid #444;
     border-radius: 0.625rem;
     padding: 1.25rem;
     display: flex;
@@ -506,7 +524,7 @@
     background: #2a2a2a;
     border-radius: 0.5rem;
     cursor: pointer;
-    border: 2px solid transparent;
+    border: 0.125rem solid transparent;
     transition: border-color 0.15s;
   }
   .promo-choice:hover { border-color: #c8a96e; }
@@ -541,7 +559,7 @@
     flex-shrink: 0;
   }
   #ai-toggle-divider {
-    width: 1px;
+    width: 0.0625rem;
     align-self: stretch;
     background: #2a2a2a;
   }
@@ -550,22 +568,22 @@
     min-width: 8rem;
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.15rem;
   }
   #winprob-labels {
     display: flex;
     justify-content: space-between;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     color: #999;
     font-weight: 600;
   }
   /* ── Win-probability push bar: gold (left) vs neon green (right), each
      side's width tracks its own win% so they visibly push against each
-     other and meet at the split point. ── */
+     other and meet at the split point. Kept deliberately thin/compact. ── */
   #winprob-bar {
     width: 100%;
-    height: 0.5rem;
-    border-radius: 0.25rem;
+    height: 0.3rem;
+    border-radius: 0.15rem;
     background: #2a2a2a;
     overflow: hidden;
     display: flex;
@@ -573,14 +591,14 @@
   #winprob-fill-left {
     height: 100%;
     background: linear-gradient(90deg, #f0d08a, #ff8a3d, #ff4d3d);
-    box-shadow: 0 0 6px rgba(255,90,61,0.45);
+    box-shadow: 0 0 0.375rem rgba(255,90,61,0.45);
     transition: width 0.4s ease;
   }
   #winprob-fill-right {
     height: 100%;
     margin-left: auto;
     background: linear-gradient(90deg, #0bde6b, #39ff14, #adff2f);
-    box-shadow: 0 0 6px rgba(57,255,20,0.55);
+    box-shadow: 0 0 0.375rem rgba(57,255,20,0.55);
     transition: width 0.4s ease;
   }
   .switch {
@@ -596,7 +614,7 @@
     cursor: pointer;
     top: 0; left: 0; right: 0; bottom: 0;
     background-color: #2a2a2a;
-    border: 1px solid #444;
+    border: 0.0625rem solid #444;
     transition: background-color 0.2s, border-color 0.2s;
     border-radius: 1.5rem;
   }
@@ -605,8 +623,8 @@
     content: "";
     height: 1.125rem;
     width: 1.125rem;
-    left: 2px;
-    bottom: 2px;
+    left: 0.125rem;
+    bottom: 0.125rem;
     background-color: #ccc;
     transition: transform 0.2s, background-color 0.2s;
     border-radius: 50%;
@@ -652,7 +670,7 @@
   <div id="players">
     <div class="player-panel" id="panel-engine">
       <span class="player-icon">🐉</span>
-      <span class="player-name">Pet Dragon Engine</span>
+      <span class="player-name">Pet Dragon</span>
       <div class="captured" id="captured-engine"></div>
     </div>
     <div class="player-panel" id="panel-human">
@@ -1099,16 +1117,17 @@ function updateWinProb(board, viewFen) {
   }
   const blackPct = 100 - whitePct;
 
-  // Display order: Engine first, then You (swapped from White/Black-first).
-  // In AI Self-Play there's no "you", so it stays White-first/Black-second.
+  // Display order: Engine first, then You. Labels stay fixed as Engine/You
+  // even during AI Self-Play — humanSide still designates which color is
+  // "yours" for this purpose, even though the engine is moving both sides.
   const engineSide = humanSide === 'w' ? 'b' : 'w';
   const enginePct  = engineSide === 'w' ? whitePct : blackPct;
   const playerPct  = 100 - enginePct;
 
-  const leftName  = aiMode ? 'White'  : 'Engine';
-  const rightName = aiMode ? 'Black'  : 'You';
-  const leftPct   = aiMode ? whitePct : enginePct;
-  const rightPct  = aiMode ? blackPct : playerPct;
+  const leftName  = 'Engine';
+  const rightName = 'You';
+  const leftPct   = enginePct;
+  const rightPct  = playerPct;
 
   document.getElementById('winprob-left-name').textContent  = leftName;
   document.getElementById('winprob-right-name').textContent = rightName;
@@ -1570,9 +1589,22 @@ function startNewGame() {
 document.getElementById('btn-new').addEventListener('click', startNewGame);
 
 // ── Board appearance popover ─────────────────────────────────────────────────
+// Base squares, as HSL: same hue family, light square just has higher
+// lightness. Hue changes rotate this H value directly (true, clean color —
+// not a filter rotating the already-rendered brown pixels, which looked
+// muddy since brown isn't very saturated). Brightness is set as a CSS
+// variable that only the .sq::before layer reads, so it can never reach the
+// piece art sitting above it.
+const BOARD_BASE_HUE = 32;
+const LIGHT_SAT = 39, LIGHT_LIGHT = 60;
+const DARK_SAT  = 36, DARK_LIGHT  = 40;
+
 function applyBoardFilter() {
-  document.getElementById('board').style.filter =
-    `hue-rotate(${boardHue}deg) brightness(${boardBrightness}%)`;
+  const hue = ((BOARD_BASE_HUE + boardHue) % 360 + 360) % 360;
+  const board = document.getElementById('board');
+  board.style.setProperty('--sq-light-color', `hsl(${hue}, ${LIGHT_SAT}%, ${LIGHT_LIGHT}%)`);
+  board.style.setProperty('--sq-dark-color',  `hsl(${hue}, ${DARK_SAT}%, ${DARK_LIGHT}%)`);
+  board.style.setProperty('--board-brightness', `${boardBrightness}%`);
 }
 applyBoardFilter(); // reflect defaults immediately on load
 
@@ -1639,7 +1671,7 @@ function updateNavControls() {
   const total = history.length;
   const fullMove = Math.floor(viewIndex / 2); // completed full-moves (both sides moved)
   document.getElementById('move-counter').innerHTML =
-    `Move <b>${fullMove}</b> &middot; Ply <b>${viewIndex}</b>`;
+    `Move <b class="mv-num">${fullMove}</b> &middot; Ply <b class="ply-num">${viewIndex}</b>`;
   document.getElementById('btn-first').disabled      = viewIndex === 0;
   document.getElementById('btn-prev').disabled       = viewIndex === 0;
   document.getElementById('btn-next').disabled       = viewIndex === total;
@@ -1709,7 +1741,7 @@ document.getElementById('ai-toggle').addEventListener('change', (e) => {
     // up naturally once that move lands.
     maybeEngineMove();
   } else {
-    updateWinProb(parseFen(displayedFen()), displayedFen()); // labels (You/Engine vs White/Black) depend on aiMode
+    updateWinProb(parseFen(displayedFen()), displayedFen()); // refresh percentages for the now-off state
   }
   // Turning self-play off requires no further action here: the in-flight
   // search (if any) finishes normally, and the `if (aiMode)` check at the
