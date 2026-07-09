@@ -75,9 +75,10 @@ fn main() {
     let k_arg = args.get(5).cloned().unwrap_or_else(|| "auto".to_string());
     let seed: u64 = args.get(6).and_then(|s| s.parse().ok()).unwrap_or(42);
     let batch_size: usize = args.get(7).and_then(|s| s.parse().ok()).unwrap_or(16384);
+    let weight_decay: f64 = args.get(8).and_then(|s| s.parse().ok()).unwrap_or(0.0);
 
     if data_files.is_empty() {
-        eprintln!("usage: texel_tune <data_files_comma_separated> <output_path> <epochs> <learning_rate> <k|auto> <seed> <batch_size>");
+        eprintln!("usage: texel_tune <data_files_comma_separated> <output_path> <epochs> <learning_rate> <k|auto> <seed> <batch_size> [weight_decay]");
         std::process::exit(1);
     }
 
@@ -90,6 +91,7 @@ fn main() {
     }
 
     let default_weights = TunableWeights::default();
+    let default_weights_f64 = TunableWeightsF64::from(&default_weights);
     let mut weights = TunableWeightsF64::from(&default_weights);
 
     let k = match k_arg.as_str() {
@@ -105,7 +107,17 @@ fn main() {
     let baseline_loss = mean_loss(&samples, &weights, k);
     eprintln!("Baseline loss (default weights) = {:.6}", baseline_loss);
 
-    train(&mut weights, &samples, k, epochs, learning_rate, seed, batch_size);
+    train(
+        &mut weights,
+        &default_weights_f64,
+        &samples,
+        k,
+        epochs,
+        learning_rate,
+        seed,
+        batch_size,
+        weight_decay,
+    );
 
     let final_loss = mean_loss(&samples, &weights, k);
     eprintln!(
@@ -261,25 +273,42 @@ fn shuffle(indices: &mut [usize], rng: &mut Rng) {
     }
 }
 
-/// Batched Adam gradient descent over the flattened weight vector.
+/// Batched Adam gradient descent over the flattened weight vector, with
+/// optional decoupled weight decay ANCHORED AT `default_weights` rather
+/// than zero (D30/D31 established the AdamW-style decoupled-decay pattern
+/// for train_nnue.rs; anchoring at zero doesn't make sense for HCE weights
+/// — "shrink everything toward no evaluation at all" isn't a sensible
+/// prior. Anchoring at the current hand-tuned defaults instead means:
+/// parameters with a strong, consistent gradient signal from the data
+/// move freely away from the default; parameters with a weak/noisy signal
+/// (rare king-safety attacker-count buckets, uncommon PST squares) get
+/// pulled back toward their known-reasonable starting point instead of
+/// drifting on noise — exactly the D35-observed failure mode from the
+/// first real run: `bishop_pair` MG went negative and `attacker_weight`
+/// picked up negative entries after only 15 epochs / ~135 gradient steps).
+///
 /// Each epoch: reshuffle sample order, walk `batch_size`-sized batches,
 /// accumulate the mean gradient over the batch via
-/// `predict_and_accumulate_grad`, take one Adam step, repeat. Prints
-/// mean loss (over the FULL dataset, not just the last batch) once per
-/// epoch so progress is visible in the Actions log.
+/// `predict_and_accumulate_grad`, take one Adam step, then apply decay
+/// toward `default_weights` if `weight_decay > 0.0`. Prints mean loss
+/// (over the FULL dataset, not just the last batch) once per epoch so
+/// progress is visible in the Actions log.
 fn train(
     weights: &mut TunableWeightsF64,
+    default_weights: &TunableWeightsF64,
     samples: &[Sample],
     k: f64,
     epochs: usize,
     learning_rate: f64,
     seed: u64,
     batch_size: usize,
+    weight_decay: f64,
 ) {
     let n_params = TunableWeightsF64::PARAM_COUNT;
     let mut m = vec![0.0f64; n_params]; // Adam first moment
     let mut v = vec![0.0f64; n_params]; // Adam second moment
     let mut t = 0i32; // Adam timestep
+    let default_flat = default_weights.flatten();
 
     let mut rng = Rng::new(seed);
     let mut indices: Vec<usize> = (0..samples.len()).collect();
@@ -318,6 +347,14 @@ fn train(
                 let m_hat = m[i] / bias_correction1;
                 let v_hat = v[i] / bias_correction2;
                 flat_weights[i] -= learning_rate * m_hat / (v_hat.sqrt() + ADAM_EPS);
+                // Decoupled decay toward the default, applied AFTER the
+                // Adam step (same ordering train_nnue.rs uses for its own
+                // AdamW-style decay), not routed through the gradient/Adam
+                // moment estimates.
+                if weight_decay > 0.0 {
+                    flat_weights[i] -=
+                        learning_rate * weight_decay * (flat_weights[i] - default_flat[i]);
+                }
             }
 
             *weights = TunableWeightsF64::unflatten(&flat_weights);
