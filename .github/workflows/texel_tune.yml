@@ -1,0 +1,165 @@
+name: Texel Tuning (Phase 14, D35)
+
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed (D15).
+#
+# Prerequisite: the Texel game database from texel_gen.yml (Phase 14.2) —
+# either a Run ID of a completed texel_gen.yml run, a repo-committed path,
+# or a direct URL (e.g. a GitHub Release asset for batches too large for
+# the 25MB web-upload limit). Same three-source pattern as train_nnue.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      data_run_id:
+        description: "Optional: comma-separated Run ID(s) of texel_gen.yml runs to include. Leave blank if only using data_paths/data_urls below."
+        required: false
+        default: ""
+        type: string
+      data_paths:
+        description: "Optional: comma-separated repo-relative paths to committed Texel data .txt files. Leave blank if only using data_run_id/data_urls."
+        required: false
+        default: ""
+        type: string
+      data_urls:
+        description: "Optional: comma-separated direct download URLs for Texel data .txt files too large for the 25MB repo-upload UI — e.g. a GitHub Release asset URL. Leave blank if not needed."
+        required: false
+        default: ""
+        type: string
+      epochs:
+        description: "Training epochs (full passes over the shuffled dataset)"
+        required: false
+        default: "50"
+        type: string
+      learning_rate:
+        description: "Adam learning rate"
+        required: false
+        default: "1.0"
+        type: string
+      k:
+        description: "Texel sigmoid scaling constant K — 'auto' runs a line search first (recommended), or pass a fixed numeric value to skip it"
+        required: false
+        default: "auto"
+        type: string
+      seed:
+        description: "RNG seed for epoch shuffling"
+        required: false
+        default: "42"
+        type: string
+      batch_size:
+        description: "Minibatch size for the Adam gradient steps"
+        required: false
+        default: "16384"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  texel_tune:
+    name: Tune HCE Weights
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: texel-tune-release
+
+      - name: Download Texel data artifacts
+        # Optional — only runs if data_run_id was provided. Loops over a
+        # comma-separated list so multiple texel_gen.yml batches (e.g. the
+        # 14.2 seed 1000/2000/3000 batches) can be combined in one run.
+        if: inputs.data_run_id != ''
+        run: |
+          mkdir -p data/texel
+          IFS=',' read -ra RUN_IDS <<< "${{ inputs.data_run_id }}"
+          for rid in "${RUN_IDS[@]}"; do
+            rid=$(echo "$rid" | xargs)
+            echo "Downloading Texel data artifact from run $rid"
+            gh run download "$rid" --repo g-c-3/pet-dragon --dir "data/texel/run_${rid}"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Texel data from URLs
+        # Optional — only runs if data_urls was provided. For files too
+        # large for GitHub's 25MB web-upload limit; host as GitHub Release
+        # assets instead and paste the asset's direct download URL here.
+        if: inputs.data_urls != ''
+        run: |
+          mkdir -p data/texel_url
+          IFS=',' read -ra URLS <<< "${{ inputs.data_urls }}"
+          i=0
+          for url in "${URLS[@]}"; do
+            url=$(echo "$url" | xargs)
+            i=$((i+1))
+            echo "Downloading Texel data from $url"
+            curl -sL "$url" -o "data/texel_url/url_${i}.txt"
+          done
+
+      - name: Locate Texel data files
+        id: locate
+        # Combines three sources: (a) GH Actions artifacts downloaded above
+        # (if data_run_id was given), (b) Texel data files already committed
+        # to the repo (if data_paths was given), and (c) files downloaded
+        # from direct URLs (if data_urls was given). At least one source
+        # must yield files.
+        run: |
+          FILES=()
+          if [ -d data/texel ]; then
+            while IFS= read -r f; do FILES+=("$f"); done < <(find data/texel -name '*.txt')
+          fi
+          if [ -d data/texel_url ]; then
+            while IFS= read -r f; do FILES+=("$f"); done < <(find data/texel_url -name '*.txt')
+          fi
+          if [ -n "${{ inputs.data_paths }}" ]; then
+            IFS=',' read -ra PATHS <<< "${{ inputs.data_paths }}"
+            for p in "${PATHS[@]}"; do
+              p=$(echo "$p" | xargs)
+              if [ ! -f "$p" ]; then
+                echo "ERROR: committed Texel data path not found in checkout: $p"
+                exit 1
+              fi
+              FILES+=("$p")
+            done
+          fi
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "ERROR: no Texel data files found — provide data_run_id, data_paths, and/or data_urls"
+            exit 1
+          fi
+          DATA_FILES=$(IFS=,; echo "${FILES[*]}")
+          echo "data_files=$DATA_FILES" >> "$GITHUB_OUTPUT"
+          wc -l $(echo "$DATA_FILES" | tr ',' ' ')
+
+      - name: Build texel_tune binary
+        run: cargo build --release --bin texel_tune
+
+      - name: Run Texel tuning
+        run: >
+          ./target/release/texel_tune
+          "${{ steps.locate.outputs.data_files }}"
+          texel_weights_tuned.txt
+          ${{ inputs.epochs }}
+          ${{ inputs.learning_rate }}
+          ${{ inputs.k }}
+          ${{ inputs.seed }}
+          ${{ inputs.batch_size }}
+
+      - name: Report output
+        run: cat texel_weights_tuned.txt
+
+      - name: Upload tuned weights as artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: texel-weights-e${{ inputs.epochs }}-lr${{ inputs.learning_rate }}-k${{ inputs.k }}
+          path: texel_weights_tuned.txt
+          retention-days: 90
