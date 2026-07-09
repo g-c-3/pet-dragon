@@ -678,7 +678,7 @@
     body {
       display: grid;
       grid-template-columns: minmax(0, 22rem) auto minmax(0, 22rem);
-      grid-template-rows: repeat(3, auto);
+      grid-template-rows: repeat(4, auto);
       justify-content: center;
       align-content: center;
       column-gap: clamp(1rem, 3vw, 2.75rem);
@@ -702,23 +702,25 @@
 
     #players { grid-column: 1; grid-row: 2; margin-bottom: 0; }
 
-    /* AI-toggle and status share one grid cell instead of one row each —
-       two grid items are allowed to occupy the same cell as long as
-       they're pinned to opposite edges (justify-self start/end) rather
-       than stretched, so they sit side by side instead of overlapping.
-       This trades the winprob bar's width for a saved row of vertical
-       space, which is exactly what freed up the room for the taller
-       player panels below. */
-    #ai-toggle-row {
-      grid-column: 1; grid-row: 3;
+    /* The win-probability bar used to live inside #ai-toggle-row next to
+       the "AI Self-Play" switch, but at column width its full-size labels
+       collided with the status text sharing that row. Rather than shrink
+       it into illegibility, #ai-toggle-row is unwrapped (display:contents)
+       so the bar can be pulled out onto its own row, directly under the
+       player panels — the switch stays exactly where it was, next to
+       "White to move". */
+    #ai-toggle-row { display: contents; }
+    #ai-toggle-divider { display: none; } /* was only needed to separate the switch from the bar when they shared a row */
+
+    #winprob { grid-column: 1; grid-row: 3; }
+
+    #ai-toggle-left {
+      grid-column: 1; grid-row: 4;
       justify-self: start;
       align-self: center;
-      width: auto;
-      margin-bottom: 0;
     }
-    #ai-toggle-row #winprob { min-width: 5rem; }
     #status {
-      grid-column: 1; grid-row: 3;
+      grid-column: 1; grid-row: 4;
       justify-self: end;
       align-self: center;
       margin-bottom: 0;
@@ -727,13 +729,20 @@
     /* Captured-piece chips wrap onto a second row instead of scrolling
        horizontally — a side can capture at most 5 distinct piece types
        (every type but the king), and 3-over-2 comfortably fits that
-       within the rail's width. The panel itself needs no explicit
-       height change: it's a flex row with align-items:center, so it
-       already grows to match its tallest child once the tray wraps. */
+       within the rail's width. */
     .captured {
       flex-wrap: wrap;
       overflow-x: visible;
       max-width: 60%;
+    }
+
+    /* Reserve the panel's full two-row height up front (rather than
+       letting it grow only once a capture happens) so nothing shifts
+       mid-game whether a side has captured 0 pieces or 5. The formula
+       mirrors the cap-piece clamp() used above: two chip-rows' worth of
+       height plus their gap and the panel's own vertical padding. */
+    .player-panel {
+      min-height: calc(2 * clamp(1.0625rem, 5.4vw, 1.5rem) + 1.3rem);
     }
 
     /* The board is meant to dominate the page, so it's sized to fill
