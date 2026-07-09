@@ -25,3 +25,5 @@
 pub mod features;
 pub mod weights;
 pub mod predict;
+pub mod weights_f64;
+pub mod predict_f64;
