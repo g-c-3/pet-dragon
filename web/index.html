@@ -42,6 +42,14 @@
     font-size: clamp(1.4rem, 5vw, 2rem);
     font-weight: 700;
     letter-spacing: 0.04em;
+  }
+  header h1 .title-emoji {
+    /* Deliberately NOT part of the gradient-clip below — that trick clips
+       the color out of everything inside it, including emoji, which turned
+       the dragon into a flat gold silhouette instead of its natural color. */
+    -webkit-text-fill-color: initial;
+  }
+  header h1 .title-text {
     background: linear-gradient(135deg, #c8a96e 0%, #f0d08a 50%, #c8a96e 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -640,7 +648,7 @@
 <canvas id="firework-canvas"></canvas>
 
 <header>
-  <h1>🐉 Pet Dragon</h1>
+  <h1><span class="title-emoji">🐉</span> <span class="title-text">Pet Dragon</span></h1>
   <p>Original chess variant · Every game starts differently</p>
 </header>
 
@@ -693,7 +701,7 @@
       <button id="btn-board-settings" title="Board appearance">🎨</button>
       <div id="board-settings-popover">
         <label>Hue
-          <input type="range" id="board-hue" min="-180" max="180" value="0" step="1">
+          <input type="range" id="board-hue" min="0" max="360" value="32" step="1">
         </label>
         <label>Brightness
           <input type="range" id="board-brightness" min="60" max="140" value="100" step="1">
@@ -780,7 +788,7 @@ let pendingPromo = null;      // {from, to} awaiting promotion choice
 // Board appearance (hue-rotate + brightness filter on the #board element).
 // Deliberately NOT reset in startNewGame() — it's meant to persist across
 // "+ New Game" clicks and only return to defaults on an actual page reload.
-let boardHue        = 0;    // degrees, -180..180
+let boardHue        = 32;   // degrees, 0..360 (absolute hue — 32 is the board's original warm-brown hue)
 let boardBrightness = 100;  // percent, 60..140
 
 // The move navigator lets you browse every position played so far without
@@ -800,6 +808,19 @@ const rank = (sq) => Math.floor(sq / 8);
 
 function sqName(sq) {
   return 'abcdefgh'[file(sq)] + (rank(sq) + 1);
+}
+
+// Maps a grid-cell position (n = 0 at top-left .. 63 at bottom-right,
+// filled row-major) to the board square that belongs there. Unflipped:
+// rank 8 on top, files ascending a→h left-to-right — the standard
+// White-at-bottom orientation. Flipped: rotated 180° for Black's view
+// (rank 1 on top, files descending h→a left-to-right).
+function squareForCell(n) {
+  const col = n % 8;
+  const row = Math.floor(n / 8);
+  const f = flipped ? (7 - col) : col;
+  const r = flipped ? row : (7 - row);
+  return idx(f, r);
 }
 
 function parseFen(fen) {
@@ -847,10 +868,9 @@ function getStatus(fen, board) {
 }
 
 // ── Coordinate labels ───────────────────────────────────────────────────────
-// Derived directly from the same square-iteration order render() uses to fill
-// the grid (display=63..0, sq = flipped ? 63-display : display), rather than
-// hardcoded a..h/1..8, so labels stay correct even if that iteration order
-// is ever changed.
+// Derived directly from the same squareForCell() mapping render() uses to
+// fill the grid, rather than hardcoded a..h/1..8, so labels always match
+// whatever's actually on the board.
 function renderCoords() {
   const rankEl = document.getElementById('coords-rank');
   const fileEl = document.getElementById('coords-file');
@@ -858,16 +878,14 @@ function renderCoords() {
   fileEl.innerHTML = '';
 
   for (let row = 0; row < 8; row++) {
-    const k  = row * 8;
-    const sq = flipped ? k : 63 - k;
+    const sq = squareForCell(row * 8); // leftmost cell of this row
     const el = document.createElement('div');
     el.className   = 'coord';
     el.textContent = String(rank(sq) + 1);
     rankEl.appendChild(el);
   }
   for (let col = 0; col < 8; col++) {
-    const k  = 56 + col;
-    const sq = flipped ? k : 63 - k;
+    const sq = squareForCell(56 + col); // bottom row, col-th cell
     const el = document.createElement('div');
     el.className   = 'coord';
     el.textContent = 'abcdefgh'[file(sq)];
@@ -897,9 +915,9 @@ function render() {
     ? new Set(legal.filter(m => m.slice(0,2) === sqName(selected)).map(m => m.slice(2,4)))
     : new Set();
 
-  // Build squares (flipped = black at bottom)
-  for (let display = 63; display >= 0; display--) {
-    const sq      = flipped ? (63 - display) : display;
+  // Build squares (flipped = rotated 180° for Black's view)
+  for (let n = 0; n < 64; n++) {
+    const sq      = squareForCell(n);
     const f       = file(sq);
     const r       = rank(sq);
     const isLight = (f + r) % 2 !== 0;
@@ -1589,18 +1607,20 @@ function startNewGame() {
 document.getElementById('btn-new').addEventListener('click', startNewGame);
 
 // ── Board appearance popover ─────────────────────────────────────────────────
-// Base squares, as HSL: same hue family, light square just has higher
-// lightness. Hue changes rotate this H value directly (true, clean color —
-// not a filter rotating the already-rendered brown pixels, which looked
-// muddy since brown isn't very saturated). Brightness is set as a CSS
-// variable that only the .sq::before layer reads, so it can never reach the
-// piece art sitting above it.
-const BOARD_BASE_HUE = 32;
+// boardHue is the ABSOLUTE hue (0-360), not an offset — it defaults to 32
+// (the board's original warm-brown hue) and is used exactly as-is. This
+// makes the slider's own rainbow track exactly match the resulting board
+// color at every position; an earlier version added a base-hue offset on
+// top of a -180..180 range, which put the track's displayed color out of
+// phase with the actual result. Brightness is set as a CSS variable that
+// only the .sq::before layer reads, so it can never reach the piece art
+// sitting above it.
+const BOARD_DEFAULT_HUE = 32;
 const LIGHT_SAT = 39, LIGHT_LIGHT = 60;
 const DARK_SAT  = 36, DARK_LIGHT  = 40;
 
 function applyBoardFilter() {
-  const hue = ((BOARD_BASE_HUE + boardHue) % 360 + 360) % 360;
+  const hue = ((boardHue % 360) + 360) % 360;
   const board = document.getElementById('board');
   board.style.setProperty('--sq-light-color', `hsl(${hue}, ${LIGHT_SAT}%, ${LIGHT_LIGHT}%)`);
   board.style.setProperty('--sq-dark-color',  `hsl(${hue}, ${DARK_SAT}%, ${DARK_LIGHT}%)`);
@@ -1636,7 +1656,7 @@ document.getElementById('board-brightness').addEventListener('input', (e) => {
 });
 
 document.getElementById('board-settings-reset').addEventListener('click', () => {
-  boardHue = 0;
+  boardHue = BOARD_DEFAULT_HUE;
   boardBrightness = 100;
   document.getElementById('board-hue').value = boardHue;
   document.getElementById('board-brightness').value = boardBrightness;
