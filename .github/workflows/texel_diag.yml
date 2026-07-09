@@ -1,1 +1,61 @@
+name: Texel Tuned Weights Diagnostic (Phase 14, D35)
 
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed (D15).
+#
+# Sanity-checks a texel_tune.yml output BEFORE it's written into eval/*.rs
+# (D35 step 6) — prints HCE under the current default weights next to HCE
+# under the candidate tuned weights, for the same real-Pet-Dragon-position
+# test cases eval_diag.rs uses. Catches failures that only show up when
+# the tuned parameters interact in an actual position, on top of (not
+# instead of) eyeballing the raw tuned values themselves.
+on:
+  workflow_dispatch:
+    inputs:
+      tuned_run_id:
+        description: "Run ID of the texel_tune.yml run whose texel_weights_tuned.txt artifact you want to sanity-check"
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  texel_diag:
+    name: Run Texel Tuned Weights Diagnostic
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: texel-diag-release
+
+      - name: Download tuned weights artifact
+        run: |
+          mkdir -p tuned_weights_download
+          gh run download "${{ inputs.tuned_run_id }}" --repo g-c-3/pet-dragon --dir tuned_weights_download
+          FOUND=$(find tuned_weights_download -name 'texel_weights_tuned.txt' | head -n1)
+          if [ -z "$FOUND" ]; then
+            echo "ERROR: texel_weights_tuned.txt not found in run ${{ inputs.tuned_run_id }}'s artifacts"
+            exit 1
+          fi
+          echo "Found: $FOUND"
+          cp "$FOUND" texel_weights_tuned.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build texel_diag binary
+        run: cargo build --release --bin texel_diag
+
+      - name: Run diagnostic
+        run: ./target/release/texel_diag texel_weights_tuned.txt
