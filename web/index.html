@@ -640,6 +640,72 @@
   .switch input:checked + .slider { background-color: #c8a96e; border-color: #c8a96e; }
   .switch input:checked + .slider::before { transform: translateX(1.125rem); background-color: #141414; }
   #side-select.disabled { opacity: 0.45; pointer-events: none; }
+
+  /* ══════════════════════════════════════════════════════════════════
+     ── Landscape layout ────────────────────────────────────────────
+     Fires on ORIENTATION, not device type, so a rotated phone and a
+     wide desktop window get treated identically.
+
+     The whole page becomes one fixed-size CSS grid:
+       column 1 (left rail)    → header, AI-toggle row, players, status
+       column 2 (centre, auto) → the board — the ONLY thing in this
+                                  track, so it sits exactly at the grid's
+                                  (and therefore the page's) horizontal
+                                  midpoint, since columns 1 and 3 share
+                                  the same width value
+       column 3 (right rail)   → controls, secondary controls, info
+     #app-card is unwrapped with display:contents so its existing
+     children (same markup, same IDs — nothing duplicated) drop straight
+     into this grid. Every size below is vh/vw/rem/clamp()/min(), same
+     convention as the rest of the file, so it rescales continuously
+     across every aspect ratio instead of snapping at a breakpoint.
+     ══════════════════════════════════════════════════════════════════ */
+  @media (orientation: landscape) {
+    html, body { height: 100%; overflow: hidden; }
+
+    body {
+      display: grid;
+      grid-template-columns: minmax(0, 22rem) auto minmax(0, 22rem);
+      grid-template-rows: repeat(4, auto);
+      justify-content: center;
+      align-content: center;
+      column-gap: clamp(1rem, 3vw, 2.75rem);
+      row-gap: clamp(0.25rem, 1.1vh, 0.6rem);
+      height: 100vh;
+      width: 100vw;
+      padding: clamp(0.4rem, 2vh, 1.25rem) clamp(0.6rem, 2vw, 1.5rem);
+    }
+
+    header { grid-column: 1; grid-row: 1; margin-bottom: 0; }
+
+    /* The card's box (background/border/shadow/padding) was a single
+       stacked-column idea — it doesn't make sense split across three
+       tracks, so landscape deliberately drops it in favor of the three
+       groups breathing directly on the page background. */
+    #app-card { display: contents; }
+
+    #ai-toggle-row { grid-column: 1; grid-row: 2; margin-bottom: 0; }
+    #players       { grid-column: 1; grid-row: 3; margin-bottom: 0; }
+    #status        { grid-column: 1; grid-row: 4; margin-bottom: 0; }
+
+    /* Sized off vh first (landscape is height-constrained) with a vw
+       ceiling so it never crowds the side rails on very short-but-wide
+       screens. The left/bottom margin reuses --coord-size (not a new
+       value) to make room for the rank/file coordinate labels, which
+       sit just outside the board's own box. */
+    #board-wrap {
+      grid-column: 2;
+      grid-row: 1 / -1;
+      width: min(74vh, 42vw);
+      margin: 0 0 var(--coord-size) var(--coord-size);
+      align-self: center;
+      justify-self: center;
+    }
+
+    #controls           { grid-column: 3; grid-row: 1; margin-top: 0; }
+    #controls-secondary { grid-column: 3; grid-row: 2; margin-top: 0; }
+    #info               { grid-column: 3; grid-row: 3; margin-top: 0; }
+  }
 </style>
 </head>
   
