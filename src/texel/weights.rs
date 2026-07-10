@@ -77,15 +77,16 @@ pub struct TunableWeights {
 impl Default for TunableWeights {
     fn default() -> Self {
         TunableWeights {
-            // eval/material.rs: MG_VALUES / EG_VALUES / BISHOP_PAIR_MG/EG
+            // eval/material.rs (Phase 14 Texel-tuned, 147,283 samples,
+            // weight_decay=0.08, 100 epochs — see SESSION_LOG D35 step 6)
             material_values: [
-                s(82, 94),    // Pawn
-                s(337, 281),  // Knight
-                s(365, 297),  // Bishop
-                s(477, 512),  // Rook
-                s(1025, 936), // Queen
+                s(93, 105),   // Pawn
+                s(327, 278),  // Knight
+                s(359, 291),  // Bishop
+                s(477, 519),  // Rook
+                s(1025, 932), // Queen
             ],
-            bishop_pair: s(22, 30),
+            bishop_pair: s(18, 29),
 
             // eval/tables.rs: PAWN_TABLE, KNIGHT_TABLE, BISHOP_TABLE,
             // ROOK_TABLE, QUEEN_TABLE, KING_TABLE — copied verbatim.
@@ -100,69 +101,68 @@ impl Default for TunableWeights {
 
             // eval/mobility.rs
             knight_mobility: [
-                s(-62, -81), s(-53, -56), s(-12, -31), s(-4, -16),
-                s(3, 5), s(13, 11), s(22, 17), s(28, 20),
-                s(33, 25),
+                s(-58, -75), s(-46, -47), s(-16, -24), s(-2, -8),
+                s(6, 7), s(11, 8), s(18, 16), s(21, 14),
+                s(25, 17),
             ],
             bishop_mobility: [
-                s(-48, -59), s(-20, -23), s(16, -3), s(26, 13),
-                s(38, 24), s(51, 42), s(55, 54), s(63, 57),
-                s(63, 65), s(68, 73), s(81, 78), s(81, 86),
-                s(91, 88), s(98, 97),
+                s(-42, -50), s(-16, -26), s(22, 3), s(34, 20),
+                s(43, 29), s(52, 44), s(52, 56), s(58, 55),
+                s(57, 58), s(58, 65), s(74, 70), s(73, 78),
+                s(90, 93), s(94, 91),
             ],
             rook_mobility: [
-                s(-58, -76), s(-27, -18), s(-15, 28), s(-10, 55),
-                s(-5, 69), s(-2, 82), s(9, 87), s(16, 94),
-                s(20, 102), s(25, 102), s(32, 106), s(38, 109),
-                s(46, 111), s(48, 114), s(58, 114),
+                s(-64, -79), s(-26, -13), s(-17, 24), s(-6, 60),
+                s(-1, 69), s(3, 83), s(12, 92), s(17, 97),
+                s(18, 102), s(22, 102), s(28, 103), s(34, 107),
+                s(45, 112), s(48, 121), s(51, 108),
             ],
             queen_mobility: [
-                s(-39, -36), s(-21, -15), s(3, 8), s(3, 18),
-                s(14, 34), s(22, 54), s(28, 61), s(41, 73),
-                s(43, 79), s(48, 92), s(56, 94), s(60, 104),
-                s(60, 113), s(66, 120), s(67, 123), s(70, 126),
-                s(71, 133), s(73, 136), s(79, 140), s(80, 143),
-                s(86, 148), s(93, 166), s(97, 170), s(99, 175),
-                s(102, 184), s(100, 191), s(106, 206), s(109, 212),
+                s(-43, -37), s(-21, -18), s(0, 3), s(7, 18),
+                s(11, 32), s(22, 50), s(31, 61), s(44, 75),
+                s(42, 78), s(47, 95), s(54, 93), s(61, 104),
+                s(62, 115), s(65, 118), s(67, 123), s(72, 128),
+                s(73, 133), s(73, 136), s(76, 142), s(81, 144),
+                s(88, 153), s(88, 159), s(94, 169), s(99, 174),
+                s(108, 190), s(102, 193), s(106, 206), s(110, 214),
             ],
 
             // eval/pawns.rs
-            isolated_penalty: s(-5, -15),
-            doubled_penalty: s(-11, -51),
-            backward_penalty: s(-9, -8),
+            isolated_penalty: s(-16, -17),
+            doubled_penalty: s(-18, -47),
+            backward_penalty: s(-17, -9),
             passed_pawn_bonus: [
-                s(0, 0),
-                s(2, 10),
-                s(7, 17),
-                s(15, 35),
-                s(35, 65),
-                s(65, 105),
-                s(110, 175),
+                s(5, 9),
+                s(12, 19),
+                s(14, 27),
+                s(25, 44),
+                s(40, 68),
+                s(57, 97),
+                s(102, 165),
                 s(0, 0),
             ],
 
             // eval/king_safety.rs
-            attacker_weight: [0, 0, 50, 75, 88, 94, 97, 99],
-            open_file_near_king: -20,
-            semi_open_file_near_king: -10,
-            pawn_shield_bonus: 12,
+            attacker_weight: [0, -5, 43, 79, 89, 94, 97, 99],
+            open_file_near_king: -21,
+            semi_open_file_near_king: -19,
+            pawn_shield_bonus: 16,
 
             // eval/open_lines.rs
-            rook_open_file: s(48, 21),
-            rook_semi_open_file: s(23, 11),
-            rook_on_seventh: s(17, 54),
-            rooks_connected: s(11, 13),
-            queen_open_file: s(3, 6),
-            queen_semi_open_file: s(2, 4),
-            battery_rook_queen: s(18, 10),
-            battery_bishop_queen: s(14, 8),
-            contested_file: s(-8, -4),
+            rook_open_file: s(44, 14),
+            rook_semi_open_file: s(21, 6),
+            rook_on_seventh: s(8, 47),
+            rooks_connected: s(17, 15),
+            queen_open_file: s(5, 3),
+            queen_semi_open_file: s(1, 1),
+            battery_rook_queen: s(23, 14),
+            battery_bishop_queen: s(15, 5),
+            contested_file: s(-6, -7),
 
             // eval/mod.rs
-            tempo: 10,
+            tempo: 20,
         }
     }
-}
 }
 
 // ── PST tables, copied verbatim from eval/tables.rs ─────────────────────────
