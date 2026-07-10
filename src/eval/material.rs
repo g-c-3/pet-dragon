@@ -45,9 +45,9 @@ pub const PHASE_WEIGHTS: [i32; 6] = [
 // From Ethereal's classical evaluation (GPL v3)
 
 pub const MG_VALUES: [i32; 6] = [
-    82,   // Pawn
-    337,  // Knight
-    365,  // Bishop
+    93,   // Pawn
+    327,  // Knight
+    359,  // Bishop
     477,  // Rook
     1025, // Queen
     0,    // King (handled separately)
