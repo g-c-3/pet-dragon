@@ -11,9 +11,13 @@
 // In the endgame, rooks become more powerful (open files, king attacks).
 // Knights are better in closed positions (middlegame).
 //
-// Values borrowed from Ethereal chess engine (GPL v3, Andrew Grant)
-// with attribution. These are world-class tuned values from years of
-// self-play optimization.
+// Piece values were originally borrowed from Ethereal chess engine (GPL v3,
+// Andrew Grant); as of Phase 14 (D35) they are Pet-Dragon-specific values
+// produced by Texel tuning against 147,283 real Pet Dragon self-play
+// positions (src/bin/texel_tune.rs, weight_decay=0.08, 100 epochs — see
+// SESSION_LOG). The Ethereal values remain the tuner's starting point
+// (src/texel/weights.rs's TunableWeights::default()), not the values
+// compiled here anymore.
 //
 // Tapered evaluation:
 //   score = (mg_score * phase + eg_score * (24 - phase)) / 24
