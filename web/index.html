@@ -17,10 +17,23 @@
   function setRealViewportUnits() {
     document.documentElement.style.setProperty('--vh100', window.innerHeight + 'px');
     document.documentElement.style.setProperty('--vw100', window.innerWidth + 'px');
+    // Landscape now sits the header above ALL three columns (full width)
+    // instead of just the left rail, so the board/rails can compute how
+    // much vertical room the header actually takes and subtract exactly
+    // that — rather than guessing a fixed value. <header> doesn't exist
+    // yet when this runs from <head>, hence the null-guard; the
+    // DOMContentLoaded/resize/orientationchange calls below cover it
+    // once it does, and re-measure if its rendered height ever changes
+    // (e.g. the fluid font-size clamp responding to a resize).
+    const headerEl = document.querySelector('header');
+    if (headerEl) {
+      document.documentElement.style.setProperty('--header-h', headerEl.offsetHeight + 'px');
+    }
   }
   setRealViewportUnits();
   window.addEventListener('resize', setRealViewportUnits);
   window.addEventListener('orientationchange', setRealViewportUnits);
+  document.addEventListener('DOMContentLoaded', setRealViewportUnits);
 </script>
 <style>
   /* ── Reset & base ───────────────────────────────────────────────────── */
@@ -159,7 +172,7 @@
   }
   .player-icon { font-size: 1.25rem; line-height: 1; }
   .player-name {
-    font-size: 0.86rem;
+    font-size: 0.7rem;
     font-weight: 600;
     color: #bbb;
     transition: color 0.2s;
@@ -190,7 +203,7 @@
     flex-shrink: 0;
   }
   .cap-piece {
-    width: clamp(1.0625rem, 5.4vw, 1.5rem);   /* bigger, still ≈33–40% of the on-board piece size */
+    width: clamp(1.3rem, 6.8vw, 1.9rem);   /* bigger, still ≈33–40% of the on-board piece size */
     aspect-ratio: 1;
     background-repeat: no-repeat;
     background-position: center;
@@ -695,13 +708,17 @@
      wide desktop window get treated identically.
 
      The whole page becomes one fixed-size CSS grid:
-       column 1 (left rail)    → header, AI-toggle row, players, status
-       column 2 (centre, auto) → the board — the ONLY thing in this
+       row 1 (full width)      → the header, spanning all three columns
+                                  so every column starts at the same top
+                                  edge instead of the header only pushing
+                                  column 1 down
+       row 2, column 1 (rail)  → AI-toggle row, players, status
+       row 2, column 2 (auto)  → the board — the ONLY thing in this
                                   track, so it sits exactly at the grid's
                                   (and therefore the page's) horizontal
                                   midpoint, since columns 1 and 3 share
                                   the same width value
-       column 3 (right rail)   → controls, secondary controls, info
+       row 2, column 3 (rail)  → controls, secondary controls, info
      #app-card is unwrapped with display:contents so its existing
      children (same markup, same IDs — nothing duplicated) drop straight
      into this grid. Every size below is vh/vw/rem/clamp()/min(), same
@@ -756,7 +773,11 @@
       padding: clamp(0.6rem, 2.2dvh, 1.25rem) clamp(0.5rem, 2vw, 1.25rem);
     }
 
-    header { grid-column: 1; grid-row: 1; margin-bottom: 0; }
+    /* Full width (not just column 1) so the board and right rail start at
+       the same top edge as the left rail instead of sitting a header's
+       height higher — that mismatch was what made the two sides read as
+       uneven. */
+    header { grid-column: 1 / -1; grid-row: 1; margin-bottom: 0; }
 
     /* The card's own box (background/border/shadow/padding) was a single
        stacked-column idea — it doesn't make sense split across three
@@ -765,8 +786,9 @@
     #app-card { display: contents; }
 
     /* Each rail is its OWN small grid/flex box with a hard-bounded height
-       (the outer grid's 1fr row, or the full column for the right rail)
-       and `overflow:hidden` — so if a rail's content is ever slightly
+       (the outer grid's 1fr row, shared with the board now that the
+       header spans full width above all three columns) and
+       `overflow:hidden` — so if a rail's content is ever slightly
        taller than expected in some browser, THAT rail clips internally
        instead of the whole page growing past the viewport. This is the
        main structural fix versus placing every element straight onto one
@@ -819,7 +841,7 @@
       /* One chip-row's worth of height (not two — see .captured below)
          plus the icon/name row and the panel's own padding, so nothing
          shifts mid-game whether a side has captured 0 pieces or 5. */
-      min-height: 4.1rem;
+      min-height: 4.6rem;
     }
     .player-icon { grid-row: 1; grid-column: 1; }
     .player-name { grid-row: 1; grid-column: 2; }
@@ -842,9 +864,9 @@
       width: 100%;
       gap: clamp(0.1rem, 2cqw, 0.3rem);
     }
-    .captured .cap-piece { width: clamp(0.55rem, 11cqw, 1.4rem); }
+    .captured .cap-piece { width: clamp(0.8rem, 14cqw, 1.8rem); }
     .captured .cap-item { padding: 0.05rem 0.2rem 0.05rem 0.1rem; gap: 0.1rem; }
-    .captured .cap-count { font-size: 0.62rem; }
+    .captured .cap-count { font-size: 0.66rem; }
 
     /* The board is meant to dominate the page, filling essentially the
        whole viewport height edge-to-edge. Unlike a flat "94vh" guess,
@@ -858,10 +880,13 @@
        side rails on a very short-but-ultra-wide screen. */
     #board-wrap {
       grid-column: 2;
-      grid-row: 1 / -1;
-      width: min(calc(100vh - 2 * clamp(0.6rem, 2.2vh, 1.25rem) - var(--coord-size) - 2rem), 46vw);
-      width: min(calc(100dvh - 2 * clamp(0.6rem, 2.2dvh, 1.25rem) - var(--coord-size) - 2rem), 46vw);
-      width: min(calc(var(--vh100, 100dvh) - 2 * clamp(0.6rem, 2.2dvh, 1.25rem) - var(--coord-size) - 2rem), 46vw);
+      /* Row 2 only now (the header lives in row 1 across every column —
+         see above), so this cell's available height is already just the
+         board's share, no longer the whole viewport. */
+      grid-row: 2;
+      width: min(calc(100vh - 2 * clamp(0.6rem, 2.2vh, 1.25rem) - var(--coord-size) - 2rem - var(--header-h, 3.5rem) - clamp(0.2rem, 1vh, 0.5rem)), 46vw);
+      width: min(calc(100dvh - 2 * clamp(0.6rem, 2.2dvh, 1.25rem) - var(--coord-size) - 2rem - var(--header-h, 3.5rem) - clamp(0.2rem, 1dvh, 0.5rem)), 46vw);
+      width: min(calc(var(--vh100, 100dvh) - 2 * clamp(0.6rem, 2.2dvh, 1.25rem) - var(--coord-size) - 2rem - var(--header-h, 3.5rem) - clamp(0.2rem, 1dvh, 0.5rem)), 46vw);
       margin: 0 0 var(--coord-size) var(--coord-size);
       align-self: start;
       justify-self: center;
@@ -874,7 +899,7 @@
        next to the AI switch there) would otherwise leak in here too. */
     #rail-right {
       grid-column: 3;
-      grid-row: 1 / -1;
+      grid-row: 2;
       display: flex;
       flex-direction: column;
       justify-content: center;
