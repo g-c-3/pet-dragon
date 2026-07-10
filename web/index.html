@@ -4,6 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pet Dragon Chess</title>
+<script>
+  /* CSS vh/dvh have proven unreliable across the Chrome/Opera builds
+     tested here even after several rounds of fallbacks and safety
+     buffers, so the landscape layout falls back to the one thing that's
+     always accurate: window.innerHeight/innerWidth, which correctly
+     reflect the actually-visible viewport (toolbar included) in every
+     browser. This pushes that real value into CSS custom properties the
+     landscape media query reads instead of vh/dvh directly — runs
+     immediately, then again on resize/orientationchange so it tracks the
+     toolbar showing/hiding in real time. */
+  function setRealViewportUnits() {
+    document.documentElement.style.setProperty('--vh100', window.innerHeight + 'px');
+    document.documentElement.style.setProperty('--vw100', window.innerWidth + 'px');
+  }
+  setRealViewportUnits();
+  window.addEventListener('resize', setRealViewportUnits);
+  window.addEventListener('orientationchange', setRealViewportUnits);
+</script>
 <style>
   /* ── Reset & base ───────────────────────────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -693,17 +711,18 @@
   @media (orientation: landscape) {
     /* `vh` on mobile Chrome measures the viewport with its on-screen
        toolbar collapsed, so a page sized off 100vh can render taller than
-       what's actually visible (Firefox/Opera already report the
-       toolbar-aware size for plain vh). `dvh`/`dvw` are the dynamic-
-       viewport units built for this; every vh/vw pair below is listed
-       twice on purpose — the vh/vw line first as a safe fallback, the
-       dvh/dvw line after it so it wins the cascade in any browser that
-       supports it. Browsers that don't understand dvh/dvw simply ignore
-       that whole (invalid) line and keep the fallback. */
+       what's actually visible. `dvh` is supposed to fix that, but testing
+       showed it still isn't reliable in some Chrome/Opera builds here —
+       so as the final, most-trustworthy layer, --vh100/--vw100 (set via
+       JS from window.innerHeight/innerWidth, see <head>) override both.
+       Each property below is listed three times on purpose, each one a
+       progressively more reliable fallback: plain vh first, dvh next
+       (wins if supported), then var(--vh100/--vw100) last (wins once the
+       JS has run, which is almost immediately). */
     html, body { height: 100%; overflow: hidden; }
 
     /* Pins the page exactly to the viewport box (belt-and-suspenders
-       alongside the height:100dvh above): some mobile browsers can leave
+       alongside the height fix above): some mobile browsers can leave
        the document scrolled a few pixels when their toolbar collapses,
        and since scrolling is disabled there'd be no way back to see
        whatever that clipped at the top. position:fixed removes the page
@@ -715,10 +734,10 @@
        container no matter how tall its content wants to be, which is the
        actual fix for the cross-browser cutoff: previously every row was
        `auto`, so slightly taller text/rendering in one browser could push
-       the whole grid past 100dvh and get clipped by overflow:hidden. Any
-       column whose content doesn't fit its bounded cell now clips inside
-       that cell (see #rail-left/#rail-right below) instead of inflating
-       the page. */
+       the whole grid past the true viewport height and get clipped by
+       overflow:hidden. Any column whose content doesn't fit its bounded
+       cell now clips inside that cell (see #rail-left/#rail-right below)
+       instead of inflating the page. */
     body {
       display: grid;
       grid-template-columns: minmax(0, 22rem) auto minmax(0, 22rem);
@@ -729,8 +748,10 @@
       row-gap: clamp(0.2rem, 1dvh, 0.5rem);
       height: 100vh;
       height: 100dvh;
+      height: var(--vh100, 100dvh);
       width: 100vw;
       width: 100dvw;
+      width: var(--vw100, 100dvw);
       padding: clamp(0.6rem, 2.2vh, 1.25rem) clamp(0.5rem, 2vw, 1.25rem);
       padding: clamp(0.6rem, 2.2dvh, 1.25rem) clamp(0.5rem, 2vw, 1.25rem);
     }
@@ -815,6 +836,7 @@
       grid-row: 1 / -1;
       width: min(calc(100vh - 2 * clamp(0.6rem, 2.2vh, 1.25rem) - var(--coord-size) - 2rem), 46vw);
       width: min(calc(100dvh - 2 * clamp(0.6rem, 2.2dvh, 1.25rem) - var(--coord-size) - 2rem), 46vw);
+      width: min(calc(var(--vh100, 100dvh) - 2 * clamp(0.6rem, 2.2dvh, 1.25rem) - var(--coord-size) - 2rem), 46vw);
       margin: 0 0 var(--coord-size) var(--coord-size);
       align-self: start;
       justify-self: center;
