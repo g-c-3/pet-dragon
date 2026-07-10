@@ -22,8 +22,12 @@
 //   6. Battery detection: Queen+Rook on same file, Queen+Bishop on same diagonal
 //   7. Contested open files (both sides have a rook)
 //
-// Weights adapted from Ethereal (GPL v3, Andrew Grant) with Pet Dragon
-// starting position adjustments (weights active from move 1 — no suppression).
+// Weights originally adapted from Ethereal (GPL v3, Andrew Grant) with Pet
+// Dragon starting position adjustments (weights active from move 1 — no
+// suppression). As of Phase 14 (D35) these are Pet-Dragon-specific
+// Texel-tuned values (147,283 samples, weight_decay=0.08, 100 epochs —
+// see SESSION_LOG). Ethereal's values remain the tuner's starting point
+// (src/texel/weights.rs).
 // ============================================================================
 
 use crate::bitboard::{rook_attacks, bishop_attacks};
@@ -35,31 +39,31 @@ use crate::types::{Color, PieceKind};
 // ── Open line bonuses ─────────────────────────────────────────────────────────
 
 /// Rook on fully open file (no pawns of any colour)
-const ROOK_OPEN_FILE: i64 = s(48, 21);
+const ROOK_OPEN_FILE: i64 = s(44, 14);
 
 /// Rook on semi-open file (no own pawns, enemy pawn present)
-const ROOK_SEMI_OPEN_FILE: i64 = s(23, 11);
+const ROOK_SEMI_OPEN_FILE: i64 = s(21, 6);
 
 /// Rook on the 7th rank (or 2nd for Black) — attacks enemy pawns/king
-const ROOK_ON_SEVENTH: i64 = s(17, 54);
+const ROOK_ON_SEVENTH: i64 = s(8, 47);
 
 /// Two rooks connected (same file or rank, nothing between them)
-const ROOKS_CONNECTED: i64 = s(11, 13);
+const ROOKS_CONNECTED: i64 = s(17, 15);
 
 /// Queen on open file
-const QUEEN_OPEN_FILE: i64 = s(3, 6);
+const QUEEN_OPEN_FILE: i64 = s(5, 3);
 
 /// Queen on semi-open file
-const QUEEN_SEMI_OPEN_FILE: i64 = s(2, 4);
+const QUEEN_SEMI_OPEN_FILE: i64 = s(1, 1);
 
 /// Battery: Queen + Rook on same open file (combined attack)
-const BATTERY_ROOK_QUEEN: i64 = s(18, 10);
+const BATTERY_ROOK_QUEEN: i64 = s(23, 14);
 
 /// Battery: Queen + Bishop on same open diagonal
-const BATTERY_BISHOP_QUEEN: i64 = s(14, 8);
+const BATTERY_BISHOP_QUEEN: i64 = s(15, 5);
 
 /// Contested file penalty: both sides have rook on same file
-const CONTESTED_FILE: i64 = s(-8, -4);
+const CONTESTED_FILE: i64 = s(-6, -7);
 
 // ── Main evaluation function ──────────────────────────────────────────────────
 
