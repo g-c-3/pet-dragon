@@ -57,18 +57,18 @@ pub const MG_VALUES: [i32; 6] = [
 // Rooks and Queens become more powerful in the endgame
 
 pub const EG_VALUES: [i32; 6] = [
-    94,   // Pawn
-    281,  // Knight
-    297,  // Bishop
-    512,  // Rook
-    936,  // Queen
+    105,  // Pawn
+    278,  // Knight
+    291,  // Bishop
+    519,  // Rook
+    932,  // Queen
     0,    // King
 ];
 
 // ── Bishop pair bonus ─────────────────────────────────────────────────────────
 // Having both bishops is worth extra in open positions
-pub const BISHOP_PAIR_MG: i32 = 22;
-pub const BISHOP_PAIR_EG: i32 = 30;
+pub const BISHOP_PAIR_MG: i32 = 18;
+pub const BISHOP_PAIR_EG: i32 = 29;
 
 // ── Tapered score helper ──────────────────────────────────────────────────────
 
