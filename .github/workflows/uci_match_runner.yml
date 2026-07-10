@@ -1,1 +1,125 @@
+name: UCI Pinned-Ref Match (D36)
 
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed.
+#
+# Builds TWO separate `pet_dragon` binaries from two different git refs
+# and plays them against each other over real UCI (src/bin/uci_match_runner.rs,
+# D36) — this is what gives a genuine pre/post-Texel-tuning Elo number,
+# unlike match_runner.yml which A/Bs NNUE blend weight within one binary.
+#
+# How to find pre_tuning_ref: in the mobile GitHub app, open
+# g-c-3/pet-dragon -> Commits, find the Session 55 commit that landed the
+# Texel-tuned eval/*.rs weights (search commit messages for "Session 55" or
+# "tuned weights"), and use the SHA of the commit immediately BEFORE it —
+# that's the last commit still on the original Ethereal-derived HCE values.
+on:
+  workflow_dispatch:
+    inputs:
+      pre_tuning_ref:
+        description: "Git SHA/tag from BEFORE the Texel-tuning commit (see workflow file comment for how to find it)"
+        required: true
+        type: string
+      post_tuning_ref:
+        description: "Git SHA/tag/branch to compare against (usually 'main')"
+        required: false
+        default: "main"
+        type: string
+      num_games:
+        description: "Number of games to play"
+        required: false
+        default: "20"
+        type: string
+      movetime_ms:
+        description: "Milliseconds of think time per move"
+        required: false
+        default: "100"
+        type: string
+      seed_start:
+        description: "Starting seed (change between runs for different games, otherwise reruns replay the same games)"
+        required: false
+        default: "0"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  uci-match:
+    name: Run UCI Pinned-Ref Match
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout three copies: harness (current ref, has uci_match_runner.rs),
+      #    pre-tuning engine, post-tuning engine ──────────────────────────────
+      - name: Checkout harness (current ref)
+        uses: actions/checkout@v6
+        with:
+          path: harness
+
+      - name: Checkout pre-tuning ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.pre_tuning_ref }}
+          path: pre
+
+      - name: Checkout post-tuning ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.post_tuning_ref }}
+          path: post
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies (harness)
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: uci-match-harness-release
+          workspaces: harness
+
+      - name: Cache Rust dependencies (pre-tuning)
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: uci-match-pre-release
+          workspaces: pre
+
+      - name: Cache Rust dependencies (post-tuning)
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: uci-match-post-release
+          workspaces: post
+
+      - name: Build harness binary
+        run: cargo build --release --bin uci_match_runner --manifest-path harness/Cargo.toml
+
+      - name: Build pre-tuning engine binary
+        run: cargo build --release --bin pet_dragon --manifest-path pre/Cargo.toml
+
+      - name: Build post-tuning engine binary
+        run: cargo build --release --bin pet_dragon --manifest-path post/Cargo.toml
+
+      - name: Run UCI pinned-ref match
+        run: >
+          ./harness/target/release/uci_match_runner
+          ./pre/target/release/pet_dragon
+          ./post/target/release/pet_dragon
+          ${{ inputs.num_games }}
+          ${{ inputs.movetime_ms }}
+          ${{ inputs.seed_start }}
+          "pre-tuning (${{ inputs.pre_tuning_ref }})"
+          "post-tuning (${{ inputs.post_tuning_ref }})"
+          uci_match_results.txt
+
+      - name: Print summary
+        run: cat uci_match_results.txt
+
+      - name: Upload match results as artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: uci-match-results-n${{ inputs.num_games }}-seed${{ inputs.seed_start }}
+          path: uci_match_results.txt
+          retention-days: 30
