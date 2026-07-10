@@ -43,8 +43,11 @@ use king_safety::evaluate_king_safety;
 use open_lines::evaluate_open_lines;
 
 // ── Tempo bonus ───────────────────────────────────────────────────────────────
-/// Small bonus for the side to move — having the initiative is worth ~10 cp.
-const TEMPO: i32 = 10;
+/// Bonus for the side to move — having the initiative. Originally 10cp
+/// (hand-picked); as of Phase 14 (D35) this is Pet-Dragon-specific
+/// Texel-tuned (147,283 samples, weight_decay=0.08, 100 epochs — see
+/// SESSION_LOG).
+const TEMPO: i32 = 20;
 
 // ── Main evaluation entry point ───────────────────────────────────────────────
 
