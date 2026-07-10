@@ -93,6 +93,28 @@
      existed — display:contents does exactly that. */
   #rail-left, #rail-right { display: contents; }
 
+  /* #winprob now physically lives inside #rail-right's markup (so
+     landscape can place it under the nav buttons, fully contained in
+     that rail's own box) instead of inside #ai-toggle-row. Since
+     #app-card is a flex container and everything above these elements
+     flattens via display:contents, explicit `order` puts it back in its
+     original portrait spot — right after the AI-toggle switch, before
+     the player panels — regardless of where it actually sits in the
+     markup. (Landscape overrides these same properties inside its media
+     query, where the flex context is #rail-right instead of #app-card.) */
+  #ai-toggle-row       { order: 1; }
+  #winprob             { order: 2; }
+  #players             { order: 3; }
+  #status              { order: 4; }
+  #board-wrap          { order: 5; }
+  #controls            { order: 6; }
+  #controls-secondary  { order: 7; }
+  #info                { order: 8; }
+
+  /* Only ever existed to separate the switch from the bar when they sat
+     in one row; the bar no longer lives in this row in either mode. */
+  #ai-toggle-divider { display: none; }
+
   /* ── Player panels ──────────────────────────────────────────────────── */
   #players {
     width: 100%;
@@ -579,7 +601,8 @@
     background: #2a2a2a;
   }
   #winprob {
-    flex: 1;
+    flex: 0 0 auto;
+    width: 100%;
     min-width: 8rem;
     display: flex;
     flex-direction: column;
@@ -679,6 +702,14 @@
        that whole (invalid) line and keep the fallback. */
     html, body { height: 100%; overflow: hidden; }
 
+    /* Pins the page exactly to the viewport box (belt-and-suspenders
+       alongside the height:100dvh above): some mobile browsers can leave
+       the document scrolled a few pixels when their toolbar collapses,
+       and since scrolling is disabled there'd be no way back to see
+       whatever that clipped at the top. position:fixed removes the page
+       from the normal scrolling flow entirely, so that can't happen. */
+    body { position: fixed; inset: 0; }
+
     /* Outer grid: row 1 is exactly as tall as the header, row 2 (1fr) is
        whatever's left — a `1fr` row can never grow past its share of the
        container no matter how tall its content wants to be, which is the
@@ -724,7 +755,7 @@
       grid-row: 2;
       display: grid;
       grid-template-columns: 1fr;
-      grid-template-rows: auto auto auto;
+      grid-template-rows: auto auto;
       align-content: center;
       row-gap: clamp(0.25rem, 1.4vh, 0.7rem);
       row-gap: clamp(0.25rem, 1.4dvh, 0.7rem);
@@ -732,19 +763,23 @@
       overflow: hidden;
     }
 
-    /* The win-probability bar used to live inside #ai-toggle-row next to
-       the "AI Self-Play" switch, but at column width its full-size labels
-       collided with the status text sharing that row. #ai-toggle-row is
-       unwrapped (display:contents) so the bar can sit on its own row,
-       under the player panels, while the switch stays next to the status
-       text below it, exactly as requested. */
-    #ai-toggle-row { display: contents; }
-    #ai-toggle-divider { display: none; } /* only existed to separate the switch from the bar when they shared a row */
-
-    #players        { grid-row: 1; grid-column: 1; margin-bottom: 0; }
-    #winprob        { grid-row: 2; grid-column: 1; width: 100%; }
-    #ai-toggle-left { grid-row: 3; grid-column: 1; justify-self: start; align-self: center; max-width: 60%; }
-    #status         { grid-row: 3; grid-column: 1; justify-self: end;   align-self: center; max-width: 38%; margin-bottom: 0; }
+    /* AI-toggle switch and status text share one grid cell instead of
+       one row each — pinned to opposite edges (justify-self start/end)
+       rather than stretched, so they sit side by side without
+       overlapping. The win-probability bar moved out of this row
+       entirely (see #rail-right below), which is what freed up the
+       room for it. */
+    #players    { grid-row: 1; grid-column: 1; margin-bottom: 0; }
+    #ai-toggle-row {
+      grid-row: 2; grid-column: 1;
+      justify-self: start; align-self: center;
+      width: auto; max-width: 60%; margin-bottom: 0;
+    }
+    #status {
+      grid-row: 2; grid-column: 1;
+      justify-self: end; align-self: center;
+      max-width: 38%; margin-bottom: 0;
+    }
 
     /* Captured-piece chips wrap onto a second row instead of scrolling
        horizontally — a side can capture at most 5 distinct piece types
@@ -785,6 +820,11 @@
       justify-self: center;
     }
 
+    /* The bar now lives right in the markup here (see the HTML), sitting
+       directly below the nav-controls row inside #controls — `order`
+       pins the sequence explicitly rather than relying on markup order,
+       since #winprob's base/portrait order value (needed to put it back
+       next to the AI switch there) would otherwise leak in here too. */
     #rail-right {
       grid-column: 3;
       grid-row: 1 / -1;
@@ -796,7 +836,10 @@
       min-height: 0;
       overflow: hidden;
     }
-    #controls, #controls-secondary, #info { margin-top: 0; }
+    #controls            { order: 1; margin-top: 0; }
+    #winprob              { order: 2; }
+    #controls-secondary  { order: 3; margin-top: 0; }
+    #info                { order: 4; margin-top: 0; }
   }
 </style>
 </head>
@@ -822,16 +865,6 @@
         <span>AI Self-Play</span>
       </div>
       <div id="ai-toggle-divider"></div>
-      <div id="winprob">
-        <div id="winprob-labels">
-          <span id="winprob-left-name">Engine</span>
-          <span id="winprob-right-name">You</span>
-        </div>
-        <div id="winprob-bar">
-          <div id="winprob-fill-left"></div>
-          <div id="winprob-fill-right"></div>
-        </div>
-      </div>
     </div>
 
     <div id="players">
@@ -880,6 +913,17 @@
         <button id="btn-playpause" title="Play/Pause">▶</button>
         <button id="btn-next" title="Next move">❯</button>
         <button id="btn-last" title="Last move (live)">⏭</button>
+      </div>
+    </div>
+
+    <div id="winprob">
+      <div id="winprob-labels">
+        <span id="winprob-left-name">Engine</span>
+        <span id="winprob-right-name">You</span>
+      </div>
+      <div id="winprob-bar">
+        <div id="winprob-fill-left"></div>
+        <div id="winprob-fill-right"></div>
       </div>
     </div>
 
