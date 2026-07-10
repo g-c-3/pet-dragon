@@ -163,6 +163,7 @@ impl Default for TunableWeights {
         }
     }
 }
+}
 
 // ── PST tables, copied verbatim from eval/tables.rs ─────────────────────────
 
