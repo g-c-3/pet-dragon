@@ -32,19 +32,26 @@ use crate::position::Position;
 use crate::types::{Color, PieceKind, Square};
 
 // ── King safety weights ───────────────────────────────────────────────────────
+// Originally from Ethereal (GPL v3, Andrew Grant); as of Phase 14 (D35)
+// ATTACKER_WEIGHT/OPEN_FILE_NEAR_KING/SEMI_OPEN_FILE_NEAR_KING/
+// PAWN_SHIELD_BONUS are Pet-Dragon-specific Texel-tuned values (147,283
+// samples, weight_decay=0.08, 100 epochs — see SESSION_LOG). Ethereal's
+// values remain the tuner's starting point (src/texel/weights.rs).
+// MAX_KING_DANGER is untouched — a structural clamp, not a tunable weight
+// (D35's one deliberate nonlinearity in the whole HCE).
 
 /// Penalty per attacker targeting the king zone (indexed by attacker count 0-7+)
 /// Escalates rapidly — many attackers = danger
-const ATTACKER_WEIGHT: [i32; 8] = [0, 0, 50, 75, 88, 94, 97, 99];
+const ATTACKER_WEIGHT: [i32; 8] = [0, -5, 43, 79, 89, 94, 97, 99];
 
 /// Penalty for each open file adjacent to or on the king's file (MG only)
-const OPEN_FILE_NEAR_KING: i32 = -20;
+const OPEN_FILE_NEAR_KING: i32 = -21;
 
 /// Penalty for each semi-open file adjacent to or on the king's file (MG only)
-const SEMI_OPEN_FILE_NEAR_KING: i32 = -10;
+const SEMI_OPEN_FILE_NEAR_KING: i32 = -19;
 
 /// Pawn shield bonus per pawn within 2 ranks of king on king's or adjacent file (MG only)
-const PAWN_SHIELD_BONUS: i32 = 12;
+const PAWN_SHIELD_BONUS: i32 = 16;
 
 /// Max king danger score before scaling (prevents integer overflow)
 const MAX_KING_DANGER: i32 = 2400;
