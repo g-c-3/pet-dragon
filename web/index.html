@@ -777,9 +777,9 @@
       display: grid;
       grid-template-columns: 1fr;
       grid-template-rows: auto auto;
-      align-content: center;
-      row-gap: clamp(0.25rem, 1.4vh, 0.7rem);
-      row-gap: clamp(0.25rem, 1.4dvh, 0.7rem);
+      align-content: start;
+      row-gap: clamp(0.3rem, 1.6vh, 0.85rem);
+      row-gap: clamp(0.3rem, 1.6dvh, 0.85rem);
       min-height: 0;
       overflow: hidden;
     }
@@ -802,24 +802,49 @@
       max-width: 38%; margin-bottom: 0;
     }
 
-    /* Captured-piece chips wrap onto a second row instead of scrolling
-       horizontally — a side can capture at most 5 distinct piece types
-       (every type but the king), and 3-over-2 comfortably fits that
-       within the rail's width. */
-    .captured {
-      flex-wrap: wrap;
-      overflow-x: visible;
-      max-width: 60%;
-    }
-
-    /* Reserve the panel's full two-row height up front (rather than
-       letting it grow only once a capture happens) so nothing shifts
-       mid-game whether a side has captured 0 pieces or 5. The formula
-       mirrors the cap-piece clamp() used above: two chip-rows' worth of
-       height plus their gap and the panel's own vertical padding. */
+    /* Icon+name become their own centered row, captured chips their own
+       centered row below — a small CSS-grid restructure (rather than the
+       portrait single flex row, where the icon+name naturally sit at the
+       left and the tray is pushed to the right) so the panel reads as
+       "name on top, captures below", both centered, instead of hugging
+       one edge when there's nothing captured yet to fill the row. */
     .player-panel {
-      min-height: calc(2 * clamp(1.0625rem, 5.4vw, 1.5rem) + 1.3rem);
+      display: grid;
+      grid-template-columns: auto auto;
+      grid-template-rows: auto auto;
+      justify-content: center;
+      align-content: center;
+      row-gap: 0.3rem;
+      column-gap: 0.4rem;
+      /* One chip-row's worth of height (not two — see .captured below)
+         plus the icon/name row and the panel's own padding, so nothing
+         shifts mid-game whether a side has captured 0 pieces or 5. */
+      min-height: 4.1rem;
     }
+    .player-icon { grid-row: 1; grid-column: 1; }
+    .player-name { grid-row: 1; grid-column: 2; }
+
+    /* All 5 possible captured piece-types (every type but the king) now
+       stay on ONE row instead of wrapping — container queries size each
+       chip as a fraction of the tray's OWN rendered width (not the
+       viewport), so they scale correctly whether the rail ends up wide
+       or narrow on any given screen/resolution, rather than assuming one
+       fixed viewport-relative size. */
+    .captured {
+      grid-row: 2;
+      grid-column: 1 / -1;
+      container-type: inline-size;
+      margin-left: 0;
+      flex-wrap: nowrap;
+      justify-content: center;
+      overflow-x: visible;
+      max-width: 100%;
+      width: 100%;
+      gap: clamp(0.1rem, 2cqw, 0.3rem);
+    }
+    .captured .cap-piece { width: clamp(0.55rem, 11cqw, 1.4rem); }
+    .captured .cap-item { padding: 0.05rem 0.2rem 0.05rem 0.1rem; gap: 0.1rem; }
+    .captured .cap-count { font-size: 0.62rem; }
 
     /* The board is meant to dominate the page, filling essentially the
        whole viewport height edge-to-edge. Unlike a flat "94vh" guess,
