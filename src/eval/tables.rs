@@ -10,8 +10,13 @@
 // Tables are from White's perspective (a1=index 0, h8=index 63).
 // Black's tables are mirrored automatically.
 //
-// Tables borrowed from Ethereal chess engine (GPL v3, Andrew Grant)
-// with attribution. Tuned over millions of self-play games.
+// Piece-square tables were originally borrowed from Ethereal chess engine
+// (GPL v3, Andrew Grant); as of Phase 14 (D35) they are Pet-Dragon-specific,
+// Texel-tuned against 147,283 real Pet Dragon self-play positions
+// (src/bin/texel_tune.rs, weight_decay=0.08, 100 epochs — see SESSION_LOG).
+// The Ethereal tables remain the tuner's starting point
+// (src/texel/weights.rs's TunableWeights::default()), not the tables
+// compiled here anymore.
 //
 // All values use the s(mg, eg) tapered score system.
 // ============================================================================
