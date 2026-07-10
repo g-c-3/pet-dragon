@@ -32,31 +32,36 @@ use crate::position::Position;
 use crate::types::{Color, PieceKind, Square};
 
 // ── Pawn structure bonus/penalty tables ───────────────────────────────────────
-// Values from Ethereal (GPL v3, Andrew Grant), packed MG/EG scores.
+// Originally from Ethereal (GPL v3, Andrew Grant); as of Phase 14 (D35)
+// these are Pet-Dragon-specific Texel-tuned values (147,283 samples,
+// weight_decay=0.08, 100 epochs — see SESSION_LOG). Ethereal's values
+// remain the tuner's starting point (src/texel/weights.rs).
 
 /// Isolated pawn penalty (no friendly pawn on adjacent files)
-const ISOLATED_PENALTY: i64 = s(-5, -15);
+const ISOLATED_PENALTY: i64 = s(-16, -17);
 
 /// Doubled pawn penalty (two pawns on same file)
-const DOUBLED_PENALTY: i64 = s(-11, -51);
+const DOUBLED_PENALTY: i64 = s(-18, -47);
 
 /// Backward pawn penalty (can't safely advance, stop square enemy-controlled)
-const BACKWARD_PENALTY: i64 = s(-9, -8);
+const BACKWARD_PENALTY: i64 = s(-17, -9);
 
 /// Passed pawn bonus by rank (0-indexed rank relative to own back rank).
 /// Index 0 = rank closest to own start (least advanced), 5 = one step from promo.
-/// Ranks 0 and 1 are 0 (pawns haven't moved far enough to be "passed" bonuses).
+/// Index 7 (promotion rank) stays 0,0 — pawns there promote immediately and
+/// are never observed as pawns in the training data, so the tuner correctly
+/// never touches it.
 ///
 /// For White: rank index = pawn.rank() - 1 (rank 2 = index 1, rank 7 = index 6)
 /// For Black: rank index = 6 - pawn.rank() (rank 7 = index 1, rank 2 = index 6)
 const PASSED_PAWN_BONUS: [i64; 8] = [
-    s(  0,   0),  // rank 1 / rank 8 (start — no bonus)
-    s(  2,  10),  // rank 2 / rank 7
-    s(  7,  17),  // rank 3 / rank 6
-    s( 15,  35),  // rank 4 / rank 5 (dangerous)
-    s( 35,  65),  // rank 5 / rank 4
-    s( 65, 105),  // rank 6 / rank 3 (very dangerous)
-    s(110, 175),  // rank 7 / rank 2 (about to promote)
+    s(  5,   9),  // rank 1 / rank 8 (start)
+    s( 12,  19),  // rank 2 / rank 7
+    s( 14,  27),  // rank 3 / rank 6
+    s( 25,  44),  // rank 4 / rank 5 (dangerous)
+    s( 40,  68),  // rank 5 / rank 4
+    s( 57,  97),  // rank 6 / rank 3 (very dangerous)
+    s(102, 165),  // rank 7 / rank 2 (about to promote)
     s(  0,   0),  // rank 8 / rank 1 (promotion rank — handled separately)
 ];
 
