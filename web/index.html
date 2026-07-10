@@ -731,8 +731,8 @@
       height: 100dvh;
       width: 100vw;
       width: 100dvw;
-      padding: clamp(0.3rem, 1.5vh, 1rem) clamp(0.5rem, 2vw, 1.25rem);
-      padding: clamp(0.3rem, 1.5dvh, 1rem) clamp(0.5rem, 2vw, 1.25rem);
+      padding: clamp(0.6rem, 2.2vh, 1.25rem) clamp(0.5rem, 2vw, 1.25rem);
+      padding: clamp(0.6rem, 2.2dvh, 1.25rem) clamp(0.5rem, 2vw, 1.25rem);
     }
 
     header { grid-column: 1; grid-row: 1; margin-bottom: 0; }
@@ -813,8 +813,8 @@
     #board-wrap {
       grid-column: 2;
       grid-row: 1 / -1;
-      width: min(calc(100vh - 2 * clamp(0.3rem, 1.5vh, 1rem) - var(--coord-size)), 46vw);
-      width: min(calc(100dvh - 2 * clamp(0.3rem, 1.5dvh, 1rem) - var(--coord-size)), 46vw);
+      width: min(calc(100vh - 2 * clamp(0.6rem, 2.2vh, 1.25rem) - var(--coord-size) - 0.5rem), 46vw);
+      width: min(calc(100dvh - 2 * clamp(0.6rem, 2.2dvh, 1.25rem) - var(--coord-size) - 0.5rem), 46vw);
       margin: 0 0 var(--coord-size) var(--coord-size);
       align-self: center;
       justify-self: center;
