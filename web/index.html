@@ -2918,6 +2918,20 @@ function _mvToUci(mv) {
 }
 
 // ─── Dispatch a move request to Pet Dragon ───────────────────────────────────
+let _engineDiagnosticTimer = null;
+function _showEngineDiagnostic(msg) {
+  console.error('Pet Dragon diagnostic:', msg);
+  const t = document.getElementById('status-text');
+  if (!t) return;
+  t.textContent = msg;
+  t.style.color = '#ff6b6b';
+  clearTimeout(_engineDiagnosticTimer);
+  _engineDiagnosticTimer = setTimeout(() => {
+    t.style.color = '';
+    setEngineStatus(engineReady ? 'ready' : 'error');
+  }, 8000);
+}
+
 async function _engineMoveDragon() {
   if (!engineReady || customGameOver) return;
   if (customTurn === playerColor && !autoPlayEnabled) return;
@@ -2929,12 +2943,19 @@ async function _engineMoveDragon() {
   const engineColor = customTurn;
   const legalMvs = getCustomMoves(customBoard, engineColor, false);
   if (!legalMvs.length) {
-    engineThinking = false; setEngineStatus('ready'); checkGameOver(); return;
+    engineThinking = false; setEngineStatus('ready');
+    const wasOver = customGameOver;
+    checkGameOver();
+    if (!customGameOver && !wasOver) {
+      _showEngineDiagnostic('No legal moves found for engine, but game not flagged over');
+    }
+    return;
   }
 
   const currentFen = boardStateToFen(customBoard, engineColor);
 
   let bestmove = null;
+  let searchError = null;
   try {
     // Runs in a Worker (see the module bootstrap at the top of the page), so
     // this awaits a postMessage round-trip rather than blocking the main
@@ -2944,6 +2965,7 @@ async function _engineMoveDragon() {
   } catch (e) {
     // Rejected because the search was aborted (see petDragonAbortSearch) or
     // the worker errored — either way, just fall through with no move.
+    searchError = e;
     console.error('Pet Dragon search failed:', e);
   }
 
@@ -2953,12 +2975,22 @@ async function _engineMoveDragon() {
   engineThinking = false;
   setEngineStatus('ready');
 
+  if (searchError) {
+    _showEngineDiagnostic('Search error: ' + String((searchError && searchError.message) || searchError).slice(0, 120));
+    return;
+  }
+
   if (!bestmove || bestmove === '0000') {
     checkGameOver();
     return;
   }
 
-  applyEngineMove(bestmove);
+  try {
+    applyEngineMove(bestmove);
+  } catch (e) {
+    console.error('applyEngineMove threw:', e);
+    _showEngineDiagnostic('applyEngineMove error: ' + String((e && e.message) || e).slice(0, 120));
+  }
 }
 
 function applyEngineMove(uciMove) {
@@ -2982,9 +3014,12 @@ function applyEngineMove(uciMove) {
   const engineMoveObj = legalNow.find(m => m.from === fi && m.to === ti);
 
   if (!engineMoveObj) {
-    // Extremely unlikely — board state changed between dispatch and reply.
+    // Board state changed between dispatch and reply, or Pet Dragon returned
+    // a move we don't recognise as legal — surface this rather than silently
+    // doing nothing, since it means the engine and our own move list disagree.
     engineThinking = false;
     setEngineStatus('ready');
+    _showEngineDiagnostic('Unrecognised engine move: ' + uciMove);
     return;
   }
 
