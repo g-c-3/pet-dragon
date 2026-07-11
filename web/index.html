@@ -17,23 +17,10 @@
   function setRealViewportUnits() {
     document.documentElement.style.setProperty('--vh100', window.innerHeight + 'px');
     document.documentElement.style.setProperty('--vw100', window.innerWidth + 'px');
-    // Landscape now sits the header above ALL three columns (full width)
-    // instead of just the left rail, so the board/rails can compute how
-    // much vertical room the header actually takes and subtract exactly
-    // that — rather than guessing a fixed value. <header> doesn't exist
-    // yet when this runs from <head>, hence the null-guard; the
-    // DOMContentLoaded/resize/orientationchange calls below cover it
-    // once it does, and re-measure if its rendered height ever changes
-    // (e.g. the fluid font-size clamp responding to a resize).
-    const headerEl = document.querySelector('header');
-    if (headerEl) {
-      document.documentElement.style.setProperty('--header-h', headerEl.offsetHeight + 'px');
-    }
   }
   setRealViewportUnits();
   window.addEventListener('resize', setRealViewportUnits);
   window.addEventListener('orientationchange', setRealViewportUnits);
-  document.addEventListener('DOMContentLoaded', setRealViewportUnits);
 </script>
 <style>
   /* ── Reset & base ───────────────────────────────────────────────────── */
@@ -92,6 +79,16 @@
     margin-top: 0.2rem;
   }
 
+  /* #rail-title duplicates the header markup for landscape (see the
+     landscape media query) — needs its own copy of the gradient-text
+     rule since `header h1 .title-text` doesn't match outside <header>. */
+  #rail-title .title-text {
+    background: linear-gradient(135deg, #c8a96e 0%, #f0d08a 50%, #c8a96e 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
   /* ── Game-end celebration overlay ───────────────────────────────────── */
   #firework-canvas {
     position: fixed;
@@ -124,6 +121,11 @@
      existed — display:contents does exactly that. */
   #rail-left, #rail-right { display: contents; }
 
+  /* Compact duplicate of the page header, used only inside the landscape
+     rail (see the landscape media query) — hidden here so portrait's
+     single page-level <header> remains the only title shown. */
+  #rail-title { display: none; }
+
   /* #winprob now physically lives inside #rail-right's markup (so
      landscape can place it under the nav buttons, fully contained in
      that rail's own box) instead of inside #ai-toggle-row. Since
@@ -147,6 +149,13 @@
   #ai-toggle-divider { display: none; }
 
   /* ── Player panels ──────────────────────────────────────────────────── */
+  /* --panel-bg-behind is whatever's directly behind the panel — needed so
+     the floating legend (below) can paint a matching background over the
+     border line it sits on, "cutting" a notch through it the way a
+     fieldset's <legend> does. Portrait's panel sits inside #app-card
+     (bg #141414); landscape's rail sits straight on the page (#0a0a0a) —
+     see the override in the landscape media query. */
+  #players { --panel-bg-behind: #141414; }
   #players {
     width: 100%;
     display: flex;
@@ -155,10 +164,11 @@
     margin-bottom: 0.75rem;
   }
   .player-panel {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.7rem;
+    justify-content: center;
+    padding: 0.95rem 0.6rem 0.45rem;
     background: #1b1b1b;
     border: 0.0625rem solid #2a2a2a;
     border-radius: 0.5rem;
@@ -170,26 +180,46 @@
     background: #201a10;
     box-shadow: 0 0 0 0.0625rem rgba(200,169,110,0.25) inset;
   }
-  .player-icon { font-size: 1.25rem; line-height: 1; }
+  /* The "engraved" legend: sits centered ON the top border line rather
+     than inside the box, like a fieldset's <legend> — a background patch
+     matching whatever's behind the panel visually cuts the notch. */
+  .player-legend {
+    position: absolute;
+    top: 0;
+    left: 0.8rem;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0 0.4rem;
+    background: var(--panel-bg-behind, #141414);
+    line-height: 1;
+  }
+  .player-icon { font-size: 1rem; line-height: 1; }
   .player-name {
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: #bbb;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #999;
     transition: color 0.2s;
   }
   .player-panel.active .player-name { color: #f0d08a; }
 
   /* ── Captured pieces tray ───────────────────────────────────────────── */
+  /* Now the panel's ONLY visible content (name/icon moved to the border
+     legend above), so it's centered and free to use the panel's full
+     width rather than being squeezed against a name label. */
   .captured {
-    margin-left: auto;
+    width: 100%;
     display: flex;
     flex-wrap: nowrap;      /* never wraps to a 2nd line — panel height stays fixed */
     overflow-x: auto;
     scrollbar-width: none;  /* Firefox */
-    justify-content: flex-end;
-    align-content: center;
-    gap: 0.2rem;
-    max-width: 58%;
+    justify-content: center;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: 100%;
   }
   .captured::-webkit-scrollbar { display: none; } /* Chrome/Safari/Edge */
   .cap-item {
@@ -673,7 +703,7 @@
   .switch {
     position: relative;
     display: inline-block;
-    width: 2.625rem;
+    width: 2.75rem;
     height: 1.5rem;
     flex-shrink: 0;
   }
@@ -681,25 +711,37 @@
   .slider {
     position: absolute;
     cursor: pointer;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background-color: #2a2a2a;
-    border: 0.0625rem solid #444;
-    transition: background-color 0.2s, border-color 0.2s;
-    border-radius: 1.5rem;
+    inset: 0;
+    background: linear-gradient(180deg, #2c2c2c, #1a1a1a);
+    border: 0.0625rem solid #3d3d3d;
+    transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    border-radius: 2rem;
+    box-shadow: inset 0 0.0625rem 0.1875rem rgba(0,0,0,0.6);
   }
   .slider::before {
     position: absolute;
     content: "";
-    height: 1.125rem;
-    width: 1.125rem;
-    left: 0.125rem;
-    bottom: 0.125rem;
-    background-color: #ccc;
-    transition: transform 0.2s, background-color 0.2s;
+    height: 1.15rem;
+    width: 1.15rem;
+    left: 0.14rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: linear-gradient(145deg, #e8e8e8, #b0b0b0);
+    transition: transform 0.25s cubic-bezier(.4,1.6,.4,1), background 0.25s ease, box-shadow 0.25s ease;
     border-radius: 50%;
+    box-shadow: 0 0.0625rem 0.1875rem rgba(0,0,0,0.5);
   }
-  .switch input:checked + .slider { background-color: #c8a96e; border-color: #c8a96e; }
-  .switch input:checked + .slider::before { transform: translateX(1.125rem); background-color: #141414; }
+  .switch input:checked + .slider {
+    background: linear-gradient(180deg, #d8b878, #c8a96e);
+    border-color: #d8b878;
+    box-shadow: inset 0 0.0625rem 0.1875rem rgba(0,0,0,0.2), 0 0 0.55rem rgba(200,169,110,0.5);
+  }
+  .switch input:checked + .slider::before {
+    transform: translateY(-50%) translateX(1.25rem);
+    background: linear-gradient(145deg, #fffbf2, #f0d08a);
+    box-shadow: 0 0.0625rem 0.1875rem rgba(0,0,0,0.4);
+  }
+  .switch input:focus-visible + .slider { outline: 0.125rem solid #c8a96e; outline-offset: 0.125rem; }
   #side-select.disabled { opacity: 0.45; pointer-events: none; }
 
   /* ══════════════════════════════════════════════════════════════════
@@ -707,18 +749,23 @@
      Fires on ORIENTATION, not device type, so a rotated phone and a
      wide desktop window get treated identically.
 
-     The whole page becomes one fixed-size CSS grid:
-       row 1 (full width)      → the header, spanning all three columns
-                                  so every column starts at the same top
-                                  edge instead of the header only pushing
-                                  column 1 down
-       row 2, column 1 (rail)  → AI-toggle row, players, status
-       row 2, column 2 (auto)  → the board — the ONLY thing in this
-                                  track, so it sits exactly at the grid's
-                                  (and therefore the page's) horizontal
-                                  midpoint, since columns 1 and 3 share
-                                  the same width value
-       row 2, column 3 (rail)  → controls, secondary controls, info
+     The whole page becomes one fixed-size, single-row CSS grid:
+       column 1 (rail)  → title, AI-toggle row, players, status
+       column 2 (auto)  → the board — the ONLY thing in this track, and
+                           the ONLY thing every column's height is measured
+                           against: it always runs the full available
+                           height edge-to-edge (top of row 8 to bottom of
+                           the file labels), full stop.
+       column 3 (rail)  → controls, secondary controls, info
+     Both rails are capped to that exact same row height and scroll
+     internally (overflow-y: auto) if their own content is ever taller
+     than the board — they accommodate themselves to the board as the
+     reference point, never the other way around, and never expand the
+     page past the viewport.
+     The page-level <header> is hidden here in favour of #rail-title, a
+     compact duplicate living inside #rail-left's own markup — so the
+     title becomes part of the left rail's scrollable column instead of
+     a separate row that every column had to make room for.
      #app-card is unwrapped with display:contents so its existing
      children (same markup, same IDs — nothing duplicated) drop straight
      into this grid. Every size below is vh/vw/rem/clamp()/min(), same
@@ -746,38 +793,28 @@
        from the normal scrolling flow entirely, so that can't happen. */
     body { position: fixed; inset: 0; }
 
-    /* Outer grid: row 1 is exactly as tall as the header, row 2 (1fr) is
-       whatever's left — a `1fr` row can never grow past its share of the
-       container no matter how tall its content wants to be, which is the
-       actual fix for the cross-browser cutoff: previously every row was
-       `auto`, so slightly taller text/rendering in one browser could push
-       the whole grid past the true viewport height and get clipped by
-       overflow:hidden. Any column whose content doesn't fit its bounded
-       cell now clips inside that cell (see #rail-left/#rail-right below)
-       instead of inflating the page. */
+    /* Single row — the board, and both rails, all measure themselves
+       against this one 1fr track, so nothing can ever start higher or
+       lower than anything else. */
     body {
       display: grid;
-      grid-template-columns: minmax(0, 22rem) auto minmax(0, 22rem);
-      grid-template-rows: auto 1fr;
+      grid-template-columns: minmax(0, 20rem) auto minmax(0, 20rem);
+      grid-template-rows: 1fr;
       justify-content: center;
-      column-gap: clamp(1rem, 3vw, 2.75rem);
-      row-gap: clamp(0.2rem, 1vh, 0.5rem);
-      row-gap: clamp(0.2rem, 1dvh, 0.5rem);
+      column-gap: clamp(0.75rem, 2.4vw, 2rem);
       height: 100vh;
       height: 100dvh;
       height: var(--vh100, 100dvh);
       width: 100vw;
       width: 100dvw;
       width: var(--vw100, 100dvw);
-      padding: clamp(0.6rem, 2.2vh, 1.25rem) clamp(0.5rem, 2vw, 1.25rem);
-      padding: clamp(0.6rem, 2.2dvh, 1.25rem) clamp(0.5rem, 2vw, 1.25rem);
+      padding: clamp(0.5rem, 2vh, 1.1rem) clamp(0.4rem, 1.6vw, 1.1rem);
+      padding: clamp(0.5rem, 2dvh, 1.1rem) clamp(0.4rem, 1.6vw, 1.1rem);
     }
 
-    /* Full width (not just column 1) so the board and right rail start at
-       the same top edge as the left rail instead of sitting a header's
-       height higher — that mismatch was what made the two sides read as
-       uneven. */
-    header { grid-column: 1 / -1; grid-row: 1; margin-bottom: 0; }
+    /* The page-level title is replaced by #rail-title (below) so the
+       board and right rail no longer cede any height to it. */
+    header { display: none; }
 
     /* The card's own box (background/border/shadow/padding) was a single
        stacked-column idea — it doesn't make sense split across three
@@ -785,25 +822,64 @@
        directly on the page background. */
     #app-card { display: contents; }
 
-    /* Each rail is its OWN small grid/flex box with a hard-bounded height
-       (the outer grid's 1fr row, shared with the board now that the
-       header spans full width above all three columns) and
-       `overflow:hidden` — so if a rail's content is ever slightly
-       taller than expected in some browser, THAT rail clips internally
-       instead of the whole page growing past the viewport. This is the
-       main structural fix versus placing every element straight onto one
-       shared page-level grid. */
+    /* Each rail is its OWN small grid box, bounded to exactly the outer
+       grid's single row (the same height the board gets) — but unlike
+       the board, a rail is allowed to SCROLL internally
+       (overflow-y: auto) rather than clip if its content ever runs
+       taller than that, so nothing is ever silently cut off. */
+    #rail-left, #rail-right {
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: #3d3d3d transparent;
+    }
+    #rail-left::-webkit-scrollbar, #rail-right::-webkit-scrollbar { width: 0.3rem; }
+    #rail-left::-webkit-scrollbar-track, #rail-right::-webkit-scrollbar-track { background: transparent; }
+    #rail-left::-webkit-scrollbar-thumb, #rail-right::-webkit-scrollbar-thumb {
+      background: #3d3d3d; border-radius: 1rem;
+    }
+
     #rail-left {
       grid-column: 1;
-      grid-row: 2;
+      grid-row: 1;
       display: grid;
       grid-template-columns: 1fr;
-      grid-template-rows: auto auto;
+      grid-template-rows: auto auto auto;
       align-content: start;
-      row-gap: clamp(0.3rem, 1.6vh, 0.85rem);
-      row-gap: clamp(0.3rem, 1.6dvh, 0.85rem);
-      min-height: 0;
-      overflow: hidden;
+      row-gap: clamp(0.5rem, 1.8vh, 0.9rem);
+      row-gap: clamp(0.5rem, 1.8dvh, 0.9rem);
+    }
+
+    /* This rail sits straight on the page background, not #app-card's, so
+       the player-legend's "cut" patch (see .player-panel) needs to match
+       THIS background instead of the card's #141414. Set directly on
+       #players (not an ancestor) since a custom property declared right
+       on an element always wins over one merely inherited from a parent,
+       regardless of media query or specificity. */
+    #players { --panel-bg-behind: #0a0a0a; }
+
+    /* Compact stand-in for the page header, living inside the rail so it
+       shares its scroll/height budget instead of taking a bite out of
+       every column. */
+    #rail-title {
+      grid-row: 1; grid-column: 1;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    #rail-title .title-emoji { font-size: 1.6rem; line-height: 1; }
+    #rail-title h1 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1.15;
+    }
+    #rail-title p {
+      font-size: 0.62rem;
+      color: #666;
+      line-height: 1.25;
+      margin-top: 0.1rem;
     }
 
     /* AI-toggle switch and status text share one grid cell instead of
@@ -812,39 +888,21 @@
        overlapping. The win-probability bar moved out of this row
        entirely (see #rail-right below), which is what freed up the
        room for it. */
-    #players    { grid-row: 1; grid-column: 1; margin-bottom: 0; }
+    #players    { grid-row: 2; grid-column: 1; margin-bottom: 0; gap: 0.3rem; }
     #ai-toggle-row {
-      grid-row: 2; grid-column: 1;
+      grid-row: 3; grid-column: 1;
       justify-self: start; align-self: center;
       width: auto; max-width: 60%; margin-bottom: 0;
     }
     #status {
-      grid-row: 2; grid-column: 1;
+      grid-row: 3; grid-column: 1;
       justify-self: end; align-self: center;
       max-width: 38%; margin-bottom: 0;
     }
 
-    /* Icon+name become their own centered row, captured chips their own
-       centered row below — a small CSS-grid restructure (rather than the
-       portrait single flex row, where the icon+name naturally sit at the
-       left and the tray is pushed to the right) so the panel reads as
-       "name on top, captures below", both centered, instead of hugging
-       one edge when there's nothing captured yet to fill the row. */
-    .player-panel {
-      display: grid;
-      grid-template-columns: auto auto;
-      grid-template-rows: auto auto;
-      justify-content: center;
-      align-content: center;
-      row-gap: 0.3rem;
-      column-gap: 0.4rem;
-      /* One chip-row's worth of height (not two — see .captured below)
-         plus the icon/name row and the panel's own padding, so nothing
-         shifts mid-game whether a side has captured 0 pieces or 5. */
-      min-height: 4.6rem;
-    }
-    .player-icon { grid-row: 1; grid-column: 1; }
-    .player-name { grid-row: 1; grid-column: 2; }
+    /* Crammed a notch tighter than portrait — the legend now carries the
+       name, so the box itself only has to hold the captured-piece tray. */
+    .player-panel { padding: 0.85rem 0.55rem 0.4rem; min-height: 2.3rem; }
 
     /* All 5 possible captured piece-types (every type but the king) now
        stay on ONE row instead of wrapping — container queries size each
@@ -853,20 +911,12 @@
        or narrow on any given screen/resolution, rather than assuming one
        fixed viewport-relative size. */
     .captured {
-      grid-row: 2;
-      grid-column: 1 / -1;
       container-type: inline-size;
-      margin-left: 0;
-      flex-wrap: nowrap;
-      justify-content: center;
-      overflow-x: visible;
-      max-width: 100%;
-      width: 100%;
       gap: clamp(0.1rem, 2cqw, 0.3rem);
     }
-    .captured .cap-piece { width: clamp(0.8rem, 14cqw, 1.8rem); }
+    .captured .cap-piece { width: clamp(0.8rem, 15cqw, 1.7rem); }
     .captured .cap-item { padding: 0.05rem 0.2rem 0.05rem 0.1rem; gap: 0.1rem; }
-    .captured .cap-count { font-size: 0.66rem; }
+    .captured .cap-count { font-size: 0.64rem; }
 
     /* The board is meant to dominate the page, filling essentially the
        whole viewport height edge-to-edge. Unlike a flat "94vh" guess,
@@ -880,13 +930,10 @@
        side rails on a very short-but-ultra-wide screen. */
     #board-wrap {
       grid-column: 2;
-      /* Row 2 only now (the header lives in row 1 across every column —
-         see above), so this cell's available height is already just the
-         board's share, no longer the whole viewport. */
-      grid-row: 2;
-      width: min(calc(100vh - 2 * clamp(0.6rem, 2.2vh, 1.25rem) - var(--coord-size) - 2rem - var(--header-h, 3.5rem) - clamp(0.2rem, 1vh, 0.5rem)), 46vw);
-      width: min(calc(100dvh - 2 * clamp(0.6rem, 2.2dvh, 1.25rem) - var(--coord-size) - 2rem - var(--header-h, 3.5rem) - clamp(0.2rem, 1dvh, 0.5rem)), 46vw);
-      width: min(calc(var(--vh100, 100dvh) - 2 * clamp(0.6rem, 2.2dvh, 1.25rem) - var(--coord-size) - 2rem - var(--header-h, 3.5rem) - clamp(0.2rem, 1dvh, 0.5rem)), 46vw);
+      grid-row: 1;
+      width: min(calc(100vh - 2 * clamp(0.5rem, 2vh, 1.1rem) - var(--coord-size) - 1.5rem), 44vw);
+      width: min(calc(100dvh - 2 * clamp(0.5rem, 2dvh, 1.1rem) - var(--coord-size) - 1.5rem), 44vw);
+      width: min(calc(var(--vh100, 100dvh) - 2 * clamp(0.5rem, 2dvh, 1.1rem) - var(--coord-size) - 1.5rem), 44vw);
       margin: 0 0 var(--coord-size) var(--coord-size);
       align-self: start;
       justify-self: center;
@@ -899,19 +946,17 @@
        next to the AI switch there) would otherwise leak in here too. */
     #rail-right {
       grid-column: 3;
-      grid-row: 2;
+      grid-row: 1;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      gap: clamp(0.4rem, 1.6vh, 0.9rem);
-      gap: clamp(0.4rem, 1.6dvh, 0.9rem);
-      min-height: 0;
-      overflow: hidden;
+      gap: clamp(0.35rem, 1.4vh, 0.7rem);
+      gap: clamp(0.35rem, 1.4dvh, 0.7rem);
     }
     #controls            { order: 1; margin-top: 0; }
     #winprob              { order: 2; }
     #controls-secondary  { order: 3; margin-top: 0; }
-    #info                { order: 4; margin-top: 0; }
+    #info                { order: 4; margin-top: 0; line-height: 1.5; }
   }
 </style>
 </head>
@@ -928,6 +973,14 @@
 <div id="app-card">
 
   <div id="rail-left">
+    <div id="rail-title">
+      <span class="title-emoji">🐉</span>
+      <div>
+        <h1><span class="title-text">Pet Dragon</span></h1>
+        <p>Original chess variant · Every game starts differently</p>
+      </div>
+    </div>
+
     <div id="ai-toggle-row">
       <div id="ai-toggle-left">
         <label class="switch">
@@ -941,13 +994,11 @@
 
     <div id="players">
       <div class="player-panel" id="panel-engine">
-        <span class="player-icon">🐉</span>
-        <span class="player-name">Pet Dragon</span>
+        <span class="player-legend"><span class="player-icon">🐉</span><span class="player-name">Pet Dragon</span></span>
         <div class="captured" id="captured-engine"></div>
       </div>
       <div class="player-panel" id="panel-human">
-        <span class="player-icon">🧑</span>
-        <span class="player-name">You</span>
+        <span class="player-legend"><span class="player-icon">🧑</span><span class="player-name">You</span></span>
         <div class="captured" id="captured-human"></div>
       </div>
     </div>
