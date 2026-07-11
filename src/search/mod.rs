@@ -29,7 +29,7 @@ pub mod time;
 pub mod see;
 pub mod pruning;
 
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
 use crate::types::Move;
 
 // ── Score constants ───────────────────────────────────────────────────────────
@@ -155,6 +155,24 @@ pub struct SearchInfo {
     /// All threads sharing this Arc terminate as soon as the flag is set.
     pub stop_flag: Arc<AtomicBool>,
 
+    /// Ponder-hit soft-limit override, in ms (Phase 18/D37). Expressed
+    /// relative to THIS search's own `start_time`, not reset to zero —
+    /// pondering time is free per the UCI spec, and `start_time` is owned
+    /// by the search thread so it can't safely be reset from main.rs's
+    /// `ponderhit` handler on another thread. `u64::MAX` = not yet fired.
+    /// Set once by `ponderhit`; consumed once (via `swap`) by
+    /// `iterative_deepening()` between depth iterations to replace the
+    /// effectively-infinite ponder `TimeManager` with a real, bounded one.
+    pub ponder_hit_soft_ms: Arc<AtomicU64>,
+    /// Ponder-hit hard-limit override — same units/semantics as
+    /// `ponder_hit_soft_ms`, but this is the one `is_time_up()` actually
+    /// checks every 256 nodes (kept separate so that hot-path check stays
+    /// a single atomic load, matching the existing `stop_flag` pattern).
+    /// Left set (not consumed) for the rest of the search once ponderhit
+    /// fires — a new search always gets a fresh `u64::MAX` via
+    /// `reset_for_search()`.
+    pub ponder_hit_hard_ms: Arc<AtomicU64>,
+
     /// Syzygy tablebase handle — native only (Phase 15).
     /// Set by main.rs when a SyzygyPath is configured. None = no tablebases.
     /// Arc makes it cheap to clone into helper threads.
@@ -186,6 +204,8 @@ impl SearchInfo {
             seldepth:          0,
             correction_history: crate::search::pruning::CorrectionHistory::new(),
             stop_flag: Arc::new(AtomicBool::new(false)),
+            ponder_hit_soft_ms: Arc::new(AtomicU64::new(u64::MAX)),
+            ponder_hit_hard_ms: Arc::new(AtomicU64::new(u64::MAX)),
             #[cfg(not(target_arch = "wasm32"))]
             syzygy: None,
         }
@@ -209,6 +229,11 @@ impl SearchInfo {
         self.best_move   = Move::NULL;
         self.seldepth    = 0;
         self.start_time  = web_time::Instant::now();
+        // Defense-in-depth: cmd_go already resets these on EngineState's
+        // copies before every search, but a fresh search should never
+        // inherit a stale override even if some future caller skips that.
+        self.ponder_hit_soft_ms.store(u64::MAX, Ordering::Relaxed);
+        self.ponder_hit_hard_ms.store(u64::MAX, Ordering::Relaxed);
         self.pv_length   = [0; MAX_PLY];
         self.pv_table    = [[Move::NULL; MAX_PLY]; MAX_PLY];
         self.killers     = [[Move::NULL; KILLER_COUNT]; MAX_PLY];
@@ -242,6 +267,17 @@ impl SearchInfo {
         if self.stop || self.stop_flag.load(Ordering::Relaxed) {
             return true;
         }
+        // Ponder-hit override (Phase 18/D37): once a `ponderhit` has fired,
+        // this is set to a real, finite deadline (still relative to this
+        // search's own start_time) — use it instead of the effectively-
+        // infinite time_allocated_ms a `go ponder` search started with.
+        // u64::MAX = no override yet, fall through to the normal check.
+        let hard_override = self.ponder_hit_hard_ms.load(Ordering::Relaxed);
+        let effective_limit = if hard_override != u64::MAX {
+            hard_override
+        } else {
+            self.time_allocated_ms
+        };
         // Sampled every 256 nodes (was 2048) — Phase 16.6's NNUE-blended
         // eval is heavier per node than pure HCE, so the old interval could
         // let a single uninterrupted burst run well past the time budget
@@ -250,7 +286,7 @@ impl SearchInfo {
         // boundary, so no mid-search check ever fired). Instant::now() is
         // cheap enough that checking 8x more often has no measurable search
         // overhead.
-        self.nodes & 255 == 0 && self.elapsed_ms() >= self.time_allocated_ms
+        self.nodes & 255 == 0 && self.elapsed_ms() >= effective_limit
     }
 
     /// Milliseconds elapsed since search started
@@ -559,6 +595,46 @@ mod tests {
         // Set stop flag
         info.stop = true;
         assert!(info.is_time_up());
+    }
+
+    #[test]
+    fn test_ponder_hit_override_defaults_to_unset() {
+        let info = SearchInfo::new();
+        assert_eq!(info.ponder_hit_soft_ms.load(Ordering::Relaxed), u64::MAX,
+            "fresh SearchInfo should have no ponder-hit override");
+        assert_eq!(info.ponder_hit_hard_ms.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[test]
+    fn test_ponder_hit_override_ignored_when_unset() {
+        let mut info = SearchInfo::new();
+        // Simulate a "go ponder" search: huge time_allocated_ms, override unset.
+        info.time_allocated_ms = u64::MAX / 2;
+        assert!(!info.is_time_up(),
+            "with no ponder-hit override, an infinite budget should never time out");
+    }
+
+    #[test]
+    fn test_ponder_hit_hard_override_triggers_timeout() {
+        let mut info = SearchInfo::new();
+        // Simulate an active "go ponder" search (huge nominal budget)...
+        info.time_allocated_ms = u64::MAX / 2;
+        // ...that just received a ponderhit with an already-expired real budget.
+        info.ponder_hit_hard_ms.store(0, Ordering::Relaxed);
+        assert!(info.is_time_up(),
+            "a ponder-hit hard override should take priority over the \
+             original (huge) time_allocated_ms");
+    }
+
+    #[test]
+    fn test_ponder_hit_override_reset_by_reset_for_search() {
+        let mut info = SearchInfo::new();
+        info.ponder_hit_soft_ms.store(123, Ordering::Relaxed);
+        info.ponder_hit_hard_ms.store(456, Ordering::Relaxed);
+        info.reset_for_search();
+        assert_eq!(info.ponder_hit_soft_ms.load(Ordering::Relaxed), u64::MAX,
+            "reset_for_search should clear any stale ponder-hit override");
+        assert_eq!(info.ponder_hit_hard_ms.load(Ordering::Relaxed), u64::MAX);
     }
     
     #[test]

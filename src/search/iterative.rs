@@ -19,6 +19,8 @@
 //   Saves time when score is stable between depths.
 // ============================================================================
 
+use std::sync::atomic::Ordering;
+
 use crate::position::Position;
 use crate::search::{
     alpha_beta::alpha_beta,
@@ -94,6 +96,21 @@ pub fn iterative_deepening(
     // ── Iterative deepening loop ───────────────────────────────────────────────
     for depth in 1..=max_depth {
         info.current_depth = depth;
+
+        // Ponder-hit conversion (Phase 18/D37): if a `ponderhit` arrived
+        // since the last depth started, swap the effectively-infinite
+        // ponder TimeManager for a real, bounded one. `swap` both consumes
+        // the soft override exactly once (so this block only runs the
+        // depth after a hit, not every iteration) and hands back the value
+        // atomically — no separate load-then-store race, though this is
+        // single-writer anyway (only main.rs's ponderhit handler writes).
+        // ponder_hit_hard_ms is deliberately left set for is_time_up()'s
+        // hot-path check for the rest of this search.
+        let ponder_soft_override = info.ponder_hit_soft_ms.swap(u64::MAX, Ordering::Relaxed);
+        if ponder_soft_override != u64::MAX {
+            let hard_override = info.ponder_hit_hard_ms.load(Ordering::Relaxed);
+            tm = TimeManager::new(ponder_soft_override, hard_override);
+        }
 
         // Don't start a new depth if we probably won't finish it
         if depth > 1 && !tm.should_start_next_depth(info.elapsed_ms()) {
@@ -426,6 +443,63 @@ mod tests {
 
         assert_eq!(pos.game_history.len(), initial_history_len,
             "Game history should be same length after search");
+    }
+
+    #[test]
+    fn test_ponder_hit_override_bounds_an_infinite_search() {
+        setup();
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        let tt   = TranspositionTable::new(16);
+        // A real `go ponder` — allocate_time() returns ~u64::MAX/2 for this.
+        let tc = TimeControl { ponder: true, ..Default::default() };
+
+        // Simulate a ponderhit arriving from another thread WHILE the
+        // search is already running — this is the real scenario (a GUI
+        // can only send ponderhit after iterative_deepening() has already
+        // called reset_for_search(), which clears any override; setting it
+        // BEFORE calling iterative_deepening() would just get wiped by
+        // that reset and prove nothing). 30ms gives reset_for_search()
+        // and depth-1 startup plenty of time to complete first.
+        let soft_override = info.ponder_hit_soft_ms.clone();
+        let hard_override  = info.ponder_hit_hard_ms.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            soft_override.store(10, Ordering::Relaxed);
+            hard_override.store(20, Ordering::Relaxed);
+        });
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+
+        // Without the override this would run until MAX_DEPTH (u64::MAX/2
+        // soft/hard limits never trip). With it, it should stop shortly
+        // after the ~30ms + 20ms override fires — generous bound for CI
+        // variance (thread scheduling, slow CI runners, etc).
+        assert!(result.time_ms < 3000,
+            "ponder-hit override should bound an otherwise-infinite ponder \
+             search, got {}ms", result.time_ms);
+        assert_ne!(result.best_move, Move::NULL,
+            "should still return a valid move even when cut short quickly");
+    }
+
+    #[test]
+    fn test_ponder_without_hit_keeps_running_until_depth_cap() {
+        setup();
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        let tt   = TranspositionTable::new(16);
+        // A real `go ponder` with NO ponderhit — bounded here by a shallow
+        // fixed depth instead of letting it run to MAX_DEPTH=128, since
+        // this is a unit test, not a timing benchmark. Proves the ABSENCE
+        // of a ponder-hit override doesn't accidentally cut the search
+        // short via some other path.
+        let tc = TimeControl { ponder: true, depth: 3, ..Default::default() };
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+
+        assert_eq!(result.depth, 3,
+            "with no ponder-hit override, depth should be limited only by \
+             tc.depth, not cut short by the (huge) ponder time budget");
     }
 
     #[test]
