@@ -12,6 +12,9 @@
 //   ucinewgame       → reset position + clear TT + age history
 //   position         → set board (startpos|fen) + optional move list
 //   go               → start search in background thread; print bestmove when done
+//   ponderhit        → convert an active `go ponder` search from effectively
+//                      infinite to a real, time-bounded one (Phase 18/D37).
+//                      No-op if no ponder search is currently active.
 //   stop             → signal background search to stop; wait; print bestmove
 //   setoption        → Hash size, Threads count
 //   quit             → join any active search, exit
@@ -34,8 +37,10 @@
 // ============================================================================
 
 use std::io::{self, BufRead, Write};
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::thread::JoinHandle;
+
+use web_time::Instant;
 
 use pet_dragon_lib::bitboard::magic::init_magic;
 use pet_dragon_lib::bitboard::masks::init_masks;
@@ -48,7 +53,7 @@ use pet_dragon_lib::eval::set_nnue_weight_pct;
 use pet_dragon_lib::search::{
     iterative::iterative_deepening, SearchInfo,
 };
-use pet_dragon_lib::search::time::TimeControl;
+use pet_dragon_lib::search::time::{allocate_time, TimeControl};
 use pet_dragon_lib::tt::TranspositionTable;
 use pet_dragon_lib::types::{Color, Move, PieceKind, Square};
 
@@ -83,14 +88,37 @@ struct EngineState {
     /// Syzygy tablebase handle — set on setoption SyzygyPath. None = disabled.
     #[cfg(not(target_arch = "wasm32"))]
     syzygy: Option<std::sync::Arc<SyzygyProber>>,
+
+    // ── Pondering (Phase 18/D37) ────────────────────────────────────────────
+    /// Shared ponder-hit soft-limit override, cloned into the active search
+    /// thread's SearchInfo in cmd_go. Written by cmd_ponderhit. See
+    /// SearchInfo::ponder_hit_soft_ms for the full mechanism explanation.
+    ponder_hit_soft_ms: Arc<AtomicU64>,
+    /// Shared ponder-hit hard-limit override — see SearchInfo::ponder_hit_hard_ms.
+    ponder_hit_hard_ms: Arc<AtomicU64>,
+    /// The (soft_ms, hard_ms) the current search WOULD use once a
+    /// `ponderhit` arrives, precomputed in cmd_go from the original `go`
+    /// command's real time control (with `ponder` forced false). None
+    /// when the most recent `go` wasn't a ponder search, or once consumed
+    /// by cmd_ponderhit.
+    pending_ponder_allocation: Option<(u64, u64)>,
+    /// Wall-clock instant the current ponder search was dispatched. Used by
+    /// cmd_ponderhit to compute how much "free" pondering time has already
+    /// elapsed (pondering time doesn't count against the real clock, per
+    /// the UCI spec). None when not currently pondering.
+    ponder_started_at: Option<Instant>,
 }
 
 impl EngineState {
     fn new() -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
+        let ponder_hit_soft_ms = Arc::new(AtomicU64::new(u64::MAX));
+        let ponder_hit_hard_ms = Arc::new(AtomicU64::new(u64::MAX));
         let mut info = SearchInfo::new_with_stop(Arc::clone(&stop_flag));
         // Ensure info's stop_flag is the same Arc as our stop_flag
         info.stop_flag = Arc::clone(&stop_flag);
+        info.ponder_hit_soft_ms = Arc::clone(&ponder_hit_soft_ms);
+        info.ponder_hit_hard_ms = Arc::clone(&ponder_hit_hard_ms);
         EngineState {
             pos:           Position::start_pos().unwrap(),
             tt:            Arc::new(TranspositionTable::new(DEFAULT_HASH_MB)),
@@ -101,6 +129,10 @@ impl EngineState {
             search_handle: None,
             #[cfg(not(target_arch = "wasm32"))]
             syzygy: None,
+            ponder_hit_soft_ms,
+            ponder_hit_hard_ms,
+            pending_ponder_allocation: None,
+            ponder_started_at: None,
         }
     }
 
@@ -135,6 +167,12 @@ impl EngineState {
         self.stop_flag.store(false, Ordering::SeqCst);
         self.info.stop_flag = Arc::clone(&self.stop_flag);
         self.pos = Position::start_pos().unwrap();
+        // A new game should never carry a stale ponder-hit override or
+        // pending allocation from whatever the engine was doing before.
+        self.ponder_hit_soft_ms.store(u64::MAX, Ordering::Relaxed);
+        self.ponder_hit_hard_ms.store(u64::MAX, Ordering::Relaxed);
+        self.pending_ponder_allocation = None;
+        self.ponder_started_at = None;
     }
 }
 
@@ -178,6 +216,10 @@ fn main() {
             // Complete any previous search first (shouldn't normally happen).
             state.wait_for_search();
             cmd_go(&mut state, &line);
+        } else if line == "ponderhit" {
+            // Do NOT wait_for_search() here — the ponder search is actively
+            // running and this must not block; we only signal it.
+            cmd_ponderhit(&mut state);
         } else if line == "stop" {
             // Signal search thread to stop; it will print bestmove and exit.
             state.stop_search();
@@ -365,6 +407,28 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     // Reset stop flag for the new search
     state.stop_flag.store(false, Ordering::SeqCst);
 
+    // ── Pondering setup (Phase 18/D37) ────────────────────────────────────────
+    // Always clear any leftover override from a previous search first.
+    state.ponder_hit_soft_ms.store(u64::MAX, Ordering::Relaxed);
+    state.ponder_hit_hard_ms.store(u64::MAX, Ordering::Relaxed);
+    if tc.ponder {
+        // Precompute what the REAL time budget would be if this were an
+        // ordinary (non-ponder) go with the same clock values — this is
+        // exactly what allocate_time() already computes for a normal
+        // search; ponder just tells it to ignore the clock and run near-
+        // infinitely instead (see search/time.rs). Stash the real budget
+        // now so cmd_ponderhit can apply it later without needing to
+        // re-parse the original go line.
+        let is_white = state.pos.side_to_move == Color::White;
+        let mut real_tc = tc.clone();
+        real_tc.ponder = false;
+        state.pending_ponder_allocation = Some(allocate_time(&real_tc, is_white));
+        state.ponder_started_at = Some(Instant::now());
+    } else {
+        state.pending_ponder_allocation = None;
+        state.ponder_started_at = None;
+    }
+
     // Age TT for this new search (only when idle — Arc::get_mut works here)
     if let Some(tt) = Arc::get_mut(&mut state.tt) {
         tt.new_search();
@@ -407,6 +471,8 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let threads   = state.threads.max(1);
     let stop_flag = Arc::clone(&state.stop_flag);
     let tt        = Arc::clone(&state.tt);
+    let ponder_hit_soft_ms = Arc::clone(&state.ponder_hit_soft_ms);
+    let ponder_hit_hard_ms = Arc::clone(&state.ponder_hit_hard_ms);
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -445,6 +511,8 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.history      = history;
         main_info.countermoves = countermoves;
         main_info.correction_history = correction;
+        main_info.ponder_hit_soft_ms = ponder_hit_soft_ms;
+        main_info.ponder_hit_hard_ms = ponder_hit_hard_ms;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -468,6 +536,35 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     });
 
     state.search_handle = Some(handle);
+}
+
+// ── ponderhit ─────────────────────────────────────────────────────────────────
+
+/// Handle "ponderhit" — the GUI confirms our predicted ponder move was
+/// actually played. Converts the currently-running, effectively-infinite
+/// `go ponder` search into a properly time-bounded one, using the real time
+/// control from the original `go` command (precomputed in cmd_go).
+///
+/// Pondering time is free per the UCI spec: the real budget is expressed
+/// relative to how much time has already elapsed since pondering began, not
+/// reset to zero. It can't be reset to zero here even if we wanted to —
+/// `SearchInfo::start_time` is owned by the (already-running) search thread,
+/// not shared, so this function can only ever hand the search thread a new
+/// *deadline* via the shared atomics, never rewind its clock (see D37).
+///
+/// Silently does nothing if no ponder search is currently active (e.g. a
+/// stray or duplicate `ponderhit`, or one that arrives after the search
+/// already finished on its own) — matches this file's existing convention
+/// of silently ignoring inapplicable commands (UCI spec §3.1).
+fn cmd_ponderhit(state: &mut EngineState) {
+    let allocation = state.pending_ponder_allocation.take();
+    let started_at = state.ponder_started_at.take();
+
+    if let (Some((soft, hard)), Some(started_at)) = (allocation, started_at) {
+        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+        state.ponder_hit_soft_ms.store(elapsed_ms.saturating_add(soft), Ordering::Relaxed);
+        state.ponder_hit_hard_ms.store(elapsed_ms.saturating_add(hard), Ordering::Relaxed);
+    }
 }
 
 /// Parse a "go" command into a TimeControl.
@@ -738,5 +835,78 @@ mod tests {
         let mut state = EngineState::new();
         // Should not panic when no search is running
         state.wait_for_search();
+    }
+
+    #[test]
+    fn test_ponderhit_without_pending_allocation_is_noop() {
+        setup();
+        let mut state = EngineState::new();
+        // No `go ponder` was ever issued — a stray ponderhit should do nothing.
+        cmd_ponderhit(&mut state);
+        assert_eq!(state.ponder_hit_soft_ms.load(Ordering::Relaxed), u64::MAX);
+        assert_eq!(state.ponder_hit_hard_ms.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[test]
+    fn test_ponderhit_computes_and_stores_override() {
+        setup();
+        let mut state = EngineState::new();
+        state.pending_ponder_allocation = Some((100, 200));
+        state.ponder_started_at = Some(Instant::now());
+
+        cmd_ponderhit(&mut state);
+
+        let soft = state.ponder_hit_soft_ms.load(Ordering::Relaxed);
+        let hard = state.ponder_hit_hard_ms.load(Ordering::Relaxed);
+        // Should be roughly elapsed(~0ms) + 100 / elapsed(~0ms) + 200 —
+        // generous upper bound to avoid CI timing flakiness.
+        assert!(soft >= 100 && soft < 1000,
+            "expected soft override near 100ms, got {soft}");
+        assert!(hard >= 200 && hard < 1100,
+            "expected hard override near 200ms, got {hard}");
+        assert!(hard > soft, "hard override should exceed soft override");
+
+        // Consumed exactly once.
+        assert!(state.pending_ponder_allocation.is_none());
+        assert!(state.ponder_started_at.is_none());
+    }
+
+    #[test]
+    fn test_ponderhit_is_idempotent_after_consumption() {
+        setup();
+        let mut state = EngineState::new();
+        state.pending_ponder_allocation = Some((50, 100));
+        state.ponder_started_at = Some(Instant::now());
+
+        cmd_ponderhit(&mut state);
+        let soft_after_first = state.ponder_hit_soft_ms.load(Ordering::Relaxed);
+
+        // A second ponderhit with nothing pending should not change anything.
+        cmd_ponderhit(&mut state);
+        assert_eq!(state.ponder_hit_soft_ms.load(Ordering::Relaxed), soft_after_first);
+    }
+
+    #[test]
+    fn test_cmd_go_ponder_sets_pending_allocation() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_go(&mut state, "go ponder wtime 60000 btime 60000");
+        assert!(state.pending_ponder_allocation.is_some(),
+            "a ponder go should precompute the real allocation");
+        assert!(state.ponder_started_at.is_some());
+        state.stop_search();
+    }
+
+    #[test]
+    fn test_cmd_go_non_ponder_clears_pending_allocation() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_go(&mut state, "go ponder wtime 60000 btime 60000");
+        state.stop_search();
+        cmd_go(&mut state, "go movetime 50");
+        assert!(state.pending_ponder_allocation.is_none(),
+            "a normal go should clear any leftover ponder allocation");
+        assert!(state.ponder_started_at.is_none());
+        state.stop_search();
     }
 }
