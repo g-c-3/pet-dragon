@@ -28,10 +28,23 @@
 // .github/workflows/uci_match_runner.yml):
 //   cargo run --release --bin uci_match_runner -- \
 //       <engine_a_path> <engine_b_path> [num_games] [movetime_ms] \
-//       [seed_start] [label_a] [label_b] [output_path]
+//       [seed_start] [label_a] [label_b] [output_path] \
+//       [engine_a_uci_options] [engine_b_uci_options]
 //
 // Defaults: 20 games, 100ms/move, seed_start=0, labels "Engine A"/"Engine B",
-// output_path="uci_match_results.txt".
+// output_path="uci_match_results.txt", both UCI-options args empty (no
+// setoption commands sent — engines run at their compiled-in defaults).
+//
+// Phase 20 (Session 66 follow-up): `engine_a_uci_options`/
+// `engine_b_uci_options` let the same two binaries be configured
+// differently before the match — e.g. to compare Skill Level tiers of the
+// SAME build rather than two different git refs. Each is a single string
+// of one or more `setoption ...` lines separated by `;`, sent once right
+// after the UCI handshake, before any games are played (matches how a real
+// GUI would set a persistent option like Skill Level once per session, not
+// per move) — e.g. "setoption name Skill Level value 0" for engine A and
+// "setoption name Skill Level value 5" for engine B, with both
+// pre_tuning_ref/post_tuning_ref set to the same git ref in the workflow.
 //
 // Known limitation: if a child engine process hangs (never prints a
 // `bestmove` line), this harness blocks indefinitely on that read — there is
@@ -131,6 +144,20 @@ impl EngineProcess {
         self.wait_for_line_starting_with("readyok");
     }
 
+    /// Send zero or more `setoption` lines (already split by
+    /// `split_uci_options`) once, right after the UCI handshake and before
+    /// any games are played — matches how a real GUI sets a persistent
+    /// option like `Skill Level` once per session, not per move. A single
+    /// trailing `isready`/`readyok` confirms the engine has processed all
+    /// of them (per the UCI spec, `setoption` itself has no direct reply).
+    fn configure(&mut self, uci_options: &str) {
+        for line in split_uci_options(uci_options) {
+            self.send(line);
+        }
+        self.send("isready");
+        self.wait_for_line_starting_with("readyok");
+    }
+
     /// Send the current position (base FEN + move list so far) and a
     /// `go movetime` command, then return the `bestmove` UCI string
     /// (e.g. "e2e4", "a7a8q", or "(none)").
@@ -203,6 +230,15 @@ fn parse_uci_move(pos: &Position, mv_str: &str) -> Option<Move> {
     None
 }
 
+/// Split a semicolon-separated raw UCI options string (as passed via the
+/// `engine_a_uci_options`/`engine_b_uci_options` CLI args) into individual
+/// trimmed, non-empty command lines ready to send verbatim (e.g.
+/// "setoption name Skill Level value 0"). Pulled out as a pure function so
+/// it's unit-testable without spawning a real engine process.
+fn split_uci_options(raw: &str) -> Vec<&str> {
+    raw.split(';').map(str::trim).filter(|s| !s.is_empty()).collect()
+}
+
 fn main() {
     init_masks();
     init_magic();
@@ -224,9 +260,13 @@ fn main() {
         .get(8)
         .cloned()
         .unwrap_or_else(|| "uci_match_results.txt".to_string());
+    let engine_a_uci_options = args.get(9).cloned().unwrap_or_default();
+    let engine_b_uci_options = args.get(10).cloned().unwrap_or_default();
 
     let mut engine_a = EngineProcess::spawn(engine_a_path);
     let mut engine_b = EngineProcess::spawn(engine_b_path);
+    engine_a.configure(&engine_a_uci_options);
+    engine_b.configure(&engine_b_uci_options);
 
     let mut wins_a = 0u64;
     let mut wins_b = 0u64;
@@ -395,6 +435,37 @@ fn format_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_split_uci_options_empty_string_is_empty() {
+        assert!(split_uci_options("").is_empty());
+    }
+
+    #[test]
+    fn test_split_uci_options_single_line() {
+        let opts = split_uci_options("setoption name Skill Level value 5");
+        assert_eq!(opts, vec!["setoption name Skill Level value 5"]);
+    }
+
+    #[test]
+    fn test_split_uci_options_multiple_trims_whitespace() {
+        let opts = split_uci_options(
+            " setoption name Skill Level value 5 ; setoption name MultiPV value 2 "
+        );
+        assert_eq!(opts, vec![
+            "setoption name Skill Level value 5",
+            "setoption name MultiPV value 2",
+        ]);
+    }
+
+    #[test]
+    fn test_split_uci_options_ignores_empty_segments() {
+        // Guards against trailing/doubled semicolons producing a blank
+        // "send()" call, which would just be a no-op line to the engine
+        // but is worth keeping clean regardless.
+        let opts = split_uci_options("setoption name Skill Level value 5;;  ;");
+        assert_eq!(opts, vec!["setoption name Skill Level value 5"]);
+    }
 
     #[test]
     fn test_elo_diff_even_score_is_zero() {
