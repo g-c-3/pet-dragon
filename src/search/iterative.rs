@@ -70,6 +70,16 @@ pub fn iterative_deepening(
         info.node_limit = tc.nodes;
     }
 
+    // Phase 20 / D39: Skill Level depth cap. `.min()` only ever makes the
+    // search shallower than what was already requested above — a tier can
+    // never override an explicit, shallower `go depth` with something
+    // deeper. Skill Level 20 (default) returns None here, so this is a
+    // no-op for every caller that hasn't opted into a lower tier.
+    let max_depth = match crate::search::skill::skill_depth_cap(info.skill_level) {
+        Some(cap) => max_depth.min(cap),
+        None      => max_depth,
+    };
+
     info.reset_for_search();
     // Note: tt.new_search() is called by the caller (cmd_go in main.rs)
     // before spawning the search thread. Tests create fresh TTs.
@@ -581,6 +591,61 @@ mod tests {
         assert_eq!(result.depth, 3,
             "with no ponder-hit override, depth should be limited only by \
              tc.depth, not cut short by the (huge) ponder time budget");
+    }
+
+    #[test]
+    fn test_skill_level_default_does_not_cap_depth() {
+        setup();
+        // Default Skill Level (20) must be byte-for-byte the same as before
+        // this feature existed — same safety argument as MultiPV=1.
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        assert_eq!(info.skill_level, crate::search::skill::MAX_SKILL_LEVEL);
+        let tt = TranspositionTable::new(16);
+        let tc = fixed_depth_tc(5);
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+
+        assert_eq!(result.depth, 5,
+            "an explicit go depth must be reached in full when Skill Level \
+             is at its default (uncapped) setting");
+    }
+
+    #[test]
+    fn test_skill_level_caps_search_depth() {
+        setup();
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.skill_level = 0; // weakest tier -> depth cap of 1
+        let tt = TranspositionTable::new(16);
+        // Ask for depth 10, but Skill Level 0 should cap it down to 1.
+        let tc = fixed_depth_tc(10);
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+
+        assert_eq!(result.depth, 1,
+            "Skill Level 0 should cap the search to depth 1 even though \
+             depth 10 was explicitly requested");
+        assert_ne!(result.best_move, Move::NULL,
+            "a capped search must still return a valid legal move");
+    }
+
+    #[test]
+    fn test_skill_level_never_exceeds_explicit_shallower_depth() {
+        setup();
+        // A tier cap must only ever make the search shallower, never
+        // override an explicit request that's ALREADY shallower than the
+        // tier's own cap.
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.skill_level = 19; // depth cap of 20 — far above the requested 3
+        let tt = TranspositionTable::new(16);
+        let tc = fixed_depth_tc(3);
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+
+        assert_eq!(result.depth, 3,
+            "an explicit shallower go depth must win over a higher tier cap");
     }
 
     #[test]

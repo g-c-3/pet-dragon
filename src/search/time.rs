@@ -81,6 +81,16 @@ pub struct TimeControl {
     /// `main.rs`'s `cmd_go`, not parsed from the `go` line itself (Move
     /// Overhead is a persistent `setoption`, not a per-search parameter).
     pub overhead_ms: u64,
+    /// Percentage (0..=100) of the computed time budget to actually use
+    /// (Phase 20 / D39, Session 65 refinement). Set from `EngineState.
+    /// skill_level` via `skill::skill_time_fraction_pct()` in `main.rs`'s
+    /// `cmd_go` — same "persistent setoption, not parsed from the go line"
+    /// pattern as `overhead_ms` above. 100 (the default) means no change to
+    /// the movetime/clock-based allocation. Deliberately NOT applied to the
+    /// `infinite`/`ponder` branches (analysis, not a strength setting) or
+    /// the fixed-depth/fixed-nodes sentinel branches (already governed by
+    /// the Skill Level depth cap in `iterative_deepening()` instead).
+    pub skill_time_fraction_pct: u32,
 }
 
 impl Default for TimeControl {
@@ -97,11 +107,18 @@ impl Default for TimeControl {
             infinite: false,
             ponder: false,
             overhead_ms: OVERHEAD_MS,
+            skill_time_fraction_pct: 100,
         }
     }
 }
 
 // ── Time allocation ───────────────────────────────────────────────────────────
+
+/// Scale a millisecond value by a percentage (0..=100), using u128
+/// intermediates so this can never overflow even at `ms` near `u64::MAX`.
+fn scale_ms(ms: u64, pct: u32) -> u64 {
+    ((ms as u128) * (pct as u128) / 100) as u64
+}
 
 /// Calculate how much time to allocate for this move
 /// Returns (soft_limit_ms, hard_limit_ms)
@@ -111,6 +128,12 @@ pub fn allocate_time(tc: &TimeControl, is_white: bool) -> (u64, u64) {
     // Fixed movetime overrides everything
     if tc.movetime > 0 {
         let t = tc.movetime.saturating_sub(tc.overhead_ms);
+        // Phase 20: apply the Skill Level time fraction here too — a fixed
+        // movetime is exactly the "instaflies then sits idle" case Session
+        // 65 flagged (a beginner tier capped to depth 6 could finish in
+        // ~50ms on a 5-second movetime and just wait), so low tiers still
+        // need to visibly use less of it, not the whole budget.
+        let t = scale_ms(t, tc.skill_time_fraction_pct).max(MIN_TIME_MS.min(t));
         return (t, t);
     }
 
@@ -133,7 +156,9 @@ pub fn allocate_time(tc: &TimeControl, is_white: bool) -> (u64, u64) {
 
     // If no time set, use defaults
     if our_time == 0 {
-        return (5000, 10000);
+        let soft = scale_ms(5000, tc.skill_time_fraction_pct).max(MIN_TIME_MS);
+        let hard = scale_ms(10000, tc.skill_time_fraction_pct).max(soft);
+        return (soft, hard);
     }
 
     // Apply overhead buffer
@@ -156,6 +181,13 @@ pub fn allocate_time(tc: &TimeControl, is_white: bool) -> (u64, u64) {
 
     let soft = soft.max(MIN_TIME_MS).min(available * 8 / 10);
     let hard = hard.max(soft).min(available * 9 / 10);
+
+    // Phase 20: Skill Level time fraction, applied last so it scales the
+    // fully-clamped result rather than interacting with the movestogo/
+    // sudden-death math above. Re-clamp to MIN_TIME_MS/hard>=soft afterward
+    // since scaling down can otherwise violate both.
+    let soft = scale_ms(soft, tc.skill_time_fraction_pct).max(MIN_TIME_MS.min(soft));
+    let hard = scale_ms(hard, tc.skill_time_fraction_pct).max(soft);
 
     (soft, hard)
 }
@@ -382,6 +414,88 @@ mod tests {
         let (soft, _) = allocate_time(&tc, true);
         assert!(soft >= MIN_TIME_MS || soft == 0,
             "Should enforce minimum time or be 0 for very low time");
+    }
+
+    #[test]
+    fn test_skill_time_fraction_default_is_full() {
+        let tc = TimeControl::default();
+        assert_eq!(tc.skill_time_fraction_pct, 100,
+            "a fresh TimeControl should default to 100% (no reduction), \
+             matching pre-Phase-20 behavior for every existing caller");
+    }
+
+    #[test]
+    fn test_skill_time_fraction_reduces_movetime() {
+        let tc_full = TimeControl { movetime: 1000, ..Default::default() };
+        let tc_low  = TimeControl {
+            movetime: 1000,
+            skill_time_fraction_pct: 20,
+            ..Default::default()
+        };
+        let (soft_full, _) = allocate_time(&tc_full, true);
+        let (soft_low, _)  = allocate_time(&tc_low, true);
+        assert!(soft_low < soft_full,
+            "a lower Skill Level time fraction should reduce a fixed \
+             movetime allocation, not just leave the whole budget idle");
+    }
+
+    #[test]
+    fn test_skill_time_fraction_reduces_clock_time() {
+        let tc_full = make_tc(60_000, 60_000, 0);
+        let tc_low  = TimeControl {
+            skill_time_fraction_pct: 20,
+            ..make_tc(60_000, 60_000, 0)
+        };
+        let (soft_full, hard_full) = allocate_time(&tc_full, true);
+        let (soft_low, hard_low)   = allocate_time(&tc_low, true);
+        assert!(soft_low < soft_full,
+            "a lower Skill Level time fraction should reduce the soft limit \
+             on a clock-based (sudden-death) allocation");
+        assert!(hard_low < hard_full,
+            "a lower Skill Level time fraction should reduce the hard limit too");
+        assert!(hard_low >= soft_low,
+            "hard limit must never drop below the soft limit after scaling");
+    }
+
+    #[test]
+    fn test_skill_time_fraction_does_not_affect_infinite_or_ponder() {
+        let tc = TimeControl {
+            infinite: true,
+            skill_time_fraction_pct: 10,
+            ..Default::default()
+        };
+        let (soft, hard) = allocate_time(&tc, true);
+        assert!(soft > 1_000_000 && hard > 1_000_000,
+            "infinite/ponder searches are analysis, not a strength setting \
+             — Skill Level's time fraction must not touch them");
+    }
+
+    #[test]
+    fn test_skill_time_fraction_does_not_affect_fixed_depth_sentinel() {
+        let tc = TimeControl {
+            depth: 5,
+            skill_time_fraction_pct: 10,
+            ..Default::default()
+        };
+        let (soft, hard) = allocate_time(&tc, true);
+        assert!(soft > 1_000_000 && hard > 1_000_000,
+            "a fixed-depth search's time sentinel is untouched by the \
+             Skill Level time fraction — depth is already the limiter, via \
+             iterative_deepening()'s separate depth cap");
+    }
+
+    #[test]
+    fn test_skill_time_fraction_never_drops_below_min_time() {
+        let tc = TimeControl {
+            movetime: 100,
+            skill_time_fraction_pct: 1,
+            ..Default::default()
+        };
+        let (soft, hard) = allocate_time(&tc, true);
+        assert!(soft >= MIN_TIME_MS.min(70), // 100 - default overhead 30
+            "even an extreme time-fraction reduction must not go below the \
+             minimum viable think time");
+        assert_eq!(soft, hard);
     }
 
     #[test]

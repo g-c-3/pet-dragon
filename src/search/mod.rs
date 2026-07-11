@@ -28,6 +28,7 @@ pub mod ordering;
 pub mod time;
 pub mod see;
 pub mod pruning;
+pub mod skill;
 
 use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
 use crate::types::Move;
@@ -194,6 +195,18 @@ pub struct SearchInfo {
     /// Arc makes it cheap to clone into helper threads.
     #[cfg(not(target_arch = "wasm32"))]
     pub syzygy: Option<std::sync::Arc<crate::syzygy::SyzygyProber>>,
+
+    // ── Skill Level (Phase 20 / D39) ──────────────────────────────────────────
+    /// UCI `Skill Level` setting, 0..=20. `20` (`skill::MAX_SKILL_LEVEL`,
+    /// the default) means full strength — no depth cap, no time reduction.
+    /// Below 20, `iterative_deepening()` caps `max_depth` via
+    /// `skill::skill_depth_cap()` and `cmd_go`/`allocate_time()` reduce the
+    /// time budget via `skill::skill_time_fraction_pct()` (Session 65: depth
+    /// alone left a "instaflies then sits idle" gap on long time controls,
+    /// so both are tier-driven together). A persistent session setting like
+    /// `multipv` — NOT reset by `reset_for_search()`, since a Skill Level
+    /// choice should carry across moves within a game, same as MultiPV.
+    pub skill_level: u8,
 }
 
 impl SearchInfo {
@@ -226,6 +239,7 @@ impl SearchInfo {
             root_exclude: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             syzygy: None,
+            skill_level: crate::search::skill::MAX_SKILL_LEVEL,
         }
     }
 
@@ -729,6 +743,24 @@ mod tests {
             "Cont hist should be zeroed by reset_for_search");
     }
     
+    #[test]
+    fn test_skill_level_defaults_to_max() {
+        let info = SearchInfo::new();
+        assert_eq!(info.skill_level, crate::search::skill::MAX_SKILL_LEVEL,
+            "Skill Level should default to full strength (20), matching \
+             pre-Phase-20 behavior for every existing caller");
+    }
+
+    #[test]
+    fn test_skill_level_survives_reset_for_search() {
+        let mut info = SearchInfo::new();
+        info.skill_level = 5;
+        info.reset_for_search();
+        assert_eq!(info.skill_level, 5,
+            "Skill Level is a persistent session setting (like multipv) \
+             and must survive reset_for_search(), not reset per-search");
+    }
+
     #[test]
     fn test_age_history() {
         let mut info = SearchInfo::new();
