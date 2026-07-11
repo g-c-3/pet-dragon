@@ -2931,8 +2931,29 @@ function _showEngineDiagnostic(msg) {
 }
 
 async function _engineMoveDragon() {
-  if (!engineReady) { _showEngineDiagnostic('Engine move skipped: Pet Dragon not ready'); return; }
   if (customGameOver) return; // legitimate — nothing to diagnose
+
+  if (!engineReady) {
+    // Pet Dragon's WASM is loaded twice (main thread + search Worker), which
+    // roughly doubles load time — on a slow connection the player can move
+    // before it's finished. Wait for it rather than permanently skipping the
+    // engine's turn, since nothing else would ever retry it otherwise.
+    if (!window.petDragonReadyPromise || !window.petDragonWorkerReadyPromise) {
+      _showEngineDiagnostic('Engine move skipped: Pet Dragon bootstrap missing');
+      return;
+    }
+    setEngineStatus('loading');
+    try {
+      await Promise.all([window.petDragonReadyPromise, window.petDragonWorkerReadyPromise]);
+    } catch (e) {
+      _showEngineDiagnostic('Pet Dragon failed to load: ' + String((e && e.message) || e).slice(0, 120));
+      return;
+    }
+    engineReady = true;
+    setEngineStatus('ready');
+    if (customGameOver) return; // could have ended while we were waiting
+  }
+
   if (customTurn === playerColor && !autoPlayEnabled) {
     // engineMove() is only ever scheduled right after the turn should have
     // flipped to the engine (or at a natural engine-turn point), so this
