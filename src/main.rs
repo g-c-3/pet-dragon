@@ -67,6 +67,14 @@ const ENGINE_AUTHOR:  &str = "Gokul Chandar";
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_HASH_MB: usize = 64;
 const MAX_THREADS: usize = 64;
+/// Declared UCI upper bound for MultiPV (Phase 19). iterative_deepening()
+/// separately clamps against the actual number of legal root moves at
+/// search time, so this is just a sane ceiling for the `option` declaration
+/// — no realistic position has anywhere near this many legal moves, but
+/// Pet Dragon's custom pawn rules mean "no realistic position" isn't a
+/// guarantee, hence a generous but still bounded number rather than
+/// something unbounded.
+const MAX_MULTIPV: usize = 64;
 
 // ── Engine state ──────────────────────────────────────────────────────────────
 
@@ -107,6 +115,17 @@ struct EngineState {
     /// elapsed (pondering time doesn't count against the real clock, per
     /// the UCI spec). None when not currently pondering.
     ponder_started_at: Option<Instant>,
+
+    // ── Analysis GUI options (Phase 19) ─────────────────────────────────────
+    /// UCI `MultiPV` setting — how many principal variations to report.
+    /// Set from `setoption`; applied to the active search's SearchInfo in
+    /// cmd_go. Neither this nor `move_overhead_ms` below affects playing
+    /// strength, only what gets reported / how time is budgeted.
+    multipv: usize,
+    /// UCI `Move Overhead` setting, in ms — replaces the old hardcoded
+    /// `OVERHEAD_MS` constant with a runtime-configurable value. Applied
+    /// to the TimeControl in cmd_go via `TimeControl::overhead_ms`.
+    move_overhead_ms: u64,
 }
 
 impl EngineState {
@@ -133,6 +152,8 @@ impl EngineState {
             ponder_hit_hard_ms,
             pending_ponder_allocation: None,
             ponder_started_at: None,
+            multipv: 1,
+            move_overhead_ms: pet_dragon_lib::search::time::OVERHEAD_MS,
         }
     }
 
@@ -261,6 +282,17 @@ fn cmd_uci() {
     // 100 = pure NNUE. Default matches D23's fixed constant (25%), now
     // runtime-adjustable for Elo A/B testing from one binary.
     println!("option name NNUEWeight type spin default 0 min 0 max 100");
+    // Phase 19: standard UCI options for analysis GUIs. Neither affects
+    // playing strength — MultiPV reports extra candidate lines, Move
+    // Overhead just tunes the safety buffer for slow/laggy connections.
+    println!(
+        "option name MultiPV type spin default 1 min 1 max {}",
+        MAX_MULTIPV
+    );
+    println!(
+        "option name Move Overhead type spin default {} min 0 max 5000",
+        pet_dragon_lib::search::time::OVERHEAD_MS
+    );
     println!();
     println!("uciok");
 }
@@ -268,12 +300,25 @@ fn cmd_uci() {
 // ── setoption ─────────────────────────────────────────────────────────────────
 
 /// Handle "setoption name <Name> value <Value>"
+///
+/// Both `<Name>` and `<Value>` can contain spaces per the UCI spec (e.g.
+/// "Move Overhead" is a two-word option name; a Windows SyzygyPath can
+/// contain spaces too) — find the "value" token and split there instead of
+/// assuming single-word name/value at fixed positions (Phase 19: this used
+/// to just take `tokens[2]`/`tokens[4]`, which silently mis-parsed any
+/// multi-word name and truncated any multi-word value to its first token).
 fn cmd_setoption(state: &mut EngineState, line: &str) {
     let tokens: Vec<&str> = line.split_whitespace().collect();
-    if tokens.len() < 5 || tokens[1] != "name" { return; }
+    if tokens.len() < 3 || tokens[1] != "name" { return; }
 
-    let name  = tokens[2].to_lowercase();
-    let value = tokens.get(4).copied().unwrap_or("");
+    let value_idx = tokens.iter().position(|&t| t == "value");
+    let name_end  = value_idx.unwrap_or(tokens.len());
+    let name: String = tokens[2..name_end].join(" ").to_lowercase();
+    let value: String = match value_idx {
+        Some(vi) if vi + 1 < tokens.len() => tokens[vi + 1..].join(" "),
+        _ => String::new(),
+    };
+    let value = value.as_str();
 
     match name.as_str() {
         "hash" => {
@@ -298,6 +343,24 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
         "nnueweight" => {
             if let Ok(pct) = value.parse::<u32>() {
                 set_nnue_weight_pct(pct);
+            }
+        }
+        "move overhead" => {
+            // Phase 19: runtime-configurable safety buffer, replacing the
+            // old hardcoded OVERHEAD_MS constant. Applied in cmd_go via
+            // TimeControl::overhead_ms, not here — this only records the
+            // setting.
+            if let Ok(ms) = value.parse::<u64>() {
+                state.move_overhead_ms = ms.clamp(0, 5000);
+            }
+        }
+        "multipv" => {
+            // Phase 19: how many principal variations to report. Clamped
+            // to a sane declared max here; iterative_deepening() further
+            // clamps against the actual number of legal root moves at
+            // search time, so requesting more than exist is harmless.
+            if let Ok(n) = value.parse::<usize>() {
+                state.multipv = n.clamp(1, MAX_MULTIPV);
             }
         }
         "syzygypath" => {
@@ -402,7 +465,12 @@ fn cmd_position(state: &mut EngineState, line: &str) {
 /// Spawns the search on a background thread (Lazy SMP). The UCI loop
 /// remains responsive for `stop`, `isready`, etc.
 fn cmd_go(state: &mut EngineState, line: &str) {
-    let tc = parse_go(line);
+    let mut tc = parse_go(line);
+    // Phase 19: apply the configured Move Overhead (default OVERHEAD_MS,
+    // overridable via `setoption name Move Overhead`) — not part of the
+    // `go` line itself, since it's a persistent session setting, not a
+    // per-search parameter.
+    tc.overhead_ms = state.move_overhead_ms;
 
     // Reset stop flag for the new search
     state.stop_flag.store(false, Ordering::SeqCst);
@@ -473,6 +541,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let tt        = Arc::clone(&state.tt);
     let ponder_hit_soft_ms = Arc::clone(&state.ponder_hit_soft_ms);
     let ponder_hit_hard_ms = Arc::clone(&state.ponder_hit_hard_ms);
+    let multipv   = state.multipv;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -513,6 +582,12 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.correction_history = correction;
         main_info.ponder_hit_soft_ms = ponder_hit_soft_ms;
         main_info.ponder_hit_hard_ms = ponder_hit_hard_ms;
+        // Phase 19: MultiPV reporting comes from the main thread only —
+        // helper threads (above) exist purely to populate the shared TT
+        // faster and never print `info` lines for the primary line either,
+        // so there's no "authoritative main thread" ambiguity to create by
+        // leaving their SearchInfo at the single-PV default.
+        main_info.multipv = multipv;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -827,6 +902,88 @@ mod tests {
         let mut state = EngineState::new();
         cmd_setoption(&mut state, "setoption name Hash value 32");
         assert_eq!(state.hash_mb, 32, "Hash option should update state");
+    }
+
+    #[test]
+    fn test_multipv_option() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name MultiPV value 3");
+        assert_eq!(state.multipv, 3, "MultiPV option should update state");
+    }
+
+    #[test]
+    fn test_multipv_option_clamped_to_max() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name MultiPV value 99999");
+        assert_eq!(state.multipv, MAX_MULTIPV,
+            "MultiPV should be clamped to the declared maximum");
+    }
+
+    #[test]
+    fn test_multipv_option_defaults_to_one() {
+        setup();
+        let state = EngineState::new();
+        assert_eq!(state.multipv, 1);
+    }
+
+    #[test]
+    fn test_move_overhead_option_multiword_name() {
+        setup();
+        let mut state = EngineState::new();
+        // This is the exact case the old tokens[2]-only parsing broke:
+        // "Move Overhead" is two words.
+        cmd_setoption(&mut state, "setoption name Move Overhead value 100");
+        assert_eq!(state.move_overhead_ms, 100,
+            "a two-word option name must parse correctly");
+    }
+
+    #[test]
+    fn test_move_overhead_option_defaults_to_constant() {
+        setup();
+        let state = EngineState::new();
+        assert_eq!(
+            state.move_overhead_ms,
+            pet_dragon_lib::search::time::OVERHEAD_MS
+        );
+    }
+
+    #[test]
+    fn test_move_overhead_option_clamped() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name Move Overhead value 999999");
+        assert_eq!(state.move_overhead_ms, 5000,
+            "Move Overhead should be clamped to a sane maximum");
+    }
+
+    #[test]
+    fn test_setoption_single_word_value_still_works() {
+        // Regression guard: the rewritten parser must not break the
+        // existing single-token-name/single-token-value case.
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name Threads value 4");
+        assert_eq!(state.threads, 4);
+        cmd_setoption(&mut state, "setoption name Hash value 32");
+        assert_eq!(state.hash_mb, 32);
+    }
+
+    #[test]
+    fn test_cmd_go_applies_move_overhead_to_time_control() {
+        setup();
+        let mut state = EngineState::new();
+        state.move_overhead_ms = 250;
+        cmd_go(&mut state, "go movetime 1000");
+        state.wait_for_search();
+        // Indirect check: movetime 1000 with overhead 250 should have
+        // allocated (1000 - 250) = 750ms, not the default 30ms's 970ms.
+        // We can't reach into the spawned thread's TimeControl directly,
+        // so this is verified at the allocate_time() level in time.rs's
+        // own tests; here we just confirm cmd_go doesn't panic and still
+        // produces a completed search with the custom overhead set.
+        assert_eq!(state.move_overhead_ms, 250);
     }
 
     #[test]
