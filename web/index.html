@@ -4697,10 +4697,22 @@ function startGame() {
   const apBtn = document.getElementById('autoplay-btn');
   if (apBtn) { apBtn.classList.remove('autoplay-on'); }
   _updateBarNames();  // reset bar names — autoPlayEnabled is false so player shows "Earthling"
-  // Generate chaos position
+  // Generate chaos position — Pet Dragon's own new_game() (not the old
+  // generateChaosFen() JS shuffle) so the starting position obeys its two
+  // extra rules: black mirrors white's layout, and the two bishops must sit
+  // on opposite-coloured squares. A position that violates those isn't one
+  // Pet Dragon recognises, and it silently fails to respond.
   _gameStartTime = Date.now();   // record wall-clock start for game-time stat
   recordStat('game_start');
-  const fen = generateChaosFen();
+  let fen;
+  if (window.PetDragon && typeof window.PetDragon.new_game === 'function' && engineReady) {
+    try {
+      fen = window.PetDragon.new_game();
+    } catch (e) {
+      console.error('Pet Dragon new_game() failed, falling back to local generator:', e);
+    }
+  }
+  if (!fen) fen = generateChaosFen(); // fallback only if the engine isn't loaded yet
   customBoard = boardStateFromFen(fen);
   customTurn = 'w';
   customGameOver = false;
