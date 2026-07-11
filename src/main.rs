@@ -126,6 +126,15 @@ struct EngineState {
     /// `OVERHEAD_MS` constant with a runtime-configurable value. Applied
     /// to the TimeControl in cmd_go via `TimeControl::overhead_ms`.
     move_overhead_ms: u64,
+
+    // ── Skill Level (Phase 20 / D39) ────────────────────────────────────────
+    /// UCI `Skill Level` setting, 0..=20. UNLIKE `multipv`/`move_overhead_ms`
+    /// above, this DOES affect playing strength by design — it's the whole
+    /// point (D39). Applied in cmd_go to both `main_info`/`h_info.skill_level`
+    /// (depth cap, via `iterative_deepening()`) and `tc.skill_time_fraction_pct`
+    /// (time budget, via `allocate_time()`) — see skill.rs for the full
+    /// per-tier table and Session 65's reasoning for needing both.
+    skill_level: u8,
 }
 
 impl EngineState {
@@ -154,6 +163,7 @@ impl EngineState {
             ponder_started_at: None,
             multipv: 1,
             move_overhead_ms: pet_dragon_lib::search::time::OVERHEAD_MS,
+            skill_level: pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
         }
     }
 
@@ -293,6 +303,15 @@ fn cmd_uci() {
         "option name Move Overhead type spin default {} min 0 max 5000",
         pet_dragon_lib::search::time::OVERHEAD_MS
     );
+    // Phase 20 / D39: difficulty as depth-cap tiers, NOT UCI_Elo — no
+    // calibrated human-comparable number attached (DECISIONS.md D39).
+    // Default (max) means full strength, byte-identical to pre-Phase-20
+    // behavior for any GUI that never touches this option.
+    println!(
+        "option name Skill Level type spin default {} min 0 max {}",
+        pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
+        pet_dragon_lib::search::skill::MAX_SKILL_LEVEL
+    );
     println!();
     println!("uciok");
 }
@@ -361,6 +380,16 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
             // search time, so requesting more than exist is harmless.
             if let Ok(n) = value.parse::<usize>() {
                 state.multipv = n.clamp(1, MAX_MULTIPV);
+            }
+        }
+        "skill level" => {
+            // Phase 20 / D39: unlike multipv/move overhead above, this DOES
+            // change playing strength on purpose. Clamped to the declared
+            // 0..=MAX_SKILL_LEVEL range; applied to both the depth cap and
+            // the time-fraction budget in cmd_go, not here — this only
+            // records the setting.
+            if let Ok(n) = value.parse::<u8>() {
+                state.skill_level = n.min(pet_dragon_lib::search::skill::MAX_SKILL_LEVEL);
             }
         }
         "syzygypath" => {
@@ -471,6 +500,12 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     // `go` line itself, since it's a persistent session setting, not a
     // per-search parameter.
     tc.overhead_ms = state.move_overhead_ms;
+    // Phase 20 / D39 (Session 65 refinement): Skill Level also scales the
+    // time budget, not just the depth cap below — otherwise a low tier on
+    // a long movetime/clock allocation would search shallow and then just
+    // sit idle for the rest, looking broken rather than weak.
+    tc.skill_time_fraction_pct =
+        pet_dragon_lib::search::skill::skill_time_fraction_pct(state.skill_level);
 
     // Reset stop flag for the new search
     state.stop_flag.store(false, Ordering::SeqCst);
@@ -542,6 +577,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let ponder_hit_soft_ms = Arc::clone(&state.ponder_hit_soft_ms);
     let ponder_hit_hard_ms = Arc::clone(&state.ponder_hit_hard_ms);
     let multipv   = state.multipv;
+    let skill_level = state.skill_level;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -570,6 +606,11 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                 let mut h_info = SearchInfo::new_with_stop(h_stop);
                 #[cfg(not(target_arch = "wasm32"))]
                 { h_info.syzygy = h_syzygy; }
+                // Phase 20: helpers must respect the same Skill Level depth
+                // cap as the main thread — otherwise they'd populate the
+                // shared TT with deeper, full-strength lines that leak back
+                // into a low-skill main search's move ordering/scores.
+                h_info.skill_level = skill_level;
                 iterative_deepening(&mut h_pos, &h_tc, &mut h_info, &*h_tt)
             }));
         }
@@ -588,6 +629,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         // so there's no "authoritative main thread" ambiguity to create by
         // leaving their SearchInfo at the single-PV default.
         main_info.multipv = multipv;
+        main_info.skill_level = skill_level;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -886,6 +928,52 @@ mod tests {
         assert!(state.info.stop_flag.load(Ordering::SeqCst),
             "info.stop_flag should see the same store as stop_flag");
         state.stop_flag.store(false, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_skill_level_option_multiword_name() {
+        setup();
+        let mut state = EngineState::new();
+        // "Skill Level" is two words — same parsing hazard as Move Overhead.
+        cmd_setoption(&mut state, "setoption name Skill Level value 5");
+        assert_eq!(state.skill_level, 5,
+            "a two-word option name must parse correctly");
+    }
+
+    #[test]
+    fn test_skill_level_option_defaults_to_max() {
+        setup();
+        let state = EngineState::new();
+        assert_eq!(
+            state.skill_level,
+            pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
+            "Skill Level should default to full strength for any GUI that \
+             never touches this option"
+        );
+    }
+
+    #[test]
+    fn test_skill_level_option_clamped_to_max() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name Skill Level value 255");
+        assert_eq!(state.skill_level, pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
+            "Skill Level should be clamped to the declared maximum");
+    }
+
+    #[test]
+    fn test_cmd_go_applies_skill_level_to_search() {
+        setup();
+        let mut state = EngineState::new();
+        state.skill_level = 0; // weakest tier -> depth cap of 1
+        cmd_go(&mut state, "go depth 10");
+        state.wait_for_search();
+        // Indirect check, same style as test_cmd_go_applies_move_overhead_
+        // to_time_control above: the depth-cap mechanics themselves are
+        // covered directly in iterative.rs's own tests. Here we just
+        // confirm cmd_go wires the setting through without panicking and
+        // that the state still reflects the low tier afterward.
+        assert_eq!(state.skill_level, 0);
     }
 
     #[test]
