@@ -21,9 +21,12 @@ use crate::types::Move;
 /// Minimum time to spend on a move in milliseconds
 const MIN_TIME_MS: u64 = 20;
 
-/// Safety buffer subtracted from available time
-/// Compensates for network lag, GUI overhead, clock inaccuracy
-const OVERHEAD_MS: u64 = 30;
+/// Default safety buffer subtracted from available time (Phase 19: UCI's
+/// "Move Overhead" option makes this runtime-configurable via
+/// `TimeControl::overhead_ms`; this constant is now only the *default*
+/// value a fresh `TimeControl` starts with, not a hardcoded ceiling).
+/// Compensates for network lag, GUI overhead, clock inaccuracy.
+pub const OVERHEAD_MS: u64 = 30;
 
 /// Default moves to go when not specified
 /// Assumes ~30 moves remaining in the game
@@ -49,7 +52,7 @@ const STABILITY_THRESHOLD: usize = 4;
 // ── UCI time control input ────────────────────────────────────────────────────
 
 /// Time control parameters from UCI go command
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TimeControl {
     /// White time remaining in ms (0 = not set)
     pub wtime: u64,
@@ -71,6 +74,31 @@ pub struct TimeControl {
     pub infinite: bool,
     /// Pondering (think during opponent's time)
     pub ponder: bool,
+    /// Safety buffer subtracted from available time, in ms (Phase 19:
+    /// UCI's "Move Overhead" option — runtime-configurable per session,
+    /// unlike the old hardcoded constant this replaces). Defaults to
+    /// `OVERHEAD_MS`; set from `EngineState.move_overhead_ms` in
+    /// `main.rs`'s `cmd_go`, not parsed from the `go` line itself (Move
+    /// Overhead is a persistent `setoption`, not a per-search parameter).
+    pub overhead_ms: u64,
+}
+
+impl Default for TimeControl {
+    fn default() -> Self {
+        TimeControl {
+            wtime: 0,
+            btime: 0,
+            winc: 0,
+            binc: 0,
+            movestogo: 0,
+            movetime: 0,
+            depth: 0,
+            nodes: 0,
+            infinite: false,
+            ponder: false,
+            overhead_ms: OVERHEAD_MS,
+        }
+    }
 }
 
 // ── Time allocation ───────────────────────────────────────────────────────────
@@ -82,7 +110,7 @@ pub struct TimeControl {
 pub fn allocate_time(tc: &TimeControl, is_white: bool) -> (u64, u64) {
     // Fixed movetime overrides everything
     if tc.movetime > 0 {
-        let t = tc.movetime.saturating_sub(OVERHEAD_MS);
+        let t = tc.movetime.saturating_sub(tc.overhead_ms);
         return (t, t);
     }
 
@@ -109,7 +137,7 @@ pub fn allocate_time(tc: &TimeControl, is_white: bool) -> (u64, u64) {
     }
 
     // Apply overhead buffer
-    let available = our_time.saturating_sub(OVERHEAD_MS);
+    let available = our_time.saturating_sub(tc.overhead_ms);
 
     let soft;
     let hard;
@@ -354,5 +382,39 @@ mod tests {
         let (soft, _) = allocate_time(&tc, true);
         assert!(soft >= MIN_TIME_MS || soft == 0,
             "Should enforce minimum time or be 0 for very low time");
+    }
+
+    #[test]
+    fn test_overhead_ms_defaults_to_constant() {
+        let tc = TimeControl::default();
+        assert_eq!(tc.overhead_ms, OVERHEAD_MS,
+            "a fresh TimeControl should default to the standard overhead");
+    }
+
+    #[test]
+    fn test_move_overhead_is_configurable() {
+        // Same clock values, different overhead — larger overhead should
+        // eat further into available time and produce a smaller allocation.
+        let tc_default = make_tc(10_000, 10_000, 0);
+        let tc_large_overhead = TimeControl {
+            overhead_ms: 2000,
+            ..make_tc(10_000, 10_000, 0)
+        };
+        let (soft_default, _) = allocate_time(&tc_default, true);
+        let (soft_large, _)   = allocate_time(&tc_large_overhead, true);
+        assert!(soft_large < soft_default,
+            "a larger Move Overhead should reduce the time allocation");
+    }
+
+    #[test]
+    fn test_movetime_respects_custom_overhead() {
+        let tc = TimeControl {
+            movetime: 1000,
+            overhead_ms: 100,
+            ..Default::default()
+        };
+        let (soft, hard) = allocate_time(&tc, true);
+        assert_eq!(soft, 900, "movetime - custom overhead");
+        assert_eq!(hard, 900);
     }
 }

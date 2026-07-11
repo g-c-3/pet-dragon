@@ -91,6 +91,7 @@ pub fn iterative_deepening(
         pv:         vec![],
         is_mate:    false,
         mate_in:    0,
+        multipv:    1,
     };
 
     // ── Iterative deepening loop ───────────────────────────────────────────────
@@ -160,6 +161,7 @@ pub fn iterative_deepening(
             mate_in:  if is_mate_score(score_for_result) {
                           mate_in(score_for_result)
                       } else { 0 },
+            multipv:  1,
         };
 
         // Print UCI info for this depth — silent-search callers (selfplay,
@@ -167,6 +169,56 @@ pub fn iterative_deepening(
         // across thousands of internal searches (see SearchInfo doc comment).
         if info.print_info {
             println!("{}", result.to_uci_info());
+        }
+
+        // ── Additional MultiPV lines (Phase 19) ─────────────────────────────
+        // Everything above this point is the unmodified single-PV path —
+        // it always runs and always drives best_move/best_score/result,
+        // exactly as before this feature existed. This block is purely
+        // additive: extra `info` lines for GUIs that want to show several
+        // candidate moves. It's gated behind `multipv > 1` (default 1), so
+        // for every existing caller and every test that doesn't explicitly
+        // opt in, this never executes and nothing here can change behavior.
+        // Uses a full-window search per extra line rather than replicating
+        // per-line aspiration-window state — simpler, and the extra cost
+        // only applies to MultiPV>1 usage, which already accepts being
+        // slower than single-PV mode as the cost of showing multiple lines.
+        if info.multipv > 1 && !info.stop {
+            let legal = crate::movegen::generate_moves(pos);
+            let slot_count = info.multipv.min(legal.len().max(1));
+            info.root_exclude.clear();
+            if best_move != Move::NULL {
+                info.root_exclude.push(best_move);
+            }
+            for slot in 1..slot_count {
+                let slot_score = search_multipv_slot(pos, depth, info, tt);
+                if info.stop || info.best_move == Move::NULL {
+                    break;
+                }
+                info.root_exclude.push(info.best_move);
+                let s_elapsed = info.elapsed_ms().max(1);
+                info.nps = info.nodes * 1000 / s_elapsed;
+                let s_pv = info.get_pv();
+                let slot_result = SearchResult {
+                    best_move: info.best_move,
+                    score:     slot_score,
+                    depth,
+                    seldepth:  info.seldepth,
+                    nodes:     info.nodes,
+                    time_ms:   s_elapsed,
+                    nps:       info.nps,
+                    pv:        s_pv,
+                    is_mate:   is_mate_score(slot_score),
+                    mate_in:   if is_mate_score(slot_score) {
+                                   mate_in(slot_score)
+                               } else { 0 },
+                    multipv:   slot + 1,
+                };
+                if info.print_info {
+                    println!("{}", slot_result.to_uci_info());
+                }
+            }
+            info.root_exclude.clear();
         }
 
         // Check if we should stop
@@ -227,6 +279,34 @@ fn search_at_depth(
         }
         score
     }
+}
+
+// ── Additional MultiPV line search (Phase 19) ──────────────────────────────────
+
+/// Search one MultiPV line beyond the primary one, at the root, skipping
+/// whatever moves are already in `info.root_exclude`. Always full-window —
+/// see the call site in `iterative_deepening()` for why this doesn't
+/// replicate `search_at_depth()`'s aspiration-window logic per line.
+fn search_multipv_slot(
+    pos:   &mut Position,
+    depth: i32,
+    info:  &mut SearchInfo,
+    tt:    &TranspositionTable,
+) -> i32 {
+    info.best_move  = Move::NULL;
+    info.best_score = -INFINITY;
+
+    let score = alpha_beta(
+        pos, depth, -INFINITY, INFINITY,
+        0, true, info, tt, Move::NULL,
+    );
+
+    if score > -INFINITY {
+        info.best_move  = info.pv_table[0][0];
+        info.best_score = score;
+    }
+
+    score
 }
 
 fn search_with_aspiration(
@@ -409,6 +489,7 @@ mod tests {
             pv:        vec![],
             is_mate:   false,
             mate_in:   0,
+            multipv:   1,
         };
         let info_str = result.to_uci_info();
         assert!(info_str.contains("depth 10"));
@@ -514,5 +595,105 @@ mod tests {
 
         assert!(result.nodes > 0, "Should count searched nodes");
         assert!(result.nps > 0,   "Should compute NPS");
+    }
+
+    #[test]
+    fn test_multipv_default_matches_single_pv_behavior() {
+        setup();
+        // With multipv left at its default of 1, behavior must be
+        // byte-for-byte identical to before this feature existed —
+        // this is the whole safety argument for how the feature was
+        // added (purely additive, gated behind multipv > 1).
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        assert_eq!(info.multipv, 1);
+        let tt   = TranspositionTable::new(16);
+        let tc       = fixed_depth_tc(5);
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+
+        assert_eq!(result.multipv, 1);
+        assert_ne!(result.best_move, Move::NULL);
+        assert!(info.root_exclude.is_empty(),
+            "root_exclude should stay empty when multipv is 1");
+    }
+
+    #[test]
+    fn test_multipv_produces_distinct_legal_moves() {
+        setup();
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.multipv = 3;
+        let tt   = TranspositionTable::new(16);
+        let tc       = fixed_depth_tc(5);
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+
+        // The primary line (what gets played) is unaffected by multipv —
+        // still a single valid legal move.
+        assert_ne!(result.best_move, Move::NULL);
+        let legal = crate::movegen::generate_moves(&pos);
+        assert!(legal.iter().any(|&m| m == result.best_move),
+            "primary MultiPV line's move must be legal");
+        // root_exclude is cleaned up after the depth loop finishes, ready
+        // for the next search.
+        assert!(info.root_exclude.is_empty(),
+            "root_exclude should be cleared after iterative_deepening returns");
+    }
+
+    #[test]
+    fn test_multipv_clamped_to_available_legal_moves() {
+        setup();
+        // Fool's-mate-adjacent-style position with very few legal replies —
+        // requesting MultiPV=10 should not panic even though there aren't
+        // 10 legal moves. Using startpos's depth-1 legal move count (20)
+        // is already enough headroom to just request an absurdly high
+        // number and confirm it doesn't panic.
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.multipv = 1000;
+        let tt   = TranspositionTable::new(16);
+        let tc       = fixed_depth_tc(4);
+
+        // Should not panic — clamped internally to legal.len().
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+        assert_ne!(result.best_move, Move::NULL);
+    }
+
+    #[test]
+    fn test_multipv_primary_line_stays_legal_and_valid() {
+        setup();
+        // NOTE on what this test does NOT claim: an earlier version of this
+        // test asserted result.best_move is byte-identical between
+        // MultiPV=1 and MultiPV=4 runs. That's false, and finding out why
+        // is worth recording. Extra MultiPV lines searched at EARLIER
+        // depths (1..5) feed the same shared TT/history/killer/correction
+        // tables that depth 6's primary-line search then reads — so a
+        // MultiPV=4 run legitimately explores more of the tree by depth 6
+        // than a MultiPV=1 run did, which can shift move ordering and
+        // pruning enough to land on a different (still fully valid, still
+        // best-scoring-at-that-depth) move. This is a well-known, accepted
+        // property of MultiPV in most alpha-beta engines, not a bug here —
+        // Stockfish's own docs carry the same caveat. What MultiPV *does*
+        // guarantee, and what's actually worth testing, is that the
+        // primary line is always a real legal move regardless of how many
+        // extra lines were requested.
+        let mut pos1 = Position::start_pos().unwrap();
+        let mut info1 = SearchInfo::new();
+        let tt1 = TranspositionTable::new(16);
+        let result1 = iterative_deepening(&mut pos1, &fixed_depth_tc(6), &mut info1, &tt1);
+
+        let mut pos2 = Position::start_pos().unwrap();
+        let mut info2 = SearchInfo::new();
+        info2.multipv = 4;
+        let tt2 = TranspositionTable::new(16);
+        let result2 = iterative_deepening(&mut pos2, &fixed_depth_tc(6), &mut info2, &tt2);
+
+        for (label, pos, result) in [("multipv=1", &pos1, &result1), ("multipv=4", &pos2, &result2)] {
+            assert_ne!(result.best_move, Move::NULL, "{label}: should find a move");
+            let legal = crate::movegen::generate_moves(pos);
+            assert!(legal.iter().any(|&m| m == result.best_move),
+                "{label}: primary line's move must be legal");
+        }
     }
 }

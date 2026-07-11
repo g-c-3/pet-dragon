@@ -173,6 +173,22 @@ pub struct SearchInfo {
     /// `reset_for_search()`.
     pub ponder_hit_hard_ms: Arc<AtomicU64>,
 
+    // ── MultiPV (Phase 19) ──────────────────────────────────────────────────
+    /// Number of principal variations to report, per UCI's `MultiPV`
+    /// option. `1` (the default) is the common case and produces byte-
+    /// identical behavior to before this field existed — the extra-lines
+    /// logic in `iterative_deepening()` is entirely gated behind
+    /// `multipv > 1`. Set from `main.rs`'s `EngineState.multipv` in cmd_go.
+    pub multipv: usize,
+    /// Root moves already claimed by an earlier MultiPV line at the
+    /// current depth, so the next line's search skips them. Only ever
+    /// checked at the root (ply 0) in `alpha_beta`'s move loop — see the
+    /// skip check there for why this can't collide with singular
+    /// extension's `excluded` parameter (root_node never triggers
+    /// singular verification). Always empty when `multipv <= 1`, so that
+    /// check costs a single `is_empty()` per root visit in the common case.
+    pub root_exclude: Vec<Move>,
+
     /// Syzygy tablebase handle — native only (Phase 15).
     /// Set by main.rs when a SyzygyPath is configured. None = no tablebases.
     /// Arc makes it cheap to clone into helper threads.
@@ -206,6 +222,8 @@ impl SearchInfo {
             stop_flag: Arc::new(AtomicBool::new(false)),
             ponder_hit_soft_ms: Arc::new(AtomicU64::new(u64::MAX)),
             ponder_hit_hard_ms: Arc::new(AtomicU64::new(u64::MAX)),
+            multipv: 1,
+            root_exclude: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             syzygy: None,
         }
@@ -234,6 +252,11 @@ impl SearchInfo {
         // inherit a stale override even if some future caller skips that.
         self.ponder_hit_soft_ms.store(u64::MAX, Ordering::Relaxed);
         self.ponder_hit_hard_ms.store(u64::MAX, Ordering::Relaxed);
+        // A fresh search should never inherit a stale MultiPV exclusion
+        // list from whatever the engine was doing before (multipv itself
+        // is a persistent setting, not reset here — only the per-depth
+        // exclusion state).
+        self.root_exclude.clear();
         self.pv_length   = [0; MAX_PLY];
         self.pv_table    = [[Move::NULL; MAX_PLY]; MAX_PLY];
         self.killers     = [[Move::NULL; KILLER_COUNT]; MAX_PLY];
@@ -416,6 +439,11 @@ pub struct SearchResult {
     pub is_mate:    bool,
     /// Mate in N moves (if is_mate)
     pub mate_in:    i32,
+    /// Which MultiPV line this is (1-indexed, per UCI convention). Always
+    /// 1 when MultiPV is at its default of 1 — this field exists so the
+    /// `info` line format matches standard UCI even in the common case
+    /// (Phase 19).
+    pub multipv:    usize,
 }
 
 impl SearchResult {
@@ -434,9 +462,10 @@ impl SearchResult {
             .map(|m| m.to_uci())
             .collect();
         format!(
-            "info depth {} seldepth {} score {} nodes {} nps {} time {} pv {}",
+            "info depth {} seldepth {} multipv {} score {} nodes {} nps {} time {} pv {}",
             self.depth,
             self.seldepth,
+            self.multipv,
             self.score_string(),
             self.nodes,
             self.nps,
@@ -565,6 +594,7 @@ mod tests {
             pv:        vec![],
             is_mate:   false,
             mate_in:   0,
+            multipv:   1,
         };
         assert_eq!(result.score_string(), "cp 150");
     }
@@ -582,8 +612,46 @@ mod tests {
             pv:        vec![],
             is_mate:   true,
             mate_in:   3,
+            multipv:   1,
         };
         assert_eq!(result.score_string(), "mate 3");
+    }
+
+    #[test]
+    fn test_to_uci_info_includes_multipv() {
+        let result = SearchResult {
+            best_move: Move::NULL,
+            score:     42,
+            depth:     8,
+            seldepth:  12,
+            nodes:     1000,
+            time_ms:   100,
+            nps:       10_000,
+            pv:        vec![],
+            is_mate:   false,
+            mate_in:   0,
+            multipv:   3,
+        };
+        assert!(result.to_uci_info().contains("multipv 3"),
+            "to_uci_info should report which MultiPV line this is");
+    }
+
+    #[test]
+    fn test_multipv_and_root_exclude_defaults() {
+        let info = SearchInfo::new();
+        assert_eq!(info.multipv, 1,
+            "MultiPV should default to 1 (single-PV, the common case)");
+        assert!(info.root_exclude.is_empty(),
+            "root_exclude should start empty");
+    }
+
+    #[test]
+    fn test_root_exclude_cleared_by_reset_for_search() {
+        let mut info = SearchInfo::new();
+        info.root_exclude.push(Move::NULL);
+        info.reset_for_search();
+        assert!(info.root_exclude.is_empty(),
+            "reset_for_search should clear any stale MultiPV exclusion list");
     }
 
     #[test]

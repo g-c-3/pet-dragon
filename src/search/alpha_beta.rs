@@ -523,6 +523,20 @@ fn alpha_beta_with_excluded(
             continue;
         }
 
+        // Skip moves already claimed by an earlier MultiPV line at this
+        // depth (Phase 19). Only ever relevant at the root — root_exclude
+        // is always empty when MultiPV is at its default of 1, so this is
+        // a single cheap `is_empty()` check (short-circuited by
+        // `root_node` first) for the overwhelming majority of nodes, and
+        // a short Vec scan only at the root when MultiPV>1 is in use.
+        // Safe to share the move loop with singular extension's `excluded`
+        // above: singular verification is explicitly gated on
+        // `!root_node` (see above), so the two mechanisms never apply to
+        // the same node.
+        if root_node && !info.root_exclude.is_empty() && info.root_exclude.contains(&mv) {
+            continue;
+        }
+
         // Singular extension bonus — only the TT move itself gets it
         let singular_ext = if singular_extension && mv == tt_move { 1 } else { 0 };
 
