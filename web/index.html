@@ -4289,9 +4289,12 @@ function cancelResign() {
 function generateChaosFen() {
   // Kings stay fixed: white king on e1 (row 7, file 4),
   //                   black king on e8 (row 0, file 4)
-  // White's other 15 pieces shuffle randomly across ranks 1-2 (rows 6-7)
-  // Black's other 15 pieces shuffle randomly across ranks 7-8 (rows 0-1)
-  // King squares are excluded from the shuffle pool.
+  // White's other 15 pieces shuffle randomly across ranks 1-2 (rows 6-7),
+  // with one constraint: the two bishops must land on opposite-coloured
+  // squares (never both light or both dark).
+  // Black is then a mirror image of white — same file, row flipped
+  // (row 7 -> row 0, row 6 -> row 1) — which automatically gives black
+  // opposite-coloured bishops too, since mirroring always flips square colour.
 
   function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
@@ -4303,30 +4306,41 @@ function generateChaosFen() {
 
   const board = Array(64).fill(null);
   const idx = (r, f) => r * 8 + f;
+  const sqColor = (sq) => (Math.floor(sq / 8) + (sq % 8)) % 2; // 0 or 1
 
   // Fix kings
   board[idx(7, 4)] = 'wK'; // e1
   board[idx(0, 4)] = 'bK'; // e8
 
   // White territory: rows 6 & 7 (ranks 2 & 1), 16 squares minus e1
-  const wSquares = [];
+  const wSquaresBase = [];
   for (let r = 6; r <= 7; r++)
     for (let f = 0; f < 8; f++)
-      if (!(r === 7 && f === 4)) wSquares.push(idx(r, f)); // exclude e1
-  shuffle(wSquares);
-
-  // Black territory: rows 0 & 1 (ranks 8 & 7), 16 squares minus e8
-  const bSquares = [];
-  for (let r = 0; r <= 1; r++)
-    for (let f = 0; f < 8; f++)
-      if (!(r === 0 && f === 4)) bSquares.push(idx(r, f)); // exclude e8
-  shuffle(bSquares);
+      if (!(r === 7 && f === 4)) wSquaresBase.push(idx(r, f)); // exclude e1
 
   // 15 pieces per color (no king): Q R R B B N N P P P P P P P P
   const pieces = ['Q','R','R','B','B','N','N','P','P','P','P','P','P','P','P'];
+  const bishopPositions = pieces.reduce((acc, p, i) => { if (p === 'B') acc.push(i); return acc; }, []);
+
+  // Shuffle white's placement until the two bishops land on opposite colours.
+  let wSquares = null;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const candidate = shuffle(wSquaresBase.slice());
+    if (sqColor(candidate[bishopPositions[0]]) !== sqColor(candidate[bishopPositions[1]])) {
+      wSquares = candidate;
+      break;
+    }
+  }
+  if (!wSquares) wSquares = shuffle(wSquaresBase.slice()); // astronomically unlikely fallback
 
   pieces.forEach((p, i) => { board[wSquares[i]] = 'w' + p; });
-  pieces.forEach((p, i) => { board[bSquares[i]] = 'b' + p; });
+
+  // Black mirrors white: same file, row flipped (7<->0, 6<->1).
+  pieces.forEach((p, i) => {
+    const sq = wSquares[i];
+    const r = Math.floor(sq / 8), f = sq % 8;
+    board[idx(7 - r, f)] = 'b' + p;
+  });
 
   // Build FEN rank by rank (row 0 = rank 8)
   const fenRows = [];
@@ -4697,22 +4711,13 @@ function startGame() {
   const apBtn = document.getElementById('autoplay-btn');
   if (apBtn) { apBtn.classList.remove('autoplay-on'); }
   _updateBarNames();  // reset bar names — autoPlayEnabled is false so player shows "Earthling"
-  // Generate chaos position — Pet Dragon's own new_game() (not the old
-  // generateChaosFen() JS shuffle) so the starting position obeys its two
-  // extra rules: black mirrors white's layout, and the two bishops must sit
-  // on opposite-coloured squares. A position that violates those isn't one
-  // Pet Dragon recognises, and it silently fails to respond.
+  // Generate the chaos starting position ourselves (see generateChaosFen):
+  // black mirrors white's layout, and the two bishops always land on
+  // opposite-coloured squares. Every position handed to Pet Dragon must obey
+  // both rules, or the engine silently fails to respond.
   _gameStartTime = Date.now();   // record wall-clock start for game-time stat
   recordStat('game_start');
-  let fen;
-  if (window.PetDragon && typeof window.PetDragon.new_game === 'function' && engineReady) {
-    try {
-      fen = window.PetDragon.new_game();
-    } catch (e) {
-      console.error('Pet Dragon new_game() failed, falling back to local generator:', e);
-    }
-  }
-  if (!fen) fen = generateChaosFen(); // fallback only if the engine isn't loaded yet
+  const fen = generateChaosFen();
   customBoard = boardStateFromFen(fen);
   customTurn = 'w';
   customGameOver = false;
