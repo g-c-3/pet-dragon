@@ -2830,6 +2830,7 @@ function setEngineStatus(state, txt) {
   const dot = document.getElementById('status-dot');
   const text = document.getElementById('status-text');
   dot.className = 'status-dot ' + state;
+  text.style.color = ''; // clear any diagnostic red left by _showEngineDiagnostic
   if (state === 'loading') text.textContent = 'Loading Pet Dragon...';
   else if (state === 'ready') text.textContent = 'Ready';
   else if (state === 'thinking') text.textContent = 'Thinking...';
@@ -2918,24 +2919,29 @@ function _mvToUci(mv) {
 }
 
 // ─── Dispatch a move request to Pet Dragon ───────────────────────────────────
-let _engineDiagnosticTimer = null;
 function _showEngineDiagnostic(msg) {
   console.error('Pet Dragon diagnostic:', msg);
   const t = document.getElementById('status-text');
   if (!t) return;
+  // Persists until the next setEngineStatus() call (e.g. the next move
+  // attempt, or New Game) — not on a timer — so it can't disappear before
+  // you get a chance to read/screenshot it.
   t.textContent = msg;
   t.style.color = '#ff6b6b';
-  clearTimeout(_engineDiagnosticTimer);
-  _engineDiagnosticTimer = setTimeout(() => {
-    t.style.color = '';
-    setEngineStatus(engineReady ? 'ready' : 'error');
-  }, 8000);
 }
 
 async function _engineMoveDragon() {
-  if (!engineReady || customGameOver) return;
-  if (customTurn === playerColor && !autoPlayEnabled) return;
-  if (engineThinking) return;
+  if (!engineReady) { _showEngineDiagnostic('Engine move skipped: Pet Dragon not ready'); return; }
+  if (customGameOver) return; // legitimate — nothing to diagnose
+  if (customTurn === playerColor && !autoPlayEnabled) {
+    // engineMove() is only ever scheduled right after the turn should have
+    // flipped to the engine (or at a natural engine-turn point), so this
+    // firing means the turn didn't actually flip — that's a real bug, not
+    // a normal "it's not my turn yet" case.
+    _showEngineDiagnostic('Engine move skipped: still ' + customTurn + "'s turn (expected engine's turn)");
+    return;
+  }
+  if (engineThinking) { _showEngineDiagnostic('Engine move skipped: already thinking (stuck flag?)'); return; }
 
   engineThinking = true;
   setEngineStatus('thinking');
