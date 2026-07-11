@@ -3,25 +3,36 @@ name: UCI Pinned-Ref Match (D36)
 # Manual trigger only — run from the Actions tab ("Run workflow" button),
 # fully usable from the mobile GitHub app, no terminal needed.
 #
-# Builds TWO separate `pet_dragon` binaries from two different git refs
-# and plays them against each other over real UCI (src/bin/uci_match_runner.rs,
-# D36) — this is what gives a genuine pre/post-Texel-tuning Elo number,
-# unlike match_runner.yml which A/Bs NNUE blend weight within one binary.
+# Builds TWO separate `pet_dragon` binaries from two git refs (can be the
+# SAME ref twice) and plays them against each other over real UCI
+# (src/bin/uci_match_runner.rs, D36) — this is what gives a genuine
+# pre/post-Texel-tuning Elo number, unlike match_runner.yml which A/Bs
+# NNUE blend weight within one binary.
 #
-# How to find pre_tuning_ref: in the mobile GitHub app, open
-# g-c-3/pet-dragon -> Commits, find the Session 55 commit that landed the
-# Texel-tuned eval/*.rs weights (search commit messages for "Session 55" or
-# "tuned weights"), and use the SHA of the commit immediately BEFORE it —
-# that's the last commit still on the original Ethereal-derived HCE values.
+# How to find pre_tuning_ref for a pre/post-tuning Elo run: in the mobile
+# GitHub app, open g-c-3/pet-dragon -> Commits, find the Session 55 commit
+# that landed the Texel-tuned eval/*.rs weights (search commit messages for
+# "Session 55" or "tuned weights"), and use the SHA of the commit
+# immediately BEFORE it — that's the last commit still on the original
+# Ethereal-derived HCE values.
+#
+# Phase 20 (Session 66 follow-up) — Skill Level tier validation: set BOTH
+# engine_a_ref and engine_b_ref to the SAME ref (e.g. "main"), and instead
+# differ engine_a_uci_options / engine_b_uci_options, e.g.
+# "setoption name Skill Level value 0" vs "setoption name Skill Level value
+# 5" — this builds the identical commit twice and configures each copy
+# differently before the match, which is the only way to compare two Skill
+# Level tiers of the same build (the harness has no way to change a
+# setoption mid-binary — it's two real, separately-configured processes).
 on:
   workflow_dispatch:
     inputs:
       pre_tuning_ref:
-        description: "Git SHA/tag from BEFORE the Texel-tuning commit (see workflow file comment for how to find it)"
+        description: "Engine A: git SHA/tag/branch (for a pre/post-tuning Elo run, the commit BEFORE Texel-tuning — see workflow file comment; for a Skill Level tier run, just use 'main')"
         required: true
         type: string
       post_tuning_ref:
-        description: "Git SHA/tag/branch to compare against (usually 'main')"
+        description: "Engine B: git SHA/tag/branch to compare against (usually 'main' either way)"
         required: false
         default: "main"
         type: string
@@ -39,6 +50,16 @@ on:
         description: "Starting seed (change between runs for different games, otherwise reruns replay the same games)"
         required: false
         default: "0"
+        type: string
+      engine_a_uci_options:
+        description: "Optional: ';'-separated setoption lines sent to Engine A before the match (e.g. 'setoption name Skill Level value 0'). Leave blank to use compiled-in defaults."
+        required: false
+        default: ""
+        type: string
+      engine_b_uci_options:
+        description: "Optional: ';'-separated setoption lines sent to Engine B before the match (e.g. 'setoption name Skill Level value 5'). Leave blank to use compiled-in defaults."
+        required: false
+        default: ""
         type: string
 
 env:
@@ -110,9 +131,11 @@ jobs:
           ${{ inputs.num_games }}
           ${{ inputs.movetime_ms }}
           ${{ inputs.seed_start }}
-          "pre-tuning (${{ inputs.pre_tuning_ref }})"
-          "post-tuning (${{ inputs.post_tuning_ref }})"
+          "A (${{ inputs.pre_tuning_ref }}${{ inputs.engine_a_uci_options != '' && format(' | {0}', inputs.engine_a_uci_options) || '' }})"
+          "B (${{ inputs.post_tuning_ref }}${{ inputs.engine_b_uci_options != '' && format(' | {0}', inputs.engine_b_uci_options) || '' }})"
           uci_match_results.txt
+          "${{ inputs.engine_a_uci_options }}"
+          "${{ inputs.engine_b_uci_options }}"
 
       - name: Print summary
         run: cat uci_match_results.txt
