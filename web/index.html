@@ -961,6 +961,15 @@
     background-clip: text;
   }
 
+  .logo-icon {
+    /* Undo the gradient text-fill from .logo so the emoji renders in its
+       normal full colour instead of being flattened to a gradient silhouette. */
+    background: none;
+    -webkit-background-clip: initial;
+    -webkit-text-fill-color: initial;
+    background-clip: initial;
+  }
+
   .engine-badge {
     font-family: 'DM Mono', monospace;
     font-size: calc(0.7rem * var(--s));
@@ -2334,7 +2343,7 @@
 
 <header>
   <div class="header-top">
-    <span class="logo">🐉 Pet Dragon</span>
+    <span class="logo"><span class="logo-icon">🐉</span> Pet Dragon</span>
 
     <!-- Abort / Resign — shown only during an active game -->
     <div id="game-action-btns">
@@ -2489,7 +2498,7 @@
   <div class="board-section">
     <!-- Opponent bar -->
     <div class="player-bar" id="bar-black">
-      <div class="avatar" style="background:rgba(255,255,255,0.1);font-size:calc(1.2rem * var(--s))">🤖</div>
+      <div class="avatar" style="background:rgba(255,255,255,0.1);font-size:calc(1.2rem * var(--s))">🐉</div>
       <div style="flex:1;min-width:0;">
         <div class="player-name" id="engine-name">Pet Dragon</div>
         <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">
@@ -2502,9 +2511,9 @@
 
     <!-- Player bar -->
     <div class="player-bar active" id="bar-white">
-      <div class="avatar" style="background:rgba(245,166,35,0.15);font-size:calc(1.2rem * var(--s))">👤</div>
+      <div class="avatar" style="background:rgba(245,166,35,0.15);font-size:calc(1.2rem * var(--s))"><span style="display:inline-block;transform:scaleX(-1);">🤺</span></div>
       <div style="flex:1;min-width:0;">
-        <div class="player-name" id="player-name">Earthling</div>
+        <div class="player-name" id="player-name">Slayer</div>
         <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">
           <div class="captured-pieces" id="captured-by-white"></div>
           <div class="material-score" id="score-white"></div>
@@ -4777,7 +4786,7 @@ function startGame() {
   autoPlayEnabled = false;
   const apBtn = document.getElementById('autoplay-btn');
   if (apBtn) { apBtn.classList.remove('autoplay-on'); }
-  _updateBarNames();  // reset bar names — autoPlayEnabled is false so player shows "Earthling"
+  _updateBarNames();  // reset bar names — autoPlayEnabled is false so player shows "Slayer"
   // Generate the chaos starting position ourselves (see generateChaosFen):
   // black mirrors white's layout, and the two bishops always land on
   // opposite-coloured squares. Every position handed to Pet Dragon must obey
@@ -7150,7 +7159,7 @@ function _updateBarNames() {
   const engEl = document.getElementById('engine-name');
   const plEl  = document.getElementById('player-name');
   if (engEl) engEl.textContent = 'Pet Dragon';
-  if (plEl)  plEl.textContent  = autoPlayEnabled ? 'Pet Dragon' : 'Earthling';
+  if (plEl)  plEl.textContent  = autoPlayEnabled ? 'Pet Dragon' : 'Slayer';
 }
 
 // ─── Engine move — single entry point, always dispatches to Pet Dragon ──────
