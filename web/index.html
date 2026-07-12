@@ -2882,7 +2882,7 @@ function setEngineStatus(state, txt) {
 function _dragonLegalCount(side) {
   if (!engineReady || !window.PetDragon) return 0;
   try {
-    const fenStr = boardStateToFen(customBoard, side);
+    const fenStr = boardStateToEngineFen(customBoard, side);
     const s = (window.PetDragon.legal_moves_from_fen(fenStr) || '').trim();
     return s ? s.split(' ').filter(Boolean).length : 0;
   } catch (e) { return 0; }
@@ -2993,7 +2993,7 @@ async function _engineMoveDragon() {
     return;
   }
 
-  const currentFen = boardStateToFen(customBoard, engineColor);
+  const currentFen = boardStateToEngineFen(customBoard, engineColor);
 
   let bestmove = null;
   let searchError = null;
@@ -4488,10 +4488,18 @@ function getCustomMoves(boardState, turn, forCheckTest) {
         } else {
           moves.push({ from: i, to: fwd, flags: 'n', piece: 'p' });
         }
-        // Forward two: allowed once per pawn lifetime (chaos chess — any square, first move only)
+        // Forward two: Pet Dragon custom rule — allowed only if this square
+        // is one of the recorded original pawn-start squares for this colour
+        // (pawnStartSquares, fixed once at game start — see
+        // boardStateToEngineFen). This mirrors Pet Dragon's own
+        // pawn_starts.started_here() check exactly: it's a POSITIONAL check
+        // (is *a* pawn currently sitting on a recorded start square), not a
+        // per-pawn-identity check, so we match that rather than tracking
+        // "has this specific pawn moved" — the two can diverge if a
+        // different pawn later lands on a vacated start square.
         // A double-push can never reach the promotion rank directly, so no promo check needed
         const fwd2 = idx(r + dir*2, f);
-        if ((p._id === undefined || !movedPawns.has(p._id)) && inBounds(r + dir*2, f) && !boardState[fwd2]) {
+        if (pawnStartSquares.includes(toSqName(i) + ':' + p.color) && inBounds(r + dir*2, f) && !boardState[fwd2]) {
           moves.push({ from: i, to: fwd2, flags: 'b', piece: 'p' });
         }
       }
@@ -4733,6 +4741,34 @@ function boardStateToFen(boardState, turn) {
   return rows.join('/') + ' ' + turn + ' ' + castle + ' ' + epStr + ' ' + halfMoveClock + ' ' + fullmoveNumber;
 }
 
+// ─── Pet Dragon's custom pawn-starts field ───────────────────────────────────
+// Pet Dragon's FEN parser (see movegen/pawns.rs in its repo) expects a
+// non-standard 7th field: space-separated "<square>:<color>" pairs recording
+// every pawn's TRUE original starting square in THIS chaos position — e.g.
+// "... w - - 0 1 e1:w h7:b". It's fixed once at game start and never changes,
+// and the engine allows a double-push only if the pawn is currently sitting
+// on one of these recorded squares. Standard FEN has no field for this, so
+// without it Pet Dragon has no way to know which pawns still qualify —
+// which is exactly what caused the "unrecognised engine move" desyncs.
+let pawnStartSquares = []; // [{sq:'e1', color:'w'}, ...] — set once per game in startGame()
+
+function _recordPawnStartSquares(board) {
+  pawnStartSquares = [];
+  for (let i = 0; i < 64; i++) {
+    const p = board[i];
+    if (p && p.type === 'p') pawnStartSquares.push(toSqName(i) + ':' + p.color);
+  }
+}
+
+// Wraps boardStateToFen() with Pet Dragon's pawn-starts suffix. Use this
+// (never the plain boardStateToFen) for anything sent to the engine
+// (petDragonSearch, legal_moves_from_fen) — internal-only FEN uses like
+// gameStartFen/share cards don't need the non-standard field.
+function boardStateToEngineFen(boardState, turn) {
+  const base = boardStateToFen(boardState, turn);
+  return pawnStartSquares.length ? (base + ' ' + pawnStartSquares.join(' ')) : base;
+}
+
 function toSqName(i) { return String.fromCharCode(97 + (i%8)) + (8 - Math.floor(i/8)); }
 function fromSqName(sq) {
   const f = sq.charCodeAt(0) - 97;
@@ -4786,7 +4822,7 @@ function startGame() {
   autoPlayEnabled = false;
   const apBtn = document.getElementById('autoplay-btn');
   if (apBtn) { apBtn.classList.remove('autoplay-on'); }
-  _updateBarNames();  // reset bar names — autoPlayEnabled is false so player shows "Slayer"
+  _updateBarNames();  // reset bar names — autoPlayEnabled is false so player shows "Earthling"
   // Generate the chaos starting position ourselves (see generateChaosFen):
   // black mirrors white's layout, and the two bishops always land on
   // opposite-coloured squares. Every position handed to Pet Dragon must obey
@@ -4809,6 +4845,9 @@ function startGame() {
     const p = customBoard[i];
     if (p && p.type === 'p') p._id = _pawnIdCounter++;
   }
+  // Record Pet Dragon's pawn-starts field now, before any move is made —
+  // this never changes for the rest of the game (see boardStateToEngineFen).
+  _recordPawnStartSquares(customBoard);
 
   selectedSq = null;
   legalMoves = [];
@@ -5180,12 +5219,10 @@ function closePickers() {
   document.getElementById('sound-overlay').classList.remove('show');
   document.getElementById('glow-overlay').classList.remove('show');
   document.getElementById('info-overlay').classList.remove('show');
-  const statsOverlay = document.getElementById('stats-overlay');
-  if (statsOverlay) statsOverlay.classList.remove('show');
+  document.getElementById('stats-overlay').classList.remove('show');
   document.getElementById('cdash-overlay').classList.remove('show');
   document.getElementById('info-btn').classList.remove('active');
-  const statsBtn = document.getElementById('stats-btn');
-  if (statsBtn) statsBtn.classList.remove('active');
+  document.getElementById('stats-btn').classList.remove('active');
   // Collapse admin panel and reset toggle state (keep unlock state across sessions)
   _adminPanelOpen = false;
   const adminPanel = document.getElementById('admin-panel');
@@ -5193,12 +5230,8 @@ function closePickers() {
   const adminBtn = document.getElementById('admin-toggle-btn');
   if (adminBtn) adminBtn.textContent = '🔐 Admin';
   // Engine dashboard: route through its own close so game resumes correctly
-  if (typeof _edashCloseDashboard === 'function') {
-    _edashCloseDashboard();
-  } else {
-    const edashOverlay = document.getElementById('engine-dash-overlay');
-    if (edashOverlay) edashOverlay.classList.remove('show');
-  }
+  if (typeof _edashCloseDashboard === 'function') _edashCloseDashboard();
+  else document.getElementById('engine-dash-overlay').classList.remove('show');
 }
 
 // Close on backdrop click
@@ -6717,7 +6750,7 @@ function showShareCard() {
   const d = _shareData;
 
   // Title
-  document.getElementById('share-modal-title').textContent = '🐉 Pet Dragon';
+  document.getElementById('share-modal-title').textContent = '♟ Crazy Chess Carnage';
 
   // Outcome badge — icon driven by badge class, text is clean (no double emoji)
   const badgeEl = document.getElementById('share-outcome-badge');
@@ -6885,7 +6918,7 @@ function copyShareText() {
   ctx.font = `bold ${14 * S}px Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('🐉  Pet Dragon', W / 2, y + TITLE_H / 2);
+  ctx.fillText('♟  Crazy Chess Carnage', W / 2, y + TITLE_H / 2);
   y += TITLE_H + GAP;
 
   // ── Outcome badge ──
@@ -7107,7 +7140,7 @@ function copyShareText() {
   ctx.font = `${7 * S}px Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Pet Dragon by Gokul Chandar', W / 2, y + FOOTER_H / 2);
+  ctx.fillText('Pet Dragon Chess  •  Crazy Chess Carnage', W / 2, y + FOOTER_H / 2);
 
   // ── Export & share — wait for async board (SVG piece images) ──
   boardDrawn.then(() => {
@@ -7132,14 +7165,14 @@ function copyShareText() {
   setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
 
   // Then also try native share sheet (with or without file support)
-  const shareText = `🐉 Pet Dragon\n${d.cleanOutcome}\nDifficulty: ${d.preset.emoji} ${d.preset.name} (${tier})\nMoves: ${d.moves} | I played: ${d.playerColorLabel}\nPlay at: ${gameUrl}`;
+  const shareText = `♟ Crazy Chess Carnage\n${d.cleanOutcome}\nDifficulty: ${d.preset.emoji} ${d.preset.name} (${tier})\nMoves: ${d.moves} | I played: ${d.playerColorLabel}\nPlay at: ${gameUrl}`;
 
   if (navigator.share) {
     // Try with file first, fall back to text-only share
     const shareWithFile = navigator.canShare && navigator.canShare({ files: [file] });
     const sharePayload = shareWithFile
-      ? { title: '🐉 Pet Dragon', text: `Play at: ${gameUrl}`, files: [file] }
-      : { title: '🐉 Pet Dragon', text: shareText };
+      ? { title: '♟ Crazy Chess Carnage', text: `Play at: ${gameUrl}`, files: [file] }
+      : { title: '♟ Crazy Chess Carnage', text: shareText };
 
     navigator.share(sharePayload)
       .then(() => {
@@ -7165,7 +7198,7 @@ function _updateBarNames() {
   const engEl = document.getElementById('engine-name');
   const plEl  = document.getElementById('player-name');
   if (engEl) engEl.textContent = 'Pet Dragon';
-  if (plEl)  plEl.textContent  = autoPlayEnabled ? 'Pet Dragon' : 'Slayer';
+  if (plEl)  plEl.textContent  = autoPlayEnabled ? 'Pet Dragon' : 'Earthling';
 }
 
 // ─── Engine move — single entry point, always dispatches to Pet Dragon ──────
