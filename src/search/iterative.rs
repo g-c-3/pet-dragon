@@ -247,6 +247,74 @@ pub fn iterative_deepening(
         }
     }
 
+    // ── Skill Level move-selection noise (Phase 20 follow-up, Session 66
+    // validation) ────────────────────────────────────────────────────────────
+    // Depth-cap alone (skill.rs's `skill_depth_cap`) strongly separates the
+    // low tiers, but plateaus once the cap exceeds roughly the depth this
+    // engine already converges at for a given time budget — extra plies
+    // beyond that stop changing the chosen move, so e.g. depth-11-capped
+    // vs depth-16-capped tiers ended up statistically indistinguishable in
+    // match-runner validation (Session 66 follow-up: 10-vs-15 measured at
+    // -8.7 Elo over 40 games, essentially a tie). Move-selection noise
+    // fixes that independently of depth: instead of always taking the
+    // single best root move, a capped tier has some chance of taking a
+    // nearby-scored alternative instead — the same general mechanism
+    // Stockfish's own Skill Level uses (weighted randomness among top
+    // candidates), though the window/selection formula below is our own,
+    // not ported from theirs (D39: no calibration data borrowed, ever).
+    //
+    // Gate: `skill_noise_window_cp()` returns 0 at Skill Level 20 (the
+    // default), so this block is a strict no-op for every caller that
+    // hasn't opted into a lower tier — same backward-compatibility pattern
+    // as the depth cap and time fraction. Reuses `search_multipv_slot()`
+    // (Phase 19) to gather alternative root moves rather than introducing
+    // a second root-search mechanism.
+    if !info.stop {
+        let window = crate::search::skill::skill_noise_window_cp(info.skill_level);
+        if window > 0 && result.best_move != Move::NULL {
+            const NOISE_CANDIDATES: usize = 3;
+            let legal = crate::movegen::generate_moves(pos);
+            let slot_count = NOISE_CANDIDATES.min(legal.len().max(1));
+            let mut candidates: Vec<(Move, i32)> = vec![(result.best_move, result.score)];
+            info.root_exclude.clear();
+            info.root_exclude.push(result.best_move);
+            for _ in 1..slot_count {
+                let slot_score = search_multipv_slot(pos, result.depth, info, tt);
+                if info.stop || info.best_move == Move::NULL {
+                    break;
+                }
+                candidates.push((info.best_move, slot_score));
+                info.root_exclude.push(info.best_move);
+            }
+            info.root_exclude.clear();
+
+            if candidates.len() > 1 {
+                // Deterministic-but-varying seed built only from search
+                // state already on hand — deliberately avoids wall-clock
+                // time (this function also compiles to wasm32, where
+                // `SystemTime::now()` isn't safely usable) and avoids
+                // depending on `Move`'s internal representation.
+                let score_mix: i64 = candidates.iter().map(|(_, s)| *s as i64).sum();
+                let seed = info.nodes
+                    ^ (result.depth as u64).wrapping_shl(48)
+                    ^ (score_mix as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                let idx = crate::search::skill::pick_noisy_move_index(
+                    &candidates, info.skill_level, seed
+                );
+                if idx != 0 {
+                    let (noisy_move, noisy_score) = candidates[idx];
+                    result.best_move = noisy_move;
+                    result.score     = noisy_score;
+                    if let Some(first) = result.pv.first_mut() {
+                        *first = noisy_move;
+                    } else {
+                        result.pv.push(noisy_move);
+                    }
+                }
+            }
+        }
+    }
+
     // Remove root position from game history
     pos.game_history.pop();
 

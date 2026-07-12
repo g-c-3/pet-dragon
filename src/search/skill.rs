@@ -82,6 +82,100 @@ pub fn skill_time_fraction_pct(level: u8) -> u32 {
     }
 }
 
+// ── Move-selection noise (Phase 20 follow-up, Session 66 validation) ──────────
+//
+// Depth-cap alone strongly separates the low tiers but plateaus at the high
+// end — once a cap exceeds roughly the depth this engine already converges
+// at for a given time budget, extra plies stop changing the chosen move.
+// Match-runner validation confirmed this: 10-vs-15 (depth caps 11 vs 16)
+// measured at -8.7 Elo over 40 games, essentially a statistical tie, while
+// 0-vs-5 (depth caps 1 vs 6) measured at -381.7 Elo — the difference isn't
+// noise, it's that depth simply stops mattering much once the search is
+// already reasonably deep. This mirrors a well-known property of essentially
+// all engines' Skill Level implementations, including Stockfish's own
+// (its own high tiers are notoriously close together too) — not a Pet
+// Dragon-specific bug.
+//
+// The fix is independent of depth: instead of always taking the single best
+// root move, a capped tier has some chance of taking a nearby-scored
+// alternative instead. This is the same general mechanism Stockfish's own
+// Skill Level uses (weighted randomness among top candidates) — but the
+// window/selection formula below is our own, designed from scratch for this
+// project, not ported from theirs (D39 applies here too: no calibration
+// data or internal formula was borrowed, only the general concept of
+// "sometimes pick a near-best move instead of the best one").
+
+/// Centipawn window for move-selection noise at a given Skill Level: the
+/// maximum score gap from the best root move within which an alternative
+/// candidate remains eligible to be chosen instead. `0` at
+/// `MAX_SKILL_LEVEL` (the default) — no noise at all, deterministic best
+/// move, byte-identical to pre-noise behavior. Widens linearly as level
+/// drops: `(MAX_SKILL_LEVEL - level) * 8`, so level 19 -> 8cp (barely any
+/// noise, matching how close 19 already is to full strength) and level 0
+/// -> 160cp (frequently willing to play a clearly-worse move, matching how
+/// weak that tier already is from its depth-1 cap).
+pub fn skill_noise_window_cp(level: u8) -> i32 {
+    if level >= MAX_SKILL_LEVEL {
+        0
+    } else {
+        ((MAX_SKILL_LEVEL - level) as i32) * 8
+    }
+}
+
+/// Minimal xorshift64 PRNG. Deliberately NOT a new crate dependency (no
+/// `rand` crate anywhere in this project) — this only needs "not always the
+/// same move," not cryptographic unpredictability, so a few lines here beat
+/// pulling in a dependency for it.
+struct NoiseRng(u64);
+
+impl NoiseRng {
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+}
+
+/// Given root candidates as `(move, score)` pairs sorted best-first, pick
+/// one — uniformly at random among whichever candidates fall within
+/// `skill_noise_window_cp(level)` of the best score, or always index `0`
+/// (the best move) when there's only one candidate, the level is uncapped,
+/// or the window excludes everything but the best move itself. `seed`
+/// should vary from call to call (e.g. derived from node count / search
+/// state) so the same position doesn't always noise the same way — see the
+/// call site in `iterative_deepening()` for how that's built without
+/// wall-clock time or a new dependency.
+///
+/// Returns an INDEX into `candidates`, not a move, so the caller decides
+/// what to do with a non-zero result (swap in the move, adjust the
+/// reported score/PV, etc.) rather than this function reaching into
+/// `SearchResult` itself.
+pub fn pick_noisy_move_index(candidates: &[(crate::types::Move, i32)], level: u8, seed: u64) -> usize {
+    if candidates.len() <= 1 {
+        return 0;
+    }
+    let window = skill_noise_window_cp(level);
+    if window <= 0 {
+        return 0;
+    }
+    let best_score = candidates[0].1;
+    let eligible: Vec<usize> = candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, score))| best_score - score <= window)
+        .map(|(i, _)| i)
+        .collect();
+    if eligible.len() <= 1 {
+        return 0;
+    }
+    let mut rng = NoiseRng(seed | 1); // xorshift needs a non-zero state
+    let pick = (rng.next_u64() as usize) % eligible.len();
+    eligible[pick]
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -140,5 +234,91 @@ mod tests {
         // still behave as "uncapped," not panic or wrap.
         assert_eq!(skill_depth_cap(255), None);
         assert_eq!(skill_time_fraction_pct(255), 100);
+    }
+
+    #[test]
+    fn test_max_level_has_no_noise_window() {
+        assert_eq!(skill_noise_window_cp(MAX_SKILL_LEVEL), 0,
+            "Skill Level 20 (default) should mean zero noise — \
+             deterministic best-move selection, same as before this \
+             feature existed");
+    }
+
+    #[test]
+    fn test_min_level_has_widest_noise_window() {
+        assert_eq!(skill_noise_window_cp(0), 160,
+            "Skill Level 0 (weakest) should have the widest noise window");
+    }
+
+    #[test]
+    fn test_noise_window_increases_as_level_drops() {
+        let mut prev = skill_noise_window_cp(0);
+        for level in 1..MAX_SKILL_LEVEL {
+            let w = skill_noise_window_cp(level);
+            assert!(w <= prev,
+                "noise window must never widen as Skill Level rises \
+                 (level {level}: {w} > prev {prev})");
+            prev = w;
+        }
+    }
+
+    #[test]
+    fn test_pick_noisy_move_index_no_op_at_max_level() {
+        let candidates = vec![
+            (crate::types::Move::NULL, 100),
+            (crate::types::Move::NULL, 90),
+        ];
+        // Same move value in both slots is fine here — this test only
+        // checks the returned INDEX, which the score-based window logic
+        // decides independently of what the move itself is.
+        for seed in [1u64, 2, 3, 4, 5] {
+            assert_eq!(
+                pick_noisy_move_index(&candidates, MAX_SKILL_LEVEL, seed), 0,
+                "uncapped Skill Level must always return the best move's \
+                 index (0), regardless of seed"
+            );
+        }
+    }
+
+    #[test]
+    fn test_pick_noisy_move_index_single_candidate_is_always_zero() {
+        let candidates = vec![(crate::types::Move::NULL, 100)];
+        assert_eq!(pick_noisy_move_index(&candidates, 0, 42), 0,
+            "a single candidate has nothing to be noisy about");
+    }
+
+    #[test]
+    fn test_pick_noisy_move_index_never_exceeds_window() {
+        // At Skill Level 0 the window is 160cp — a candidate scored 500cp
+        // worse than the best should never be selected, however the seed
+        // lands, because it's outside the window entirely.
+        let candidates = vec![
+            (crate::types::Move::NULL, 100),
+            (crate::types::Move::NULL, 100 - 500),
+        ];
+        for seed in 0u64..50 {
+            assert_eq!(pick_noisy_move_index(&candidates, 0, seed), 0,
+                "a candidate outside the noise window must never be chosen \
+                 (seed {seed})");
+        }
+    }
+
+    #[test]
+    fn test_pick_noisy_move_index_can_pick_alternate_within_window() {
+        // At Skill Level 0 the window is 160cp — a candidate scored 50cp
+        // worse than the best IS eligible, so across enough seeds it
+        // should get picked at least once (this is inherently a
+        // probabilistic assertion, but with 50 different seeds against a
+        // 2-way uniform choice, a pathological PRNG would be needed to
+        // never once pick index 1).
+        let candidates = vec![
+            (crate::types::Move::NULL, 100),
+            (crate::types::Move::NULL, 50),
+        ];
+        let picked_alternate = (0u64..50)
+            .any(|seed| pick_noisy_move_index(&candidates, 0, seed) == 1);
+        assert!(picked_alternate,
+            "an eligible in-window alternate should be picked at least \
+             once across 50 different seeds");
     }
 }
