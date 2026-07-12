@@ -104,6 +104,25 @@ pub fn skill_time_fraction_pct(level: u8) -> u32 {
 // project, not ported from theirs (D39 applies here too: no calibration
 // data or internal formula was borrowed, only the general concept of
 // "sometimes pick a near-best move instead of the best one").
+//
+// SESSION 67 FOLLOW-UP FINDING: an earlier version of this mechanism gated
+// eligibility ONLY on a fixed centipawn window (how close a candidate's
+// score is to the best move's). That measured backwards in match-runner
+// validation — Skill Level 5 beat Skill Level 10 in 3 separate runs
+// totaling 150 games (57% cumulative), the opposite of the intended
+// ordering. Root cause: root-move score gaps naturally SHRINK as search
+// gets deeper (deeper search converges on more genuinely-close
+// alternatives), so a nominally "tighter" cp window at a higher tier's
+// greater depth can end up catching MORE eligible candidates than a
+// "wider" window at a lower tier's shallower depth — inverting how often
+// each tier actually deviates from its best move, independent of the
+// window sizes' own ordering. Fix: `skill_noise_trigger_pct()` below adds
+// a separate probability gate, checked BEFORE the cp window, that controls
+// deviation FREQUENCY directly from Skill Level rather than leaving it as
+// an incidental side effect of how clustered a given position's candidates
+// happen to be at that depth. The cp window still applies after a
+// triggered roll, purely as a safety bound (never pick something wildly
+// worse than best), but no longer controls how OFTEN deviation happens.
 
 /// Centipawn window for move-selection noise at a given Skill Level: the
 /// maximum score gap from the best root move within which an alternative
@@ -119,6 +138,26 @@ pub fn skill_noise_window_cp(level: u8) -> i32 {
         0
     } else {
         ((MAX_SKILL_LEVEL - level) as i32) * 8
+    }
+}
+
+/// Probability (0..=100) that a given move even ATTEMPTS a noisy pick at
+/// all, at a given Skill Level — checked BEFORE `skill_noise_window_cp()`
+/// is consulted. `0` at `MAX_SKILL_LEVEL` (no noise, as always). Widens
+/// linearly as level drops: `(MAX_SKILL_LEVEL - level) * 4`, so level 0 ->
+/// 80% of moves attempt a deviation, level 19 -> 4%.
+///
+/// This exists specifically to keep deviation FREQUENCY under direct
+/// Skill Level control, independent of `skill_noise_window_cp()` — see the
+/// module-level comment above for why leaving frequency purely to the cp
+/// window backfired (root-move score gaps shrink at greater search depth,
+/// so a "tighter" window at a higher tier's greater depth could trigger
+/// MORE often than a "wider" window at a lower tier's shallower depth).
+pub fn skill_noise_trigger_pct(level: u8) -> u32 {
+    if level >= MAX_SKILL_LEVEL {
+        0
+    } else {
+        (MAX_SKILL_LEVEL - level) as u32 * 4
     }
 }
 
@@ -140,14 +179,19 @@ impl NoiseRng {
 }
 
 /// Given root candidates as `(move, score)` pairs sorted best-first, pick
-/// one — uniformly at random among whichever candidates fall within
-/// `skill_noise_window_cp(level)` of the best score, or always index `0`
-/// (the best move) when there's only one candidate, the level is uncapped,
-/// or the window excludes everything but the best move itself. `seed`
-/// should vary from call to call (e.g. derived from node count / search
-/// state) so the same position doesn't always noise the same way — see the
-/// call site in `iterative_deepening()` for how that's built without
-/// wall-clock time or a new dependency.
+/// one. Two-stage process (Session 67 follow-up — see module comment):
+/// first roll against `skill_noise_trigger_pct(level)` to decide whether
+/// this move deviates from the best move AT ALL; only if that fires does
+/// `skill_noise_window_cp(level)` get consulted to pick uniformly at
+/// random among whichever candidates fall within that score window of the
+/// best. Always returns index `0` (the best move) when there's only one
+/// candidate, the level is uncapped, the trigger roll misses, or the
+/// window excludes everything but the best move itself.
+///
+/// `seed` should vary from call to call (e.g. derived from node count /
+/// search state) so the same position doesn't always noise the same way —
+/// see the call site in `iterative_deepening()` for how that's built
+/// without wall-clock time or a new dependency.
 ///
 /// Returns an INDEX into `candidates`, not a move, so the caller decides
 /// what to do with a non-zero result (swap in the move, adjust the
@@ -156,6 +200,14 @@ impl NoiseRng {
 pub fn pick_noisy_move_index(candidates: &[(crate::types::Move, i32)], level: u8, seed: u64) -> usize {
     if candidates.len() <= 1 {
         return 0;
+    }
+    let trigger_pct = skill_noise_trigger_pct(level);
+    if trigger_pct == 0 {
+        return 0;
+    }
+    let mut rng = NoiseRng(seed | 1); // xorshift needs a non-zero state
+    if (rng.next_u64() % 100) as u32 >= trigger_pct {
+        return 0; // this move didn't roll into deviating at all
     }
     let window = skill_noise_window_cp(level);
     if window <= 0 {
@@ -171,7 +223,6 @@ pub fn pick_noisy_move_index(candidates: &[(crate::types::Move, i32)], level: u8
     if eligible.len() <= 1 {
         return 0;
     }
-    let mut rng = NoiseRng(seed | 1); // xorshift needs a non-zero state
     let pick = (rng.next_u64() as usize) % eligible.len();
     eligible[pick]
 }
@@ -260,6 +311,49 @@ mod tests {
                  (level {level}: {w} > prev {prev})");
             prev = w;
         }
+    }
+
+    #[test]
+    fn test_max_level_has_no_trigger_chance() {
+        assert_eq!(skill_noise_trigger_pct(MAX_SKILL_LEVEL), 0,
+            "Skill Level 20 (default) should never even roll for a \
+             deviation — deterministic best-move selection");
+    }
+
+    #[test]
+    fn test_min_level_has_highest_trigger_chance() {
+        assert_eq!(skill_noise_trigger_pct(0), 80,
+            "Skill Level 0 (weakest) should deviate from its best move \
+             most often");
+    }
+
+    #[test]
+    fn test_trigger_pct_increases_as_level_drops() {
+        let mut prev = skill_noise_trigger_pct(0);
+        for level in 1..MAX_SKILL_LEVEL {
+            let p = skill_noise_trigger_pct(level);
+            assert!(p <= prev,
+                "trigger chance must never rise as Skill Level rises \
+                 (level {level}: {p} > prev {prev})");
+            prev = p;
+        }
+    }
+
+    #[test]
+    fn test_trigger_pct_is_independent_of_depth() {
+        // Session 67 follow-up regression guard: this is the specific
+        // property that was missing before the fix. skill_noise_trigger_
+        // pct() must be a pure function of `level` alone — nothing here
+        // should vary based on how close together a position's candidate
+        // scores happen to be at that level's search depth. Asserting the
+        // function signature only takes `level` (no score/depth
+        // parameter) is enforced by the compiler; this test just pins the
+        // two concrete values a regression would most likely disturb.
+        assert_eq!(skill_noise_trigger_pct(5), 60);
+        assert_eq!(skill_noise_trigger_pct(10), 40,
+            "level 10 must trigger LESS often than level 5 — this is the \
+             exact ordering that was inverted (in effective frequency, via \
+             the cp-window-only mechanism) before this fix");
     }
 
     #[test]
