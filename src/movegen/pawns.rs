@@ -309,7 +309,7 @@ mod tests {
         // Use a FEN where pawn is on e1 (not standard but valid Pet Dragon)
         // We'll use the setup generator and find a position with rank 1 pawns
         let mut found_rank1_pawn = false;
-        for seed in 0..100u64 {
+        for seed in 0..200u64 {
             let pos = Position::generate_with_seed(seed);
             let white_pawns = pos.piece_bb(Color::White, PieceKind::Pawn);
             let rank1_pawns = white_pawns & Bitboard::RANK_1;
@@ -350,7 +350,7 @@ mod tests {
             }
         }
         assert!(found_rank1_pawn,
-            "Should find at least one position with rank 1 pawn in 100 seeds");
+            "Should find at least one position with rank 1 pawn in 200 seeds");
     }
 
     #[test]
@@ -394,6 +394,93 @@ mod tests {
     }
 
     #[test]
+    fn test_en_passant_after_rank1_double_push() {
+        // Regression guard: the EP target square set by a DoublePush move
+        // must be derived from the ACTUAL from-square of that specific
+        // push, not a hardcoded rank-2-to-rank-4 assumption — a Pet Dragon
+        // pawn double-pushing from its custom rank-1 start (e1 -> e3)
+        // passes through e2, NOT e3, so en passant against it must target
+        // e2. See make_move.rs's DoublePush handling: `ep_rank =
+        // from.rank() + 1` for White, computed relative to `from`, which is
+        // what makes this correct regardless of which rank the push
+        // originated from — this test regression-guards that generality.
+        setup();
+        // Extended FEN: White pawn's recorded start square is e1 (Pet
+        // Dragon custom), currently still sitting there (hasn't moved
+        // yet). Black pawn on d3 is positioned to capture en passant once
+        // White pushes e1-e3. Kings placed on safe, irrelevant squares.
+        let fen = "4k3/8/8/8/8/3p4/8/K3P3 w - - 0 1 e1:w";
+        let mut pos = Position::from_fen(fen).unwrap();
+
+        // Confirm the double push is actually offered from e1 first —
+        // if this fails, the rest of the test is moot (see
+        // test_pet_dragon_pawn_rank1_double_push for the dedicated check).
+        let mut pushes = MoveList::new();
+        generate_pawn_pushes(&pos, Color::White, &mut pushes);
+        let double_push = pushes.iter().find(|m| {
+            m.from == Square::E1 && m.kind == MoveKind::DoublePush
+        }).expect("e1 pawn (recorded start square) should have a double \
+                   push available");
+        assert_eq!(double_push.to, Square::E3,
+            "double push from e1 should land on e3");
+
+        // Apply it for real and check the resulting en passant target.
+        pos.make_move(*double_push);
+        assert_eq!(pos.en_passant, Square::from_uci("e2"),
+            "en passant target after an e1-e3 double push must be e2 (the \
+             square actually passed through), not e3 — a hardcoded \
+             rank-2-to-rank-4 assumption would get this wrong");
+
+        // And confirm Black's d3 pawn can actually capture en passant onto
+        // e2, ending up exactly where the passed-through square is.
+        let mut ep_list = MoveList::new();
+        generate_en_passant(&pos, Color::Black, &mut ep_list);
+        assert_eq!(ep_list.len(), 1,
+            "Black's d3 pawn should have exactly one en passant capture");
+        assert_eq!(ep_list.get(0).from, Square::D3);
+        assert_eq!(ep_list.get(0).to, Square::E2);
+        assert_eq!(ep_list.get(0).kind, MoveKind::EnPassant);
+    }
+
+    #[test]
+    fn test_en_passant_after_rank8_double_push() {
+        // Symmetric counterpart to test_en_passant_after_rank1_double_push
+        // — same regression guard, Black side. A Black pawn double-pushing
+        // from its custom rank-8 start (e8 -> e6) passes through e7, NOT
+        // e6, so en passant against it must target e7. make_move.rs's
+        // `ep_rank = from.rank() - 1` for Black is what makes this correct
+        // regardless of origin rank, mirroring White's `+ 1`.
+        setup();
+        // Extended FEN: Black pawn's recorded start is e8, still there.
+        // White pawn on d6 is positioned to capture en passant once Black
+        // pushes e8-e6.
+        let fen = "k3p3/8/3P4/8/8/8/8/4K3 b - - 0 1 e8:b";
+        let mut pos = Position::from_fen(fen).unwrap();
+
+        let mut pushes = MoveList::new();
+        generate_pawn_pushes(&pos, Color::Black, &mut pushes);
+        let double_push = pushes.iter().find(|m| {
+            m.from == Square::E8 && m.kind == MoveKind::DoublePush
+        }).expect("e8 pawn (recorded start square) should have a double \
+                   push available");
+        assert_eq!(double_push.to, Square::E6,
+            "double push from e8 should land on e6");
+
+        pos.make_move(*double_push);
+        assert_eq!(pos.en_passant, Square::from_uci("e7"),
+            "en passant target after an e8-e6 double push must be e7 (the \
+             square actually passed through), not e6");
+
+        let mut ep_list = MoveList::new();
+        generate_en_passant(&pos, Color::White, &mut ep_list);
+        assert_eq!(ep_list.len(), 1,
+            "White's d6 pawn should have exactly one en passant capture");
+        assert_eq!(ep_list.get(0).from, Square::D6);
+        assert_eq!(ep_list.get(0).to, Square::E7);
+        assert_eq!(ep_list.get(0).kind, MoveKind::EnPassant);
+    }
+
+    #[test]
     fn test_black_pawn_moves_standard() {
         setup();
         let pos = Position::start_pos().unwrap();
@@ -409,12 +496,14 @@ mod tests {
     fn test_black_double_push_from_rank8() {
         setup();
         // Find a Pet Dragon position with a Black pawn on rank 8
+        let mut found_rank8_pawn = false;
         for seed in 0..200u64 {
             let pos = Position::generate_with_seed(seed);
             let black_pawns = pos.piece_bb(Color::Black, PieceKind::Pawn);
             let rank8_pawns = black_pawns & Bitboard::RANK_8;
 
             if rank8_pawns.is_not_empty() {
+                found_rank8_pawn = true;
                 let mut list = MoveList::new();
                 generate_pawn_pushes(&pos, Color::Black, &mut list);
 
@@ -441,11 +530,11 @@ mod tests {
                         );
                     }
                 }
-                return;
+                break;
             }
         }
-        // If no rank 8 pawn found, test still passes
-        // (low probability but possible)
+        assert!(found_rank8_pawn,
+            "Should find at least one position with rank 8 pawn in 200 seeds");
     }
 
     #[test]
