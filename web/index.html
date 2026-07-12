@@ -2737,17 +2737,15 @@ init().then(() => {
 });
 
 onmessage = (e) => {
-  const { reqId, fen, ms } = e.data;
+  const { reqId, fen, ms, skill } = e.data;
   if (!ready) {
     postMessage({ type: 'result', reqId, error: 'Pet Dragon worker not ready' });
     return;
   }
   try {
-    // Hardcoded to 20 (full strength) — search_from_fen now takes a 3rd
-    // skill_level parameter (Phase 20 / D39). This worker doesn't have a
-    // difficulty control wired up yet, so it always plays at full
-    // strength rather than silently defaulting to something weaker.
-    const bestmove = search_from_fen(fen, ms, 20);
+    // skill: 0-20 (20 = full/uncapped strength). Default to 20 if the caller
+    // didn't specify one, matching search_from_fen's own pre-Skill-Level behaviour.
+    const bestmove = search_from_fen(fen, ms, typeof skill === 'number' ? skill : 20);
     postMessage({ type: 'result', reqId, bestmove });
   } catch (err) {
     postMessage({ type: 'result', reqId, error: String((err && err.message) || err) });
@@ -2789,11 +2787,12 @@ onmessage = (e) => {
   window.petDragonWorkerReadyPromise = _dragon.readyPromise;
 
   // Returns a Promise<string> resolving to a UCI bestmove string.
-  window.petDragonSearch = function(fen, ms) {
+  // skill: 0-20 (Pet Dragon's own Skill Level; 20 = full/uncapped strength).
+  window.petDragonSearch = function(fen, ms, skill) {
     return new Promise((resolve, reject) => {
       const reqId = ++_dragonReqId;
       _dragon.pending.set(reqId, { resolve, reject });
-      _dragon.worker.postMessage({ reqId, fen, ms });
+      _dragon.worker.postMessage({ reqId, fen, ms, skill });
     });
   };
 
@@ -2835,6 +2834,7 @@ let gameStartFen   = '';   // set once at startGame(); never changes during a ga
 let uciMoveHistory = [];   // UCI strings for every half-move, e.g. ["e2e4","d7d5",…]
 let blunderChance = 0;
 let engineMoveTime = 600;  // ms think-time given to Pet Dragon per move
+let engineSkillLevel = 9;  // Pet Dragon's Skill Level (0-20, 20 = full strength)
 let dragFrom = null;
 let dragGhost = document.getElementById('drag-ghost');
 
@@ -3006,7 +3006,7 @@ async function _engineMoveDragon() {
     // this awaits a postMessage round-trip rather than blocking the main
     // thread — the UI, clock, and Abort/Resign buttons all stay responsive
     // even during a 30-second "Hardest" think.
-    bestmove = await window.petDragonSearch(currentFen, engineMoveTime);
+    bestmove = await window.petDragonSearch(currentFen, engineMoveTime, engineSkillLevel);
   } catch (e) {
     // Rejected because the search was aborted (see petDragonAbortSearch) or
     // the worker errored — either way, just fall through with no move.
@@ -4008,34 +4008,38 @@ function setupPickColor(color) {
 }
 
 
-// 17 difficulty presets: 4 Easiest, 4 Easy, 4 Medium, 4 Hard, 1 Hardest
-// sfSkill: Stockfish Skill Level (0-20), scales with depth
-// movetime: ms per move — scales with depth so SF has time to reach the depth
-// depth/sfSkill fields are unused legacy metadata — Pet Dragon only takes a movetime (ms) budget
+// 20 difficulty presets: 4 Easiest, 4 Easy, 4 Medium, 4 Hard, 4 Hardest
+// skill: Pet Dragon's own Skill Level parameter (0-20, 20 = full/uncapped
+// strength) — passed straight through to search_from_fen(fen, ms, skill).
+// Linear 1-to-1 mapping: preset index 0..19 → skill 1..20.
+// movetime: ms per move given to the engine's search budget.
 // blunder: % chance (0-100) the engine plays a random legal move instead of its best move
 const DIFFICULTY_PRESETS = [
-  // ── Easiest (0-3): depth 4-7, sfSkill matches depth exactly, blunder 50→35% ──
-  { name:'Easiest I',   tier:0, emoji:'😴', sfSkill:4,  movetime:500,   depth:4,  blunder:0, elo:'🐣',  desc:'Just learning the moves' },
-  { name:'Easiest II',  tier:0, emoji:'😴', sfSkill:5,  movetime:700,   depth:5,  blunder:0, elo:'🐥',  desc:'Very basic play' },
-  { name:'Easiest III', tier:0, emoji:'😴', sfSkill:6,  movetime:1000,  depth:6,  blunder:0, elo:'🐤',  desc:'Starts to see simple threats' },
-  { name:'Easiest IV',  tier:0, emoji:'😴', sfSkill:7,  movetime:1400,  depth:7,  blunder:0, elo:'🦆',  desc:'Occasional decent moves' },
-  // ── Easy (4-7): depth 8-11, sfSkill matches depth exactly, blunder 30→15% ──
-  { name:'Easy I',      tier:1, emoji:'🙂', sfSkill:8,  movetime:2000,  depth:8,  blunder:0, elo:'🌱',  desc:'Developing some consistency' },
-  { name:'Easy II',     tier:1, emoji:'🙂', sfSkill:9,  movetime:2800,  depth:9,  blunder:0, elo:'🌿',  desc:'Avoids obvious mistakes' },
-  { name:'Easy III',    tier:1, emoji:'🙂', sfSkill:10, movetime:3600,  depth:10, blunder:0, elo:'🍃',  desc:'Solid basic play' },
-  { name:'Easy IV',     tier:1, emoji:'🙂', sfSkill:11, movetime:4500,  depth:11, blunder:0, elo:'🌲',  desc:'Consistent and steady' },
-  // ── Medium (8-11): depth 12-15, sfSkill matches depth exactly ──
-  { name:'Medium I',    tier:2, emoji:'⚡', sfSkill:12, movetime:5500,  depth:12, blunder:0, elo:'⚔️',  desc:'Thinks ahead carefully' },
-  { name:'Medium II',   tier:2, emoji:'⚡', sfSkill:13, movetime:7000,  depth:13, blunder:0, elo:'🗡️',  desc:'Club-level strength' },
-  { name:'Medium III',  tier:2, emoji:'⚡', sfSkill:14, movetime:9000,  depth:14, blunder:0, elo:'🛡️',  desc:'Strong club player' },
-  { name:'Medium IV',   tier:2, emoji:'⚡', sfSkill:15, movetime:11000, depth:15, blunder:0, elo:'🏹',  desc:'Advanced positional play' },
-  // ── Hard (12-15): depth 16-19, sfSkill matches depth exactly ──
-  { name:'Hard I',      tier:3, emoji:'🔥', sfSkill:16, movetime:13000, depth:16, blunder:0, elo:'🦁',  desc:'Tournament strength' },
-  { name:'Hard II',     tier:3, emoji:'🔥', sfSkill:17, movetime:16000, depth:17, blunder:0, elo:'🐉',  desc:'Expert level' },
-  { name:'Hard III',    tier:3, emoji:'🔥', sfSkill:18, movetime:19000, depth:18, blunder:0, elo:'👑',  desc:'Near-master strength' },
-  { name:'Hard IV',     tier:3, emoji:'🔥', sfSkill:19, movetime:22000, depth:19, blunder:0, elo:'🌋',  desc:'Master-level play' },
-  // ── Hardest (16): depth 20, sfSkill 20, no strength cap ──
-  { name:'Hardest',     tier:4, emoji:'💀', sfSkill:20, movetime:30000, depth:20, blunder:0, elo:'🤖',  desc:'Full engine strength' },
+  // ── Easiest (0-3): skill 1-4, blunder off ──
+  { name:'Easiest I',   tier:0, emoji:'😴', skill:1,  movetime:500,   blunder:0, elo:'🐣',  desc:'Just learning the moves' },
+  { name:'Easiest II',  tier:0, emoji:'😴', skill:2,  movetime:700,   blunder:0, elo:'🐥',  desc:'Very basic play' },
+  { name:'Easiest III', tier:0, emoji:'😴', skill:3,  movetime:1000,  blunder:0, elo:'🐤',  desc:'Starts to see simple threats' },
+  { name:'Easiest IV',  tier:0, emoji:'😴', skill:4,  movetime:1400,  blunder:0, elo:'🦆',  desc:'Occasional decent moves' },
+  // ── Easy (4-7): skill 5-8 ──
+  { name:'Easy I',      tier:1, emoji:'🙂', skill:5,  movetime:2000,  blunder:0, elo:'🌱',  desc:'Developing some consistency' },
+  { name:'Easy II',     tier:1, emoji:'🙂', skill:6,  movetime:2800,  blunder:0, elo:'🌿',  desc:'Avoids obvious mistakes' },
+  { name:'Easy III',    tier:1, emoji:'🙂', skill:7,  movetime:3600,  blunder:0, elo:'🍃',  desc:'Solid basic play' },
+  { name:'Easy IV',     tier:1, emoji:'🙂', skill:8,  movetime:4500,  blunder:0, elo:'🌲',  desc:'Consistent and steady' },
+  // ── Medium (8-11): skill 9-12 ──
+  { name:'Medium I',    tier:2, emoji:'⚡', skill:9,  movetime:5500,  blunder:0, elo:'⚔️',  desc:'Thinks ahead carefully' },
+  { name:'Medium II',   tier:2, emoji:'⚡', skill:10, movetime:7000,  blunder:0, elo:'🗡️',  desc:'Club-level strength' },
+  { name:'Medium III',  tier:2, emoji:'⚡', skill:11, movetime:9000,  blunder:0, elo:'🛡️',  desc:'Strong club player' },
+  { name:'Medium IV',   tier:2, emoji:'⚡', skill:12, movetime:11000, blunder:0, elo:'🏹',  desc:'Advanced positional play' },
+  // ── Hard (12-15): skill 13-16 ──
+  { name:'Hard I',      tier:3, emoji:'🔥', skill:13, movetime:13000, blunder:0, elo:'🦁',  desc:'Tournament strength' },
+  { name:'Hard II',     tier:3, emoji:'🔥', skill:14, movetime:16000, blunder:0, elo:'🐉',  desc:'Expert level' },
+  { name:'Hard III',    tier:3, emoji:'🔥', skill:15, movetime:19000, blunder:0, elo:'👑',  desc:'Near-master strength' },
+  { name:'Hard IV',     tier:3, emoji:'🔥', skill:16, movetime:22000, blunder:0, elo:'🌋',  desc:'Master-level play' },
+  // ── Hardest (16-19): skill 17-20, 20 = full uncapped strength ──
+  { name:'Hardest I',   tier:4, emoji:'💀', skill:17, movetime:24000, blunder:0, elo:'🐲',  desc:'Grandmaster level' },
+  { name:'Hardest II',  tier:4, emoji:'💀', skill:18, movetime:26000, blunder:0, elo:'👹',  desc:'Super-GM strength' },
+  { name:'Hardest III', tier:4, emoji:'💀', skill:19, movetime:28000, blunder:0, elo:'☠️',  desc:'Near-perfect play' },
+  { name:'Hardest IV',  tier:4, emoji:'💀', skill:20, movetime:30000, blunder:0, elo:'🤖',  desc:'Full engine strength' },
 ];
 
 let selectedDifficulty = 8; // default Medium I
@@ -4051,33 +4055,12 @@ function buildSubPips(tier) {
   const pipsEl = document.getElementById('diff-sub-pips');
   if (!pipsEl) return;
 
-  const count  = tier === 4 ? 1 : 4;
+  const count  = 4; // every tier now has 4 sub-levels, including Hardest
   const subIdx = selectedDifficulty - tier * 4;
   const color  = TIER_COLORS[tier];
   const romans = ['I','II','III','IV'];
 
   pipsEl.innerHTML = '';
-  // Hardest tier — single full-width locked bar
-  if (count === 1) {
-    const row = document.createElement('div');
-    row.className = 'diff-notch-row';
-    const notch = document.createElement('div');
-    notch.className = 'diff-notch active';
-    notch.style.setProperty('--diff-notch-color', color);
-    notch.title = DIFFICULTY_PRESETS[16].name;
-    notch.onclick = () => setupPickDifficulty(16);
-    row.appendChild(notch);
-    const labelRow = document.createElement('div');
-    labelRow.className = 'diff-notch-labels';
-    const lbl = document.createElement('div');
-    lbl.className = 'diff-notch-label active';
-    lbl.style.setProperty('--diff-notch-color', color);
-    lbl.textContent = 'MAX';
-    labelRow.appendChild(lbl);
-    pipsEl.appendChild(row);
-    pipsEl.appendChild(labelRow);
-    return;
-  }
 
   const row = document.createElement('div');
   row.className = 'diff-notch-row';
@@ -4138,8 +4121,8 @@ function renderDiffRevolver(level, animate) { renderDiffPicker(level); }
 function renderDiffSlider(level)            { renderDiffPicker(level); }
 
 function setupPickTier(tier) {
-  // Pick the first sub-level of the chosen tier (or level 16 for Hardest)
-  const level = tier === 4 ? 16 : tier * 4;
+  // Pick the first sub-level of the chosen tier
+  const level = tier * 4;
   setupPickDifficulty(level);
 }
 
@@ -4158,6 +4141,7 @@ function setupStart() {
   const preset = DIFFICULTY_PRESETS[selectedDifficulty];
   blunderChance = preset.blunder;
   engineMoveTime = preset.movetime; // Pet Dragon's think-time budget for this difficulty
+  engineSkillLevel = preset.skill;  // Pet Dragon's own Skill Level (0-20)
   playerColor = setupColor === 'white' ? 'w' : 'b';
   boardFlipped = playerColor === 'b';
 
@@ -4826,7 +4810,7 @@ function startGame() {
   autoPlayEnabled = false;
   const apBtn = document.getElementById('autoplay-btn');
   if (apBtn) { apBtn.classList.remove('autoplay-on'); }
-  _updateBarNames();  // reset bar names — autoPlayEnabled is false so player shows "Earthling"
+  _updateBarNames();  // reset bar names — always shows "Pet Dragon" / "Slayer"
   // Generate the chaos starting position ourselves (see generateChaosFen):
   // black mirrors white's layout, and the two bishops always land on
   // opposite-coloured squares. Every position handed to Pet Dragon must obey
@@ -6754,7 +6738,7 @@ function showShareCard() {
   const d = _shareData;
 
   // Title
-  document.getElementById('share-modal-title').textContent = '♟ Crazy Chess Carnage';
+  document.getElementById('share-modal-title').textContent = '🐉 Pet Dragon';
 
   // Outcome badge — icon driven by badge class, text is clean (no double emoji)
   const badgeEl = document.getElementById('share-outcome-badge');
@@ -6922,7 +6906,7 @@ function copyShareText() {
   ctx.font = `bold ${14 * S}px Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('♟  Crazy Chess Carnage', W / 2, y + TITLE_H / 2);
+  ctx.fillText('🐉  Pet Dragon', W / 2, y + TITLE_H / 2);
   y += TITLE_H + GAP;
 
   // ── Outcome badge ──
@@ -7144,7 +7128,7 @@ function copyShareText() {
   ctx.font = `${7 * S}px Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Pet Dragon Chess  •  Crazy Chess Carnage', W / 2, y + FOOTER_H / 2);
+  ctx.fillText('Pet Dragon by Gokul Chandar', W / 2, y + FOOTER_H / 2);
 
   // ── Export & share — wait for async board (SVG piece images) ──
   boardDrawn.then(() => {
@@ -7156,27 +7140,27 @@ function copyShareText() {
   const ia = new Uint8Array(ab);
   for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
   const blob = new Blob([ab], { type: 'image/jpeg' });
-  const file = new File([blob], 'crazy-chess-carnage.jpg', { type: 'image/jpeg' });
+  const file = new File([blob], 'PetDragon.jpg', { type: 'image/jpeg' });
 
   // Always trigger image download first (saves to gallery/downloads)
   const dlUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = dlUrl;
-  a.download = 'crazy-chess-carnage.jpg';
+  a.download = 'PetDragon.jpg';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
 
   // Then also try native share sheet (with or without file support)
-  const shareText = `♟ Crazy Chess Carnage\n${d.cleanOutcome}\nDifficulty: ${d.preset.emoji} ${d.preset.name} (${tier})\nMoves: ${d.moves} | I played: ${d.playerColorLabel}\nPlay at: ${gameUrl}`;
+  const shareText = `🐉 Pet Dragon\n${d.cleanOutcome}\nDifficulty: ${d.preset.emoji} ${d.preset.name} (${tier})\nMoves: ${d.moves} | I played: ${d.playerColorLabel}\nPlay at: ${gameUrl}`;
 
   if (navigator.share) {
     // Try with file first, fall back to text-only share
     const shareWithFile = navigator.canShare && navigator.canShare({ files: [file] });
     const sharePayload = shareWithFile
-      ? { title: '♟ Crazy Chess Carnage', text: `Play at: ${gameUrl}`, files: [file] }
-      : { title: '♟ Crazy Chess Carnage', text: shareText };
+      ? { title: '🐉 Pet Dragon', text: `Play at: ${gameUrl}`, files: [file] }
+      : { title: '🐉 Pet Dragon', text: shareText };
 
     navigator.share(sharePayload)
       .then(() => {
@@ -7202,7 +7186,9 @@ function _updateBarNames() {
   const engEl = document.getElementById('engine-name');
   const plEl  = document.getElementById('player-name');
   if (engEl) engEl.textContent = 'Pet Dragon';
-  if (plEl)  plEl.textContent  = autoPlayEnabled ? 'Pet Dragon' : 'Earthling';
+  // "Slayer" stays as the label regardless of autoplay state — the box
+  // still represents the human player's seat even when AI is playing it.
+  if (plEl)  plEl.textContent  = 'Slayer';
 }
 
 // ─── Engine move — single entry point, always dispatches to Pet Dragon ──────
