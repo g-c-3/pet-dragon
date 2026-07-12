@@ -2936,7 +2936,7 @@ function _mvToUci(mv) {
   return uci;
 }
 
-// ─── Dispatch a move request to Pet Dragon ───────────────────────────────────
+// ─── Engine move — single entry point, always dispatches to Pet Dragon ──────
 function _showEngineDiagnostic(msg) {
   console.error('Pet Dragon diagnostic:', msg);
   const t = document.getElementById('status-text');
@@ -2948,93 +2948,91 @@ function _showEngineDiagnostic(msg) {
   t.style.color = '#ff6b6b';
 }
 
-async function _engineMoveDragon() {
+// Re-entrancy guard is the very FIRST thing checked, before any other side
+// effect — mirrors Pet Dragon's own reference implementation (maybeEngineMove's
+// engineBusy check in indexOG.html). This function used to be split into a
+// wrapper (engineMove) that reset status to 'ready' and then fired a second,
+// un-awaited async function (_engineMoveDragon) — that split was exactly the
+// kind of structural awkwardness that could cause the engine to go silently
+// unresponsive with no visible error. Merged into one function with a single
+// top-level catch-all so ANY unexpected failure surfaces instead of vanishing.
+//
+// _engineMoveRunning is a SEPARATE flag from engineThinking: callers set
+// engineThinking = true immediately (before their setTimeout delay) purely to
+// lock player input during that gap; using engineThinking itself as the
+// re-entrancy guard here would make this function bail out before ever
+// running. _engineMoveRunning is only ever touched inside this function.
+let _engineMoveRunning = false;
+
+async function engineMove() {
+  if (_engineMoveRunning) return; // true re-entrancy guard, checked first, no side effects before it
   if (customGameOver) return; // legitimate — nothing to diagnose
 
-  if (!engineReady) {
-    // Pet Dragon's WASM is loaded twice (main thread + search Worker), which
-    // roughly doubles load time — on a slow connection the player can move
-    // before it's finished. Wait for it rather than permanently skipping the
-    // engine's turn, since nothing else would ever retry it otherwise.
-    if (!window.petDragonReadyPromise || !window.petDragonWorkerReadyPromise) {
-      _showEngineDiagnostic('Engine move skipped: Pet Dragon bootstrap missing');
-      return;
-    }
-    setEngineStatus('loading');
-    try {
-      await Promise.all([window.petDragonReadyPromise, window.petDragonWorkerReadyPromise]);
-    } catch (e) {
-      _showEngineDiagnostic('Pet Dragon failed to load: ' + String((e && e.message) || e).slice(0, 120));
-      return;
-    }
-    engineReady = true;
-    setEngineStatus('ready');
-    if (customGameOver) return; // could have ended while we were waiting
-  }
-
-  if (customTurn === playerColor && !autoPlayEnabled) {
-    // engineMove() is only ever scheduled right after the turn should have
-    // flipped to the engine (or at a natural engine-turn point), so this
-    // firing means the turn didn't actually flip — that's a real bug, not
-    // a normal "it's not my turn yet" case.
-    _showEngineDiagnostic('Engine move skipped: still ' + customTurn + "'s turn (expected engine's turn)");
-    return;
-  }
-  if (engineThinking) { _showEngineDiagnostic('Engine move skipped: already thinking (stuck flag?)'); return; }
-
-  engineThinking = true;
-  setEngineStatus('thinking');
-
-  const engineColor = customTurn;
-  const legalMvs = getCustomMoves(customBoard, engineColor, false);
-  if (!legalMvs.length) {
-    engineThinking = false; setEngineStatus('ready');
-    const wasOver = customGameOver;
-    checkGameOver();
-    if (!customGameOver && !wasOver) {
-      _showEngineDiagnostic('No legal moves found for engine, but game not flagged over');
-    }
-    return;
-  }
-
-  const currentFen = boardStateToEngineFen(customBoard, engineColor);
-
-  let bestmove = null;
-  let searchError = null;
+  _engineMoveRunning = true;
   try {
+    if (!engineReady) {
+      // Pet Dragon's WASM is loaded twice (main thread + search Worker), which
+      // roughly doubles load time — on a slow connection the player can move
+      // before it's finished. Wait for it rather than permanently skipping the
+      // engine's turn, since nothing else would ever retry it otherwise.
+      if (!window.petDragonReadyPromise || !window.petDragonWorkerReadyPromise) {
+        _showEngineDiagnostic('Engine move skipped: Pet Dragon bootstrap missing');
+        return;
+      }
+      setEngineStatus('loading');
+      await Promise.all([window.petDragonReadyPromise, window.petDragonWorkerReadyPromise]);
+      engineReady = true;
+      if (customGameOver) { setEngineStatus('ready'); return; } // could have ended while we waited
+    }
+
+    if (customTurn === playerColor && !autoPlayEnabled) { engineThinking = false; setEngineStatus('ready'); return; } // not the engine's turn — nothing to do
+
+    engineThinking = true;
+    setEngineStatus('thinking');
+
+    const engineColor = customTurn;
+    const legalMvs = getCustomMoves(customBoard, engineColor, false);
+    if (!legalMvs.length) {
+      engineThinking = false; setEngineStatus('ready');
+      const wasOver = customGameOver;
+      checkGameOver();
+      if (!customGameOver && !wasOver) {
+        _showEngineDiagnostic('No legal moves found for engine, but game not flagged over');
+      }
+      return;
+    }
+
+    const currentFen = boardStateToEngineFen(customBoard, engineColor);
+
     // Runs in a Worker (see the module bootstrap at the top of the page), so
     // this awaits a postMessage round-trip rather than blocking the main
     // thread — the UI, clock, and Abort/Resign buttons all stay responsive
     // even during a 30-second "Hardest" think.
-    bestmove = await window.petDragonSearch(currentFen, engineMoveTime, engineSkillLevel);
+    const bestmove = await window.petDragonSearch(currentFen, engineMoveTime, engineSkillLevel);
+
+    // The game may have been aborted/resigned/reset while we were waiting.
+    if (customGameOver) { engineThinking = false; setEngineStatus('ready'); return; }
+
+    engineThinking = false;
+    setEngineStatus('ready');
+
+    if (!bestmove || bestmove === '0000') {
+      checkGameOver();
+      return;
+    }
+
+    applyEngineMove(bestmove); // handles its own autoplay continuation internally
   } catch (e) {
-    // Rejected because the search was aborted (see petDragonAbortSearch) or
-    // the worker errored — either way, just fall through with no move.
-    searchError = e;
-    console.error('Pet Dragon search failed:', e);
-  }
-
-  // The game may have been aborted/resigned/reset while we were waiting.
-  if (customGameOver) { engineThinking = false; setEngineStatus('ready'); return; }
-
-  engineThinking = false;
-  setEngineStatus('ready');
-
-  if (searchError) {
-    _showEngineDiagnostic('Search error: ' + String((searchError && searchError.message) || searchError).slice(0, 120));
-    return;
-  }
-
-  if (!bestmove || bestmove === '0000') {
-    checkGameOver();
-    return;
-  }
-
-  try {
-    applyEngineMove(bestmove);
-  } catch (e) {
-    console.error('applyEngineMove threw:', e);
-    _showEngineDiagnostic('applyEngineMove error: ' + String((e && e.message) || e).slice(0, 120));
+    // Absolute last-resort net: no matter what throws anywhere above (a
+    // rejected/aborted search, a bug in applyEngineMove, a DOM lookup
+    // failure, anything) — surface it and reset state instead of leaving
+    // the game silently stuck with no visible explanation.
+    console.error('engineMove() error:', e);
+    engineThinking = false;
+    setEngineStatus('ready');
+    _showEngineDiagnostic('Engine error: ' + String((e && e.message) || e).slice(0, 150));
+  } finally {
+    _engineMoveRunning = false;
   }
 }
 
@@ -5207,10 +5205,12 @@ function closePickers() {
   document.getElementById('sound-overlay').classList.remove('show');
   document.getElementById('glow-overlay').classList.remove('show');
   document.getElementById('info-overlay').classList.remove('show');
-  document.getElementById('stats-overlay').classList.remove('show');
+  const statsOverlay = document.getElementById('stats-overlay');
+  if (statsOverlay) statsOverlay.classList.remove('show');
   document.getElementById('cdash-overlay').classList.remove('show');
   document.getElementById('info-btn').classList.remove('active');
-  document.getElementById('stats-btn').classList.remove('active');
+  const statsBtn = document.getElementById('stats-btn');
+  if (statsBtn) statsBtn.classList.remove('active');
   // Collapse admin panel and reset toggle state (keep unlock state across sessions)
   _adminPanelOpen = false;
   const adminPanel = document.getElementById('admin-panel');
@@ -5218,8 +5218,12 @@ function closePickers() {
   const adminBtn = document.getElementById('admin-toggle-btn');
   if (adminBtn) adminBtn.textContent = '🔐 Admin';
   // Engine dashboard: route through its own close so game resumes correctly
-  if (typeof _edashCloseDashboard === 'function') _edashCloseDashboard();
-  else document.getElementById('engine-dash-overlay').classList.remove('show');
+  if (typeof _edashCloseDashboard === 'function') {
+    _edashCloseDashboard();
+  } else {
+    const edashOverlay = document.getElementById('engine-dash-overlay');
+    if (edashOverlay) edashOverlay.classList.remove('show');
+  }
 }
 
 // Close on backdrop click
@@ -7189,13 +7193,6 @@ function _updateBarNames() {
   // "Slayer" stays as the label regardless of autoplay state — the box
   // still represents the human player's seat even when AI is playing it.
   if (plEl)  plEl.textContent  = 'Slayer';
-}
-
-// ─── Engine move — single entry point, always dispatches to Pet Dragon ──────
-function engineMove() {
-  engineThinking = false;
-  setEngineStatus('ready');
-  _engineMoveDragon();
 }
 </script>
 </body>
