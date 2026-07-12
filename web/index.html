@@ -7,7 +7,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crazy Chess Carnage</title>
+<title>Pet Dragon</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%89%3C/text%3E%3C/svg%3E">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap');
 
@@ -2333,7 +2334,7 @@
 
 <header>
   <div class="header-top">
-    <span class="logo">♟ Crazy Chess Carnage</span>
+    <span class="logo">🐉 Pet Dragon</span>
 
     <!-- Abort / Resign — shown only during an active game -->
     <div id="game-action-btns">
@@ -2421,12 +2422,16 @@
   <div class="picker-modal" style="text-align:center;">
     <h3>ℹ️ About</h3>
     <div style="display:flex;flex-direction:column;align-items:center;gap:calc(1rem * var(--s));margin-bottom:calc(1.2rem * var(--s))">
-      <div style="font-size:calc(3rem * var(--s));line-height:1;">♟</div>
-      <div style="font-family:'Playfair Display',serif;font-size:calc(1.1rem * var(--s));font-weight:700;background:linear-gradient(135deg,#fff 0%,var(--accent2) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Crazy Chess Carnage</div>
-      <div style="font-size:calc(0.82rem * var(--s));color:var(--text-muted);line-height:1.6;">A chaotic chess experience powered by the Pet Dragon engine.<br>Pieces start in random positions — absolute mayhem!</div>
+      <div style="font-size:calc(3rem * var(--s));line-height:1;">🐉</div>
+      <div style="font-family:'Playfair Display',serif;font-size:calc(1.1rem * var(--s));font-weight:700;background:linear-gradient(135deg,#fff 0%,var(--accent2) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Pet Dragon</div>
+      <div style="font-size:calc(0.82rem * var(--s));color:var(--text-muted);line-height:1.6;">by Gokul Chandar · Engine: Claude (Anthropic) · GPL v3</div>
+      <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:calc(10px * var(--s));padding:calc(0.75rem * var(--s)) calc(1.2rem * var(--s));display:flex;align-items:center;gap:calc(0.6rem * var(--s));min-width:0;">
+        <span style="font-size:calc(1.1rem * var(--s));flex-shrink:0;">🔗</span>
+        <a href="https://github.com/g-c-3/pet-dragon" target="_blank" rel="noopener" style="font-family:'DM Mono',monospace;font-size:clamp(0.6rem,calc(0.82rem * var(--s)),1rem);color:var(--accent2);text-decoration:none;letter-spacing:0.3px;overflow-wrap:break-word;word-break:break-all;min-width:0;">github.com/g-c-3/pet-dragon</a>
+      </div>
       <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:calc(10px * var(--s));padding:calc(0.75rem * var(--s)) calc(1.2rem * var(--s));display:flex;align-items:center;gap:calc(0.6rem * var(--s));min-width:0;">
         <span style="font-size:calc(1.1rem * var(--s));flex-shrink:0;">✉️</span>
-        <a href="mailto:Pet.Dragon.Chess@gmail.com" style="font-family:'DM Mono',monospace;font-size:clamp(0.6rem,calc(0.82rem * var(--s)),1rem);color:var(--accent2);text-decoration:none;letter-spacing:0.3px;overflow-wrap:break-word;word-break:break-all;min-width:0;">Pet.Dragon.Chess@gmail.com</a>
+        <a href="mailto:gc3thedev@gmail.com" style="font-family:'DM Mono',monospace;font-size:clamp(0.6rem,calc(0.82rem * var(--s)),1rem);color:var(--accent2);text-decoration:none;letter-spacing:0.3px;overflow-wrap:break-word;word-break:break-all;min-width:0;">gc3thedev@gmail.com</a>
       </div>
     </div>
     <button class="picker-close" onclick="closePickers()">Close</button>
@@ -6697,7 +6702,7 @@ function showShareCard() {
   const d = _shareData;
 
   // Title
-  document.getElementById('share-modal-title').textContent = '♟ Crazy Chess Carnage';
+  document.getElementById('share-modal-title').textContent = '🐉 Pet Dragon';
 
   // Outcome badge — icon driven by badge class, text is clean (no double emoji)
   const badgeEl = document.getElementById('share-outcome-badge');
@@ -6865,7 +6870,7 @@ function copyShareText() {
   ctx.font = `bold ${14 * S}px Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('♟  Crazy Chess Carnage', W / 2, y + TITLE_H / 2);
+  ctx.fillText('🐉  Pet Dragon', W / 2, y + TITLE_H / 2);
   y += TITLE_H + GAP;
 
   // ── Outcome badge ──
@@ -7087,7 +7092,7 @@ function copyShareText() {
   ctx.font = `${7 * S}px Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Pet Dragon Chess  •  Crazy Chess Carnage', W / 2, y + FOOTER_H / 2);
+  ctx.fillText('Pet Dragon by Gokul Chandar', W / 2, y + FOOTER_H / 2);
 
   // ── Export & share — wait for async board (SVG piece images) ──
   boardDrawn.then(() => {
@@ -7112,14 +7117,14 @@ function copyShareText() {
   setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
 
   // Then also try native share sheet (with or without file support)
-  const shareText = `♟ Crazy Chess Carnage\n${d.cleanOutcome}\nDifficulty: ${d.preset.emoji} ${d.preset.name} (${tier})\nMoves: ${d.moves} | I played: ${d.playerColorLabel}\nPlay at: ${gameUrl}`;
+  const shareText = `🐉 Pet Dragon\n${d.cleanOutcome}\nDifficulty: ${d.preset.emoji} ${d.preset.name} (${tier})\nMoves: ${d.moves} | I played: ${d.playerColorLabel}\nPlay at: ${gameUrl}`;
 
   if (navigator.share) {
     // Try with file first, fall back to text-only share
     const shareWithFile = navigator.canShare && navigator.canShare({ files: [file] });
     const sharePayload = shareWithFile
-      ? { title: '♟ Crazy Chess Carnage', text: `Play at: ${gameUrl}`, files: [file] }
-      : { title: '♟ Crazy Chess Carnage', text: shareText };
+      ? { title: '🐉 Pet Dragon', text: `Play at: ${gameUrl}`, files: [file] }
+      : { title: '🐉 Pet Dragon', text: shareText };
 
     navigator.share(sharePayload)
       .then(() => {
