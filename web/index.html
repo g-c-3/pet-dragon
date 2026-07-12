@@ -2343,7 +2343,7 @@
 
 <header>
   <div class="header-top">
-    <span class="logo"><span class="logo-icon">🐉</span> Pet Dragon</span>
+    <span class="logo" onclick="location.reload()" style="cursor:pointer;" title="Reload"><span class="logo-icon">🐉</span> Pet Dragon</span>
 
     <!-- Abort / Resign — shown only during an active game -->
     <div id="game-action-btns">
@@ -5180,10 +5180,12 @@ function closePickers() {
   document.getElementById('sound-overlay').classList.remove('show');
   document.getElementById('glow-overlay').classList.remove('show');
   document.getElementById('info-overlay').classList.remove('show');
-  document.getElementById('stats-overlay').classList.remove('show');
+  const statsOverlay = document.getElementById('stats-overlay');
+  if (statsOverlay) statsOverlay.classList.remove('show');
   document.getElementById('cdash-overlay').classList.remove('show');
   document.getElementById('info-btn').classList.remove('active');
-  document.getElementById('stats-btn').classList.remove('active');
+  const statsBtn = document.getElementById('stats-btn');
+  if (statsBtn) statsBtn.classList.remove('active');
   // Collapse admin panel and reset toggle state (keep unlock state across sessions)
   _adminPanelOpen = false;
   const adminPanel = document.getElementById('admin-panel');
@@ -5191,8 +5193,12 @@ function closePickers() {
   const adminBtn = document.getElementById('admin-toggle-btn');
   if (adminBtn) adminBtn.textContent = '🔐 Admin';
   // Engine dashboard: route through its own close so game resumes correctly
-  if (typeof _edashCloseDashboard === 'function') _edashCloseDashboard();
-  else document.getElementById('engine-dash-overlay').classList.remove('show');
+  if (typeof _edashCloseDashboard === 'function') {
+    _edashCloseDashboard();
+  } else {
+    const edashOverlay = document.getElementById('engine-dash-overlay');
+    if (edashOverlay) edashOverlay.classList.remove('show');
+  }
 }
 
 // Close on backdrop click
