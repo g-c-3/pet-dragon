@@ -15,7 +15,10 @@
 //   engine_version()     → crate version string
 //   new_game()           → generate a random Pet Dragon starting position,
 //                          return FEN string
-//   search_from_fen(fen, movetime_ms) → run search, return UCI bestmove string
+//   search_from_fen(fen, movetime_ms, skill_level) → run search, return UCI
+//                          bestmove string. skill_level 0..=20, 20 = full
+//                          strength (Phase 20 / D39 — see the function's own
+//                          doc comment for the full explanation).
 //
 // Startup:
 //   wasm_main() runs automatically on WASM module load (wasm_bindgen start).
@@ -102,16 +105,34 @@ pub fn new_game() -> String {
 }
 
 /// Run the engine search from a given FEN position for up to `movetime_ms`
-/// milliseconds. Returns the bestmove in UCI format (e.g. "e2e4").
+/// milliseconds, at the given Skill Level. Returns the bestmove in UCI
+/// format (e.g. "e2e4").
 ///
 /// # Arguments
 /// * `fen`         - FEN string of the position to search (Pet Dragon or standard)
 /// * `movetime_ms` - Maximum milliseconds to think
+/// * `skill_level` - 0..=20 (Phase 20 / D39). 20 (`skill::MAX_SKILL_LEVEL`)
+///                   means full strength — no depth cap, no time reduction,
+///                   byte-identical to how this function behaved before
+///                   Skill Level existed. Values above 20 are clamped down
+///                   to 20 rather than treated as an error, since a stray
+///                   out-of-range value from a GUI's own slider/state
+///                   shouldn't fail a search — it should just mean "as
+///                   strong as possible," the same safe fallback the native
+///                   UCI `setoption name Skill Level` handler uses.
+///                   Unlike the native UCI path (where Skill Level is a
+///                   persistent `setoption` that carries across searches
+///                   until changed), this is a plain function parameter
+///                   like `fen`/`movetime_ms` — pass whatever the GUI's own
+///                   difficulty control is currently set to on every call.
+///                   There's no hidden engine-side state to remember to
+///                   configure first, matching how every other parameter
+///                   in this stateless WASM API already works.
 ///
 /// Returns "0000" if the position is illegal or has no legal moves.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
-pub fn search_from_fen(fen: &str, movetime_ms: u32) -> String {
+pub fn search_from_fen(fen: &str, movetime_ms: u32, skill_level: u8) -> String {
     use search::iterative::iterative_deepening;
     use search::time::TimeControl;
     use search::SearchInfo;
@@ -127,13 +148,20 @@ pub fn search_from_fen(fen: &str, movetime_ms: u32) -> String {
     // Record starting position in game history
     pos.push_game_history();
 
-    // Set up search with movetime
+    // Clamp defensively rather than error — see doc comment above.
+    let skill_level = skill_level.min(search::skill::MAX_SKILL_LEVEL);
+
+    // Set up search with movetime, scaled by the Skill Level's time
+    // fraction (same mechanism as the native UCI path's cmd_go — see
+    // search/skill.rs's skill_time_fraction_pct()).
     let tc = TimeControl {
         movetime: movetime_ms as u64,
+        skill_time_fraction_pct: search::skill::skill_time_fraction_pct(skill_level),
         ..TimeControl::default()
     };
 
     let mut info = SearchInfo::new();
+    info.skill_level = skill_level;
     let mut tt   = TranspositionTable::new(32); // 32MB TT for browser
 
     // Run search
