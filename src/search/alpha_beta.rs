@@ -743,6 +743,7 @@ mod tests {
         (info.best_move, score)
     }
 
+    #[test]
     fn test_finds_mate_in_1() {
         setup();
         // Simple winning position — White is up a queen
