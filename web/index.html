@@ -1,5 +1,5 @@
 <!--
-  Copyright (c) 2026 Gokul Chandar. All rights reserved.
+  Copyright (c) 2026 G.C. All rights reserved.
   Unauthorized copying, modification, or distribution of this source code via any medium is strictly prohibited. Proprietary and confidential.
 -->
 <!DOCTYPE html>
@@ -3161,17 +3161,13 @@ function _pawnStructureScore(board, color) {
   return score;
 }
 
-function updateEvalBar() {
-  const bar = document.getElementById('eval-bar');
-  const scoreEl = document.getElementById('eval-score');
-  if (!bar || !scoreEl) return;
-  if (!engineReady || !window.PetDragon || !customBoard) {
-    scoreEl.textContent = 'Eval: —';
-    return;
-  }
-
+// Computes the raw heuristic diff (centipawn-ish units, positive = white
+// better) for a given board/turn, plus whether the side to move has any
+// legal moves (for the checkmate/stalemate edge case). Shared by the real
+// updateEvalBar() and the simulated "thinking" animation below.
+function _computeEvalDiff(board, turn) {
   let whiteMaterial = 0, blackMaterial = 0;
-  for (const p of customBoard) {
+  for (const p of board) {
     if (!p) continue;
     const v = PIECE_VALUES[p.type] || 0;
     if (p.color === 'w') whiteMaterial += v; else blackMaterial += v;
@@ -3179,28 +3175,34 @@ function updateEvalBar() {
 
   const mobilityW = _dragonLegalCount('w');
   const mobilityB = _dragonLegalCount('b');
-  const sideToMoveMobility = customTurn === 'w' ? mobilityW : mobilityB;
+  const sideToMoveMobility = turn === 'w' ? mobilityW : mobilityB;
 
-  const centerW = _centerControlScore(customBoard, 'w');
-  const centerB = _centerControlScore(customBoard, 'b');
-  const kingSafetyW = _kingSafetyScore(customBoard, 'w');
-  const kingSafetyB = _kingSafetyScore(customBoard, 'b');
-  const pawnStructW = _pawnStructureScore(customBoard, 'w');
-  const pawnStructB = _pawnStructureScore(customBoard, 'b');
+  const centerW = _centerControlScore(board, 'w');
+  const centerB = _centerControlScore(board, 'b');
+  const kingSafetyW = _kingSafetyScore(board, 'w');
+  const kingSafetyB = _kingSafetyScore(board, 'b');
+  const pawnStructW = _pawnStructureScore(board, 'w');
+  const pawnStructB = _pawnStructureScore(board, 'b');
 
-  // diff (in centipawn-ish units) combines material, mobility, center control,
-  // king safety, and pawn structure, and is the single source of truth for
-  // both the bar width and the displayed number.
   const diff = (whiteMaterial - blackMaterial) * 100
     + (mobilityW - mobilityB) * 12
     + (centerW - centerB)
     + (kingSafetyW - kingSafetyB)
     + (pawnStructW - pawnStructB);
 
+  return { diff, sideToMoveMobility };
+}
+
+// Renders a given diff value to the bar/text — shared by the real eval and
+// the simulated thinking animation so they look and behave identically.
+function _renderEvalDiff(diff, sideToMoveMobility, turn) {
+  const bar = document.getElementById('eval-bar');
+  const scoreEl = document.getElementById('eval-score');
+  if (!bar || !scoreEl) return;
+
   let whitePct;
   if (!sideToMoveMobility) {
-    // No legal moves for the side to move — checkmate/stalemate edge case.
-    whitePct = customTurn === 'w' ? 0 : 100;
+    whitePct = turn === 'w' ? 0 : 100;
   } else {
     whitePct = Math.round(100 / (1 + Math.exp(-diff / 300)));
   }
@@ -3211,6 +3213,57 @@ function updateEvalBar() {
 
   scoreEl.textContent = 'Eval: ' + (displayCp > 0 ? '+' : '') + displayCp.toFixed(1);
   bar.style.width = Math.min(95, Math.max(5, playerPct)) + '%';
+}
+
+function updateEvalBar() {
+  const bar = document.getElementById('eval-bar');
+  const scoreEl = document.getElementById('eval-score');
+  if (!bar || !scoreEl) return;
+  if (!engineReady || !window.PetDragon || !customBoard) {
+    scoreEl.textContent = 'Eval: —';
+    return;
+  }
+
+  const { diff, sideToMoveMobility } = _computeEvalDiff(customBoard, customTurn);
+  _renderEvalDiff(diff, sideToMoveMobility, customTurn);
+}
+
+// ─── Simulated "thinking" eval animation ───────────────────────────────────
+// search_from_fen is an opaque single-shot WASM call with no progress
+// callback, so we have no real intermediate scores to show. To avoid the bar
+// sitting frozen for up to engineMoveTime ms, we animate it: start from the
+// current position's real heuristic value, wobble around it with an
+// amplitude that decays over the engine's think-time budget, and settle back
+// on the exact real value once the search resolves and the true new position
+// is evaluated. Purely cosmetic — never affects the actual move search.
+let _evalThinkInterval = null;
+
+function _startEvalThinkingAnimation(turn) {
+  _stopEvalThinkingAnimation(); // clear any stale interval first
+  const bar = document.getElementById('eval-bar');
+  const scoreEl = document.getElementById('eval-score');
+  if (!bar || !scoreEl || !engineReady || !window.PetDragon || !customBoard) return;
+
+  const { diff: baseDiff, sideToMoveMobility } = _computeEvalDiff(customBoard, turn);
+  const startTime = performance.now();
+  const budget = Math.max(1, engineMoveTime);
+  const MAX_AMPLITUDE = 180; // centipawn-ish units at the very start of the think
+
+  _evalThinkInterval = setInterval(() => {
+    const elapsed = performance.now() - startTime;
+    const frac = Math.min(1, elapsed / budget);
+    const amplitude = MAX_AMPLITUDE * (1 - frac); // decays to 0 as the "think" completes
+    const jitter = (Math.random() * 2 - 1) * amplitude;
+    _renderEvalDiff(baseDiff + jitter, sideToMoveMobility, turn);
+    if (frac >= 1) _stopEvalThinkingAnimation();
+  }, 350);
+}
+
+function _stopEvalThinkingAnimation() {
+  if (_evalThinkInterval) {
+    clearInterval(_evalThinkInterval);
+    _evalThinkInterval = null;
+  }
 }
 
 // Build a UCI move string from a move object, including promotion suffix if needed.
@@ -3289,11 +3342,15 @@ async function engineMove() {
 
     const currentFen = boardStateToEngineFen(customBoard, engineColor);
 
+    _startEvalThinkingAnimation(engineColor);
+
     // Runs in a Worker (see the module bootstrap at the top of the page), so
     // this awaits a postMessage round-trip rather than blocking the main
     // thread — the UI, clock, and Abort/Resign buttons all stay responsive
     // even during a 30-second "Hardest" think.
     const bestmove = await window.petDragonSearch(currentFen, engineMoveTime, engineSkillLevel);
+
+    _stopEvalThinkingAnimation();
 
     // The game may have been aborted/resigned/reset while we were waiting.
     if (customGameOver) { engineThinking = false; setEngineStatus('ready'); return; }
@@ -3317,6 +3374,7 @@ async function engineMove() {
     setEngineStatus('ready');
     _showEngineDiagnostic('Engine error: ' + String((e && e.message) || e).slice(0, 150));
   } finally {
+    _stopEvalThinkingAnimation();
     _engineMoveRunning = false;
   }
 }
