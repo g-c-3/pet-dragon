@@ -2708,21 +2708,37 @@
           terminating the worker (see window.petDragonAbortSearch below).
           The worker's source lives inline as a string (built into a Blob
           URL below) so this page stays a single file — only ./pkg/pet_dragon.js
-          and its .wasm need to sit alongside it on disk. -->
-<script type="module">
-  import init, {
-    engine_name, engine_version,
-    new_game, legal_moves_from_fen
-  } from './pkg/pet_dragon.js';
+          and its .wasm need to sit alongside it on disk.
 
-  window.PetDragon = { engine_name, engine_version, new_game, legal_moves_from_fen };
-  window.petDragonReadyPromise = init();
+          IMPORTANT: this is a plain classic script, NOT type="module". A
+          module script is deferred by the browser until after the whole
+          document has been parsed, but the game-logic script block right
+          below this one is an ordinary classic script that runs
+          immediately, in document order, and reads window.petDragonReadyPromise
+          / window.petDragonWorkerReadyPromise as soon as it starts executing.
+          If this bridge were type="module", those globals would still be
+          undefined at that point (the module wouldn't have run yet), and the
+          engine would silently never become ready — exactly the "engine not
+          responding" symptom. Using dynamic import() here keeps the same
+          async WASM-loading behaviour while letting this script run
+          synchronously, in the correct order, like indexOG's engine bridge. -->
+<script>
+  const _dragonPkgUrl = new URL('./pkg/pet_dragon.js', document.baseURI).href;
+
+  window.petDragonReadyPromise = import(_dragonPkgUrl).then(async (mod) => {
+    await mod.default(); // init()
+    window.PetDragon = {
+      engine_name: mod.engine_name,
+      engine_version: mod.engine_version,
+      new_game: mod.new_game,
+      legal_moves_from_fen: mod.legal_moves_from_fen,
+    };
+  });
 
   // ── Search worker (built from an inline source string) ─────────────────
   // Blob-URL module workers resolve relative imports against the blob: URL
   // itself (which has no real path), so we resolve ./pkg/pet_dragon.js to an
   // absolute URL first and bake that into the worker's source.
-  const _dragonPkgUrl = new URL('./pkg/pet_dragon.js', document.baseURI).href;
 
   const _dragonWorkerSrc = `
 import init, { search_from_fen } from ${JSON.stringify(_dragonPkgUrl)};
