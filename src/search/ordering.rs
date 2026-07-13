@@ -28,7 +28,7 @@
 
 use crate::movegen::MoveList;
 use crate::position::Position;
-use crate::search::see::{see, see_value_of};
+use crate::search::see::see_value_of;
 use crate::search::SearchInfo;
 use crate::types::{Color, Move, MoveKind, PieceKind};
 

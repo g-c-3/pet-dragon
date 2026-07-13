@@ -233,7 +233,6 @@ pub fn try_probcut(
 /// [color][pawn_hash_index] — indexed by pawn structure hash
 pub struct CorrectionHistory {
     table: Vec<[i32; 2]>, // [white_correction, black_correction]
-    size:  usize,
     mask:  usize,
 }
 
@@ -242,7 +241,6 @@ impl CorrectionHistory {
         let size = 16384usize; // Power of 2
         CorrectionHistory {
             table: vec![[0i32; 2]; size],
-            size,
             mask: size - 1,
         }
     }
@@ -298,7 +296,6 @@ impl Default for CorrectionHistory {
 /// Only hashes pawn positions — correction is pawn-structure specific
 pub fn pawn_hash(pos: &Position) -> u64 {
     use crate::position::zobrist::piece_key;
-    use crate::types::PieceKind;
 
     let mut hash = 0u64;
     for color in Color::ALL {
