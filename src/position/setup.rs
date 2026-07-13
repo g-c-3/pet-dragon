@@ -31,9 +31,6 @@
 // ============================================================================
 
 use crate::bitboard::Bitboard;
-use crate::position::zobrist::{
-    castling_key, ep_key, pawn_start_key, piece_key, side_key,
-};
 use crate::position::Position;
 use crate::types::{
     CastlingRights, Color, PawnStartMap, PieceKind, Square,
