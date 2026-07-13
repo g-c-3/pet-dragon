@@ -29,7 +29,7 @@
 
 use crate::position::{HistoryEntry, Position};
 use crate::position::zobrist::{
-    castling_key, ep_key, pawn_start_key, piece_key, side_key,
+    castling_key, ep_key, piece_key, side_key,
 };
 use crate::types::{Color, Move, MoveKind, PieceKind, Square};
 
