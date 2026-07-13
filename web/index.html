@@ -3003,7 +3003,13 @@ let snapshotChecks  = []; // parallel array: snapshotChecks[i]  = {inCheck, turn
 let gameStartFen   = '';   // set once at startGame(); never changes during a game
 let uciMoveHistory = [];   // UCI strings for every half-move, e.g. ["e2e4","d7d5",…]
 let blunderChance = 0;
-let engineMoveTime = 600;  // ms think-time given to Pet Dragon per move
+// Movetime is intentionally NOT scaled per difficulty anymore — every level
+// gets the same generous think-time budget, and Pet Dragon's own Skill Level
+// (0-20) is the sole difficulty control, using whatever internal timing it
+// applies for that skill. This constant is just a generous outer cap so a
+// search can't hang forever, not a per-difficulty throttle.
+const ENGINE_MOVE_TIME_MS = 30000;
+let engineMoveTime = ENGINE_MOVE_TIME_MS;  // ms think-time given to Pet Dragon per move
 let engineSkillLevel = 9;  // Pet Dragon's Skill Level (0-20, 20 = full strength)
 let dragFrom = null;
 let dragGhost = document.getElementById('drag-ghost');
@@ -4314,7 +4320,7 @@ function setupStart() {
   // Apply chosen settings
   const preset = DIFFICULTY_PRESETS[selectedDifficulty];
   blunderChance = preset.blunder;
-  engineMoveTime = preset.movetime; // Pet Dragon's think-time budget for this difficulty
+  engineMoveTime = ENGINE_MOVE_TIME_MS; // fixed for all difficulties — skill alone drives strength/timing
   engineSkillLevel = preset.skill;  // Pet Dragon's own Skill Level (0-20)
   playerColor = setupColor === 'white' ? 'w' : 'b';
   boardFlipped = playerColor === 'b';
