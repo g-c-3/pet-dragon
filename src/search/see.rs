@@ -207,7 +207,7 @@ mod tests {
     use crate::bitboard::masks::init_masks;
     use crate::position::Position;
     use crate::position::zobrist::init_zobrist;
-    use crate::types::{Color, Move, MoveKind, PieceKind, Square};
+    use crate::types::{Move, MoveKind, PieceKind, Square};
 
     fn setup() {
         init_masks();

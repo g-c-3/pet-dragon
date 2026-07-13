@@ -440,7 +440,7 @@ mod tests {
         let killer = moves.get(5);
         info.update_killer(killer, 0);
 
-        let mut scored = score_moves(
+        let scored = score_moves(
             &pos, &moves, &info, Move::NULL, 0, Move::NULL
         );
 
@@ -467,7 +467,7 @@ mod tests {
             if rank1_pawns.is_not_empty() {
                 let moves = generate_moves(&pos);
                 let info  = SearchInfo::new();
-                let mut scored = score_moves(
+                let scored = score_moves(
                     &pos, &moves, &info, Move::NULL, 0, Move::NULL
                 );
 
@@ -499,10 +499,9 @@ mod tests {
 
         // Pick two different quiet moves
         let mv_a = moves.get(0); // e.g. a2a3
-        let mv_b = moves.get(1); // e.g. b2b3
 
         // Score without any cont hist context
-        let mut scored_before = score_moves(&pos, &moves, &info, Move::NULL, 0, Move::NULL);
+        let scored_before = score_moves(&pos, &moves, &info, Move::NULL, 0, Move::NULL);
         let score_a_before = scored_before.iter().find(|s| s.mv == mv_a).map(|s| s.score).unwrap_or(0);
 
         // Inject a cont hist bonus: prev_to=28 (e4), white pawn (piece_idx=0), to=mv_a.to
@@ -511,7 +510,7 @@ mod tests {
 
         // Create a fake prev_move that lands on e4
         let fake_prev = Move::new(Square::E2, Square::E4, MoveKind::DoublePush);
-        let mut scored_after = score_moves(&pos, &moves, &info, Move::NULL, 0, fake_prev);
+        let scored_after = score_moves(&pos, &moves, &info, Move::NULL, 0, fake_prev);
         let score_a_after = scored_after.iter().find(|s| s.mv == mv_a).map(|s| s.score).unwrap_or(0);
 
         // mv_a should score higher when cont hist is active AND prev_move matches

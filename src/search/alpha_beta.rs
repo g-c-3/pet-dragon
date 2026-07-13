@@ -823,7 +823,7 @@ mod tests {
         setup();
         // White is up a queen — should have positive eval
         let fen = "4k3/8/8/8/8/8/8/4KQ2 w - - 0 1";
-        let mut pos = Position::from_fen(fen).unwrap();
+        let pos = Position::from_fen(fen).unwrap();
         let eval = evaluate(&pos);
         assert!(eval > 0,
             "White up a queen should have positive eval");
