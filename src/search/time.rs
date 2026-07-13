@@ -28,17 +28,9 @@ const MIN_TIME_MS: u64 = 20;
 /// Compensates for network lag, GUI overhead, clock inaccuracy.
 pub const OVERHEAD_MS: u64 = 30;
 
-/// Default moves to go when not specified
-/// Assumes ~30 moves remaining in the game
-const DEFAULT_MOVES_TO_GO: u64 = 30;
-
 /// Fraction of remaining time to use per move (when no movestogo)
 /// 1/20 = use 5% of remaining time per move
 const TIME_FRACTION: u64 = 20;
-
-/// Maximum fraction of total time for one move
-/// Never use more than 80% of remaining time on a single move
-const MAX_TIME_FRACTION: u64 = 8; // 1/8 = 12.5%... wait we do 80% via /10*8
 
 /// How much to extend time when score drops significantly
 const SCORE_DROP_EXTENSION: f64 = 1.5;
