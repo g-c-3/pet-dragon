@@ -30,7 +30,7 @@ pub mod castling;
 pub mod legal;
 
 use crate::position::Position;
-use crate::types::{Color, Move};
+use crate::types::Move;
 
 // ── Move list ─────────────────────────────────────────────────────────────────
 // Fixed-size array avoids heap allocation during search.

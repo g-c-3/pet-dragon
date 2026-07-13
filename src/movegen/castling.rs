@@ -32,7 +32,6 @@
 //   Black queenside: King e8→c8, Rook a8→d8, pass through d8
 // ============================================================================
 
-use crate::bitboard::Bitboard;
 use crate::movegen::MoveList;
 use crate::position::Position;
 use crate::types::{Color, Move, MoveKind, Square};

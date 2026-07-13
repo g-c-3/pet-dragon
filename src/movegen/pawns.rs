@@ -35,7 +35,6 @@
 // The pawn_starts map is checked against current position automatically.
 // ============================================================================
 
-use crate::bitboard::Bitboard;
 use crate::bitboard::masks::pawn_attacks;
 use crate::movegen::MoveList;
 use crate::position::Position;
