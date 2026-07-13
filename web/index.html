@@ -4922,7 +4922,14 @@ function _recordPawnStartSquares(board) {
 // gameStartFen/share cards don't need the non-standard field.
 function boardStateToEngineFen(boardState, turn) {
   const base = boardStateToFen(boardState, turn);
-  return pawnStartSquares.length ? (base + ' ' + pawnStartSquares.join(' ')) : base;
+  // NOTE: the engine's own new_game() emits this suffix comma-separated
+  // (e.g. "a1:w,b1:w,c1:w"), not space-separated — its FEN parser only
+  // recognizes the comma form. Space-separating this (the previous bug)
+  // parses as zero legal moves for every position, silently, with no error:
+  // search_from_fen and legal_moves_from_fen both just return "no move"
+  // instantly instead of throwing, which is why the engine looked "ready"
+  // but never produced a move for either side, in any browser.
+  return pawnStartSquares.length ? (base + ' ' + pawnStartSquares.join(',')) : base;
 }
 
 function toSqName(i) { return String.fromCharCode(97 + (i%8)) + (8 - Math.floor(i/8)); }
