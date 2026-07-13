@@ -3082,17 +3082,23 @@ function updateEvalBar() {
   const mobilityB = _dragonLegalCount('b');
   const sideToMoveMobility = customTurn === 'w' ? mobilityW : mobilityB;
 
+  // diff (in centipawn-ish units) combines material AND mobility, and is the
+  // single source of truth for both the bar width and the displayed number —
+  // previously the bar used `diff` but the text only used raw material, so
+  // the number barely moved while the bar kept shifting from mobility alone.
+  const diff = (whiteMaterial - blackMaterial) * 100 + (mobilityW - mobilityB) * 8;
+
   let whitePct;
   if (!sideToMoveMobility) {
     // No legal moves for the side to move — checkmate/stalemate edge case.
     whitePct = customTurn === 'w' ? 0 : 100;
   } else {
-    const diff = (whiteMaterial - blackMaterial) * 100 + (mobilityW - mobilityB) * 8;
     whitePct = Math.round(100 / (1 + Math.exp(-diff / 300)));
   }
 
   const playerPct = playerColor === 'w' ? whitePct : (100 - whitePct);
-  const displayCp = playerColor === 'w' ? (whiteMaterial - blackMaterial) : (blackMaterial - whiteMaterial);
+  const whitePawns = diff / 100;
+  const displayCp = playerColor === 'w' ? whitePawns : -whitePawns;
 
   scoreEl.textContent = 'Eval: ' + (displayCp > 0 ? '+' : '') + displayCp.toFixed(1);
   bar.style.width = Math.min(95, Math.max(5, playerPct)) + '%';
