@@ -3057,8 +3057,10 @@ function setEngineStatus(state, txt) {
 
 // ─── Eval bar heuristic ───────────────────────────────────────────────────────
 // Pet Dragon's WASM API only exposes a best move (search_from_fen), not a
-// numeric evaluation score, so this is a heuristic estimate (material +
-// mobility), not a true engine evaluation.
+// numeric evaluation score, so this is a heuristic estimate — material,
+// mobility, center control, king safety, and pawn structure — not a true
+// engine evaluation. All sub-scores below are already expressed in
+// centipawn-ish units so they can be summed directly with material*100.
 function _dragonLegalCount(side) {
   if (!engineReady || !window.PetDragon) return 0;
   try {
@@ -3066,6 +3068,97 @@ function _dragonLegalCount(side) {
     const s = (window.PetDragon.legal_moves_from_fen(fenStr) || '').trim();
     return s ? s.split(' ').filter(Boolean).length : 0;
   } catch (e) { return 0; }
+}
+
+// d4/d5/e4/e5 get the biggest bonus; the surrounding 4x4 block (c3-f6) gets a
+// smaller one. Rewards occupying/holding the center, weighted a bit by piece type.
+const _EVAL_CENTER4 = [27, 28, 35, 36]; // d5, e5, d4, e4
+function _centerControlScore(board, color) {
+  let score = 0;
+  for (let r = 2; r <= 5; r++) {
+    for (let c = 2; c <= 5; c++) {
+      const idx = r * 8 + c;
+      const p = board[idx];
+      if (!p || p.color !== color) continue;
+      const isCore = _EVAL_CENTER4.includes(idx);
+      if (isCore) {
+        score += p.type === 'p' ? 8 : p.type === 'n' ? 7 : p.type === 'b' ? 6 : p.type === 'q' ? 5 : p.type === 'r' ? 4 : 0;
+      } else {
+        score += (p.type === 'p' || p.type === 'n' || p.type === 'b') ? 3 : 1;
+      }
+    }
+  }
+  return score;
+}
+
+// Pawn shield in front of the king, an open-file penalty on the king's own
+// file, and a small bonus for not having wandered off the back rank.
+function _kingSafetyScore(board, color) {
+  const ki = board.findIndex(p => p && p.color === color && p.type === 'k');
+  if (ki < 0) return 0;
+  const kr = Math.floor(ki / 8), kc = ki % 8;
+  let score = 0;
+
+  const shieldRow = color === 'w' ? kr - 1 : kr + 1;
+  if (shieldRow >= 0 && shieldRow <= 7) {
+    for (const dc of [-1, 0, 1]) {
+      const cc = kc + dc;
+      if (cc < 0 || cc > 7) continue;
+      const p = board[shieldRow * 8 + cc];
+      if (p && p.color === color && p.type === 'p') score += 10;
+    }
+  }
+
+  let ownPawnOnFile = false;
+  for (let r = 0; r < 8; r++) {
+    const p = board[r * 8 + kc];
+    if (p && p.color === color && p.type === 'p') { ownPawnOnFile = true; break; }
+  }
+  if (!ownPawnOnFile) score -= 15;
+
+  const backRow = color === 'w' ? 7 : 0;
+  if (kr === backRow) score += 6;
+
+  return score;
+}
+
+// Doubled/isolated pawns are penalized; passed pawns are rewarded, scaled by
+// how far advanced they are (more valuable the closer to promotion).
+function _pawnStructureScore(board, color) {
+  const enemy = color === 'w' ? 'b' : 'w';
+  const ownFiles = Array.from({ length: 8 }, () => []);
+  const enemyFiles = Array.from({ length: 8 }, () => []);
+  for (let i = 0; i < 64; i++) {
+    const p = board[i];
+    if (!p || p.type !== 'p') continue;
+    const f = i % 8, r = Math.floor(i / 8);
+    if (p.color === color) ownFiles[f].push(r);
+    else enemyFiles[f].push(r);
+  }
+
+  let score = 0;
+  for (let f = 0; f < 8; f++) {
+    const rows = ownFiles[f];
+    if (rows.length > 1) score -= (rows.length - 1) * 12; // doubled
+
+    const hasNeighbor = (f > 0 && ownFiles[f - 1].length > 0) || (f < 7 && ownFiles[f + 1].length > 0);
+    if (rows.length > 0 && !hasNeighbor) score -= 10 * rows.length; // isolated
+
+    for (const r of rows) {
+      // Passed: no enemy pawn on this file or adjacent files, ahead of this pawn.
+      const aheadRows = color === 'w' ? [...Array(r).keys()] : Array.from({ length: 7 - r }, (_, k) => r + 1 + k);
+      let blocked = false;
+      for (const af of [f - 1, f, f + 1]) {
+        if (af < 0 || af > 7) continue;
+        if (enemyFiles[af].some(er => aheadRows.includes(er))) { blocked = true; break; }
+      }
+      if (!blocked) {
+        const advancement = color === 'w' ? (7 - r) : r; // 0 at start rank, 6 near promotion
+        score += 6 + advancement * 3;
+      }
+    }
+  }
+  return score;
 }
 
 function updateEvalBar() {
@@ -3088,11 +3181,21 @@ function updateEvalBar() {
   const mobilityB = _dragonLegalCount('b');
   const sideToMoveMobility = customTurn === 'w' ? mobilityW : mobilityB;
 
-  // diff (in centipawn-ish units) combines material AND mobility, and is the
-  // single source of truth for both the bar width and the displayed number —
-  // previously the bar used `diff` but the text only used raw material, so
-  // the number barely moved while the bar kept shifting from mobility alone.
-  const diff = (whiteMaterial - blackMaterial) * 100 + (mobilityW - mobilityB) * 8;
+  const centerW = _centerControlScore(customBoard, 'w');
+  const centerB = _centerControlScore(customBoard, 'b');
+  const kingSafetyW = _kingSafetyScore(customBoard, 'w');
+  const kingSafetyB = _kingSafetyScore(customBoard, 'b');
+  const pawnStructW = _pawnStructureScore(customBoard, 'w');
+  const pawnStructB = _pawnStructureScore(customBoard, 'b');
+
+  // diff (in centipawn-ish units) combines material, mobility, center control,
+  // king safety, and pawn structure, and is the single source of truth for
+  // both the bar width and the displayed number.
+  const diff = (whiteMaterial - blackMaterial) * 100
+    + (mobilityW - mobilityB) * 12
+    + (centerW - centerB)
+    + (kingSafetyW - kingSafetyB)
+    + (pawnStructW - pawnStructB);
 
   let whitePct;
   if (!sideToMoveMobility) {
