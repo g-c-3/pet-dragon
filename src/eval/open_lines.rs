@@ -214,7 +214,6 @@ mod tests {
     use crate::eval::material::game_phase;
     use crate::position::Position;
     use crate::position::zobrist::init_zobrist;
-    use crate::types::Square;
 
     fn setup() {
         init_masks();
@@ -247,8 +246,6 @@ mod tests {
     fn test_rook_on_seventh_rank() {
         setup();
         // White Rook on e7 (7th rank) attacking Black pawns
-        let fen = "4k3/pppp1ppp/8/8/8/8/8/4K3 w - - 0 1";
-        let mut pos = Position::from_fen(fen).unwrap();
         // Put a white rook on e7 manually — use a FEN that has it
         let fen2 = "4k3/ppppRppp/8/8/8/8/8/4K3 w - - 0 1";
         let pos2 = Position::from_fen(fen2).unwrap();
@@ -263,7 +260,6 @@ mod tests {
         // Two White rooks on same rank with nothing between
         let fen = "4k3/8/8/8/8/8/8/R3RK2 w - - 0 1";
         let pos = Position::from_fen(fen).unwrap();
-        let phase = game_phase(&pos);
         let our_score = open_line_score(&pos, Color::White);
         // Should include ROOKS_CONNECTED bonus
         assert!(our_score > 0, "Connected rooks should give bonus: {}", our_score);
@@ -273,9 +269,6 @@ mod tests {
     fn test_battery_rook_queen() {
         setup();
         // White Queen and Rook on same file (d-file), open
-        let fen = "4k3/8/8/8/8/8/8/3QRK2 w - - 0 1";
-        let pos = Position::from_fen(fen).unwrap();
-        let phase = game_phase(&pos);
         // Queen on d1, Rook on e1 — they're on same rank but different file
         // Let's use same file: Queen d1, Rook d4
         let fen2 = "4k3/8/8/8/3R4/8/8/3QK3 w - - 0 1";
@@ -294,7 +287,6 @@ mod tests {
         let mut found_nonzero = false;
         for seed in 0..100u64 {
             let pos = Position::generate_with_seed(seed);
-            let phase = game_phase(&pos);
             let our = open_line_score(&pos, Color::White);
             let their = open_line_score(&pos, Color::Black);
             if our != 0 || their != 0 {
