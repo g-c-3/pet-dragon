@@ -25,9 +25,8 @@
 // ============================================================================
 
 use crate::bitboard::{bishop_attacks, rook_attacks, queen_attacks};
-use crate::bitboard::masks::{knight_attacks, king_attacks, pawn_attacks};
+use crate::bitboard::masks::{knight_attacks, king_attacks};
 use crate::bitboard::Bitboard;
-use crate::eval::material::s;
 use crate::position::Position;
 use crate::types::{Color, PieceKind, Square};
 

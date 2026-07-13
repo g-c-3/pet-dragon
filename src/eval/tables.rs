@@ -21,7 +21,9 @@
 // All values use the s(mg, eg) tapered score system.
 // ============================================================================
 
-use crate::eval::material::{s, taper, eg, mg};
+use crate::eval::material::{s, taper};
+#[cfg(test)]
+use crate::eval::material::{eg, mg};
 use crate::position::Position;
 use crate::types::{Color, PieceKind, Square};
 

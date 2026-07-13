@@ -83,7 +83,6 @@ pub fn evaluate_open_lines(pos: &Position, phase: i32) -> i32 {
 fn open_line_score(pos: &Position, color: Color) -> i64 {
     let our_pawns   = pos.piece_bb(color,       PieceKind::Pawn);
     let enemy_pawns = pos.piece_bb(color.flip(), PieceKind::Pawn);
-    let all_pawns   = our_pawns | enemy_pawns;
     let all_occ     = pos.all_pieces();
     let our_rooks   = pos.piece_bb(color, PieceKind::Rook);
     let our_queens  = pos.piece_bb(color, PieceKind::Queen);
