@@ -9,6 +9,57 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pet Dragon</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%89%3C/text%3E%3C/svg%3E">
+<script>
+// ─── Console Dashboard capture buffer ──────────────────────────────────────
+// Installed as the very first script on the page (before html2canvas, the
+// Pet Dragon WASM bridge, and the main game script) so it captures every
+// console message and uncaught error from the moment the page starts
+// loading. Purely additive: it mirrors each call into an in-memory ring
+// buffer and re-emits the original console call unchanged, so nothing about
+// existing logging behaviour changes. The Console Dashboard UI (button next
+// to Info) reads from window._consoleDash.
+(function() {
+  const MAX_ENTRIES = 500;
+  const buffer = [];
+  const listeners = [];
+
+  function stringify(a) {
+    if (typeof a === 'string') return a;
+    if (a instanceof Error) return a.stack || a.message || String(a);
+    try { return JSON.stringify(a); } catch (e) { return String(a); }
+  }
+
+  function push(level, args) {
+    const entry = { level, time: new Date(), text: Array.prototype.map.call(args, stringify).join(' ') };
+    buffer.push(entry);
+    if (buffer.length > MAX_ENTRIES) buffer.shift();
+    listeners.forEach(fn => { try { fn(entry); } catch (e) { /* ignore listener errors */ } });
+  }
+
+  ['log', 'warn', 'error', 'info', 'debug'].forEach(m => {
+    const original = console[m] ? console[m].bind(console) : function(){};
+    console[m] = function(...args) {
+      push(m === 'debug' ? 'log' : m, args);
+      original(...args);
+    };
+  });
+
+  window.addEventListener('error', (e) => {
+    push('error', ['Uncaught: ' + e.message + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : '')]);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const reason = e.reason;
+    push('error', ['Unhandled promise rejection: ' + ((reason && (reason.stack || reason.message)) || reason)]);
+  });
+
+  window._consoleDash = {
+    buffer,
+    subscribe(fn) { listeners.push(fn); },
+    unsubscribe(fn) { const i = listeners.indexOf(fn); if (i !== -1) listeners.splice(i, 1); },
+    clear() { buffer.length = 0; }
+  };
+})();
+</script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap');
 
@@ -775,6 +826,75 @@
     transition: background 0.15s;
   }
   .picker-close:hover { background: rgba(255,255,255,0.12); }
+
+  /* ── Console Dashboard ────────────────────────────────────────────────────
+     Live view of intercepted console.log/warn/error/info calls (see the
+     capture script at the top of <head>). Reuses .picker-overlay/.picker-modal
+     for the backdrop + shell, with its own wider modal and terminal-style log list. */
+  #console-modal { width: min(clamp(320px, calc(640px * var(--s)), 760px), 96vw); }
+
+  .console-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .console-filters { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+  .console-filter-btn {
+    padding: 0.28rem 0.65rem;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.05);
+    color: var(--text-muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .console-filter-btn:hover { background: rgba(255,255,255,0.1); }
+  .console-filter-btn.active { background: rgba(233,69,96,0.18); border-color: rgba(233,69,96,0.5); color: var(--accent); }
+  .console-clear-btn {
+    padding: 0.28rem 0.7rem;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.05);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .console-clear-btn:hover { background: rgba(255,255,255,0.12); }
+
+  .console-log-list {
+    background: #0B0B14;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.5rem 0.6rem;
+    height: min(48dvh, 420px);
+    overflow-y: auto;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+  }
+  .console-log-empty { color: var(--text-muted); text-align: center; padding: 1.5rem 0; }
+  .console-log-entry {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.15rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .console-log-time { color: var(--text-muted); flex-shrink: 0; opacity: 0.7; }
+  .console-log-text { flex: 1; }
+  .console-log-entry.level-log   .console-log-text { color: var(--text); }
+  .console-log-entry.level-info  .console-log-text { color: #4FC3F7; }
+  .console-log-entry.level-warn  .console-log-text { color: var(--accent2); }
+  .console-log-entry.level-error .console-log-text { color: var(--accent); }
 
   /* ── Customise Dashboard ─────────────────────────────────────────────────── */
   #cdash-overlay {
@@ -2384,6 +2504,9 @@
     <button class="sub-btn" id="info-btn" onclick="openInfoPicker()" title="Info">
       <span class="sub-icon">ℹ️</span>
     </button>
+    <button class="sub-btn" id="console-btn" onclick="openConsoleDash()" title="Console">
+      <span class="sub-icon">🖥️</span>
+    </button>
     <div id="difficulty-badge">Level: ⚡ Medium I</div>
   </div>
 </header>
@@ -2443,6 +2566,25 @@
         <a href="mailto:gc3thedev@gmail.com" style="font-family:'DM Mono',monospace;font-size:clamp(0.6rem,calc(0.82rem * var(--s)),1rem);color:var(--accent2);text-decoration:none;letter-spacing:0.3px;overflow-wrap:break-word;word-break:break-all;min-width:0;">gc3thedev@gmail.com</a>
       </div>
     </div>
+    <button class="picker-close" onclick="closePickers()">Close</button>
+  </div>
+</div>
+
+<!-- Console Dashboard -->
+<div class="picker-overlay" id="console-overlay">
+  <div class="picker-modal" id="console-modal">
+    <h3>🖥️ Console</h3>
+    <div class="console-toolbar">
+      <div class="console-filters" id="console-filters">
+        <button class="console-filter-btn active" data-level="all"   onclick="_consoleSetFilter('all')">All</button>
+        <button class="console-filter-btn"        data-level="log"   onclick="_consoleSetFilter('log')">Log</button>
+        <button class="console-filter-btn"        data-level="info"  onclick="_consoleSetFilter('info')">Info</button>
+        <button class="console-filter-btn"        data-level="warn"  onclick="_consoleSetFilter('warn')">Warn</button>
+        <button class="console-filter-btn"        data-level="error" onclick="_consoleSetFilter('error')">Error</button>
+      </div>
+      <button class="console-clear-btn" onclick="_consoleClear()">🧹 Clear</button>
+    </div>
+    <div class="console-log-list" id="console-log-list"></div>
     <button class="picker-close" onclick="closePickers()">Close</button>
   </div>
 </div>
@@ -5225,6 +5367,9 @@ function closePickers() {
   if (statsOverlay) statsOverlay.classList.remove('show');
   document.getElementById('cdash-overlay').classList.remove('show');
   document.getElementById('info-btn').classList.remove('active');
+  document.getElementById('console-overlay').classList.remove('show');
+  document.getElementById('console-btn').classList.remove('active');
+  if (typeof _consoleDashStopLive === 'function') _consoleDashStopLive();
   const statsBtn = document.getElementById('stats-btn');
   if (statsBtn) statsBtn.classList.remove('active');
   // Collapse admin panel and reset toggle state (keep unlock state across sessions)
@@ -5243,7 +5388,7 @@ function closePickers() {
 }
 
 // Close on backdrop click
-['palette-overlay','piece-overlay','sound-overlay','glow-overlay','info-overlay','stats-overlay','engine-dash-overlay','cdash-overlay'].forEach(id => {
+['palette-overlay','piece-overlay','sound-overlay','glow-overlay','info-overlay','console-overlay','stats-overlay','engine-dash-overlay','cdash-overlay'].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('click', function(e) {
     if (e.target === this) closePickers();
@@ -7209,6 +7354,97 @@ function _updateBarNames() {
   // "Slayer" stays as the label regardless of autoplay state — the box
   // still represents the human player's seat even when AI is playing it.
   if (plEl)  plEl.textContent  = 'Slayer';
+}
+</script>
+
+<script>
+// ─── Console Dashboard UI ───────────────────────────────────────────────────
+// Reads from window._consoleDash (installed as the very first script in
+// <head>, so it has been buffering console.log/warn/error/info/debug calls
+// and uncaught errors since the page started loading). This block only
+// renders that buffer and stays live-subscribed while the dashboard is open.
+let _consoleDashFilter = 'all';
+let _consoleDashLiveFn = null;
+
+function _consoleDashFormatTime(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,'0')}`;
+}
+
+function _consoleDashEntryHtml(entry) {
+  const div = document.createElement('div');
+  div.className = 'console-log-entry level-' + entry.level;
+  const time = document.createElement('span');
+  time.className = 'console-log-time';
+  time.textContent = _consoleDashFormatTime(entry.time);
+  const text = document.createElement('span');
+  text.className = 'console-log-text';
+  text.textContent = entry.text;
+  div.appendChild(time);
+  div.appendChild(text);
+  return div;
+}
+
+function _consoleDashRenderAll() {
+  const list = document.getElementById('console-log-list');
+  if (!list) return;
+  list.innerHTML = '';
+  const entries = window._consoleDash ? window._consoleDash.buffer : [];
+  const filtered = _consoleDashFilter === 'all' ? entries : entries.filter(e => e.level === _consoleDashFilter);
+  if (!filtered.length) {
+    const empty = document.createElement('div');
+    empty.className = 'console-log-empty';
+    empty.textContent = 'No console messages yet.';
+    list.appendChild(empty);
+    return;
+  }
+  filtered.forEach(e => list.appendChild(_consoleDashEntryHtml(e)));
+  list.scrollTop = list.scrollHeight;
+}
+
+function _consoleDashOnLive(entry) {
+  if (_consoleDashFilter !== 'all' && entry.level !== _consoleDashFilter) return;
+  const list = document.getElementById('console-log-list');
+  if (!list) return;
+  // Only appending, not re-rendering, keeps this cheap even with frequent logs.
+  const empty = list.querySelector('.console-log-empty');
+  if (empty) empty.remove();
+  const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  list.appendChild(_consoleDashEntryHtml(entry));
+  if (nearBottom) list.scrollTop = list.scrollHeight;
+}
+
+function _consoleDashStartLive() {
+  if (_consoleDashLiveFn || !window._consoleDash) return;
+  _consoleDashLiveFn = _consoleDashOnLive;
+  window._consoleDash.subscribe(_consoleDashLiveFn);
+}
+
+function _consoleDashStopLive() {
+  if (!_consoleDashLiveFn || !window._consoleDash) { _consoleDashLiveFn = null; return; }
+  window._consoleDash.unsubscribe(_consoleDashLiveFn);
+  _consoleDashLiveFn = null;
+}
+
+function openConsoleDash() {
+  closePickers();
+  document.getElementById('console-overlay').classList.add('show');
+  document.getElementById('console-btn').classList.add('active');
+  _consoleDashRenderAll();
+  _consoleDashStartLive();
+}
+
+function _consoleSetFilter(level) {
+  _consoleDashFilter = level;
+  document.querySelectorAll('#console-filters .console-filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.level === level);
+  });
+  _consoleDashRenderAll();
+}
+
+function _consoleClear() {
+  if (window._consoleDash) window._consoleDash.clear();
+  _consoleDashRenderAll();
 }
 </script>
 </body>
