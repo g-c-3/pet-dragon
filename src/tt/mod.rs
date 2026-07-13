@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn test_tt_basic_store_probe() {
-        let mut tt = TranspositionTable::new(1);
+        let tt = TranspositionTable::new(1);
         let hash   = 0x1234_5678_9ABC_DEF0u64;
         let mv     = test_move();
 
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_tt_miss_on_wrong_hash() {
-        let mut tt   = TranspositionTable::new(1);
+        let tt   = TranspositionTable::new(1);
         let hash     = 0x1234_5678_9ABC_DEF0u64;
         let bad_hash = 0xDEAD_BEEF_CAFE_1234u64;
 
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_tt_replacement_deeper_wins() {
-        let mut tt = TranspositionTable::new(1);
+        let tt = TranspositionTable::new(1);
         let hash   = 0x1234_5678_9ABC_DEF0u64;
 
         // Store shallow entry
@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn test_tt_probe_move() {
-        let mut tt = TranspositionTable::new(1);
+        let tt = TranspositionTable::new(1);
         let hash   = 0x1234_5678_9ABC_DEF0u64;
         let mv     = test_move();
 
@@ -427,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_tt_bound_types() {
-        let mut tt = TranspositionTable::new(1);
+        let tt = TranspositionTable::new(1);
 
         let hash1 = 0x1111_1111_1111_1111u64;
         let hash2 = 0x2222_2222_2222_2222u64;
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_tt_preserve_move_on_update() {
-        let mut tt = TranspositionTable::new(1);
+        let tt = TranspositionTable::new(1);
         let hash   = 0x1234_5678_9ABC_DEF0u64;
         let mv     = test_move();
 
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_tt_multiple_hashes() {
-        let mut tt = TranspositionTable::new(4);
+        let tt = TranspositionTable::new(4);
 
         // Store many different positions
         for i in 0u64..100 {
