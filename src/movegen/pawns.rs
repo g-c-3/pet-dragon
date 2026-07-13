@@ -36,6 +36,8 @@
 // ============================================================================
 
 use crate::bitboard::masks::pawn_attacks;
+#[cfg(test)]
+use crate::bitboard::Bitboard;
 use crate::movegen::MoveList;
 use crate::position::Position;
 use crate::types::{Color, Move, MoveKind, PieceKind, Square};

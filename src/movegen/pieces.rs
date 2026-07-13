@@ -245,7 +245,7 @@ mod tests {
     use crate::movegen::MoveList;
     use crate::position::Position;
     use crate::position::zobrist::init_zobrist;
-    use crate::types::{Color, PieceKind};
+    use crate::types::Color;
 
     fn setup() {
         init_masks();
