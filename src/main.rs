@@ -1385,7 +1385,7 @@ mod tests {
         // Real, direct proof — build_time_control is the exact function
         // cmd_go itself calls, so this isn't "can't reach into the spawned
         // thread" hand-waving anymore, it's the actual value construction.
-        let tc = build_time_control(&state, "go movetime 1000", state.skill_level);
+        let tc = build_time_control(&state, "go movetime 1000", effective_skill_level(&state));
         assert_eq!(tc.overhead_ms, 250,
             "build_time_control must apply state.move_overhead_ms to overhead_ms exactly");
         assert_eq!(tc.movetime, 1000,
