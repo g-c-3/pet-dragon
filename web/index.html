@@ -7,6 +7,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Tells the browser this page has its own fixed (light) theme, so Chrome/
+     Opera-for-Android's "Auto dark theme" heuristic — which otherwise
+     auto-inverts colours on pages that don't declare a scheme — leaves the
+     board/piece colours alone instead of re-tinting them. -->
+<meta name="color-scheme" content="only light">
 <title>Pet Dragon</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%89%3C/text%3E%3C/svg%3E">
 <script>
@@ -67,6 +72,7 @@
 
 
   :root {
+    color-scheme: only light; /* belt-and-braces alongside the <meta> tag above */
     --sq-light: #F0D9B5;
     --sq-dark: #B58863;
     --sq-light-hl: #CDD26A;
@@ -4918,6 +4924,7 @@ function newGame() {
   engineThinking = false;
   setEngineStatus('ready'); // Fix: reset status dot/text immediately; without this it stays stuck on 'thinking'
   stopClock();
+  _releaseWakeLock();   // no active game while the setup modal is open
   showSetupModal();
 }
 
@@ -4995,9 +5002,9 @@ function toggleAutoPlay() {
 
   updateGameActionBtns();
 
-  // Wake Lock: keep screen awake only during AI vs AI (autoPlay ON)
-  if (autoPlayEnabled) { _acquireWakeLock(); }
-  else { _releaseWakeLock(); }
+  // Wake Lock is held for the entire active game (acquired in startGame(),
+  // released on checkmate/stalemate/draw/abort/resign/timeout) — it no
+  // longer depends on autoplay state, so nothing to do here.
 
   // No customTurn === playerColor guard here — in AI-vs-AI (autoplay) mode
   // both turns need to be scheduled, not just the player's turn.
@@ -5593,7 +5600,7 @@ function startGame() {
   snapshotMoves.push(null);  // index 0 = start position, no move
   snapshotChecks.push({ inCheck: false, turn: 'w' }); // index 0 = start, no check
   engineThinking = false;
-  _releaseWakeLock();   // release any held wake lock when a new game starts
+  _acquireWakeLock();   // keep the screen awake for the whole active game (see _acquireWakeLock below)
   _shareData = null;    // clear stale share data
   positionCounts = {};
   halfMoveClock  = 0;
@@ -7345,9 +7352,12 @@ if (window.petDragonReadyPromise && window.petDragonWorkerReadyPromise) {
 // Show setup modal on first load
 showSetupModal();
 
-// ─── Wake Lock (AI vs AI screen-awake) ───────────────────────────────────────
-// Keeps the screen awake in the browser only while autoPlay (AI vs AI) is ON.
-// Released automatically when autoPlay is turned off or the game ends.
+// ─── Wake Lock (screen stays awake during an active game) ───────────────────
+// Keeps the screen awake for the whole duration of a game — from startGame()
+// until it ends (checkmate, stalemate, draw, abort, resign, or clock
+// timeout) — regardless of whether autoplay/AI-vs-AI is on. Not tied to
+// whose turn it is, since a human can be reading the board just as long
+// between their own moves as during the engine's think time.
 let _wakeLock = null;
 
 async function _acquireWakeLock() {
@@ -7368,7 +7378,7 @@ function _releaseWakeLock() {
 
 // Re-acquire if the page becomes visible again (browser releases wake lock on hide)
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && autoPlayEnabled && !customGameOver) {
+  if (document.visibilityState === 'visible' && gameStartFired && !customGameOver) {
     _acquireWakeLock();
   }
 });
