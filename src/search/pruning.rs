@@ -231,6 +231,7 @@ pub fn try_probcut(
 
 /// Correction history table
 /// [color][pawn_hash_index] — indexed by pawn structure hash
+#[derive(Clone)]
 pub struct CorrectionHistory {
     table: Vec<[i32; 2]>, // [white_correction, black_correction]
     mask:  usize,
