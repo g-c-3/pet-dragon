@@ -4,12 +4,19 @@
 // Licensed under GPL v3 — see LICENSE file
 // Contributors: Claude (Anthropic)
 //
-// search/skill.rs — Skill Level tier table (Phase 20 / D39)
+// search/skill.rs — Skill Level tier table (Phase 20 / D39; Elo mapping D43)
 //
-// Difficulty is depth-cap tiers, NOT Elo calibration — see DECISIONS.md D39
-// for the full reasoning (Pet Dragon's custom pawn rules apply from move
-// one, so no external Elo table built from real chess games transfers,
-// even for the one opening that visually resembles a standard start).
+// Difficulty tiers themselves are depth-cap based, NOT calibrated against
+// real games — see DECISIONS.md D39 for that original reasoning (Pet
+// Dragon's custom pawn rules apply from move one, so no external Elo
+// table built from real chess games transfers, even for the one opening
+// that visually resembles a standard start). D39's rejection of UCI_Elo
+// specifically was later overridden — see D43 — once Gokul explicitly
+// chose to proceed with self-assumed Elo anchors rather than an external
+// rating pool. ELO_TABLE / elo_to_skill_level() below implement that;
+// read D43 before trusting these numbers as anything more than what
+// they are: two hand-picked anchor points (1200, 2600) plus this
+// project's own real measured relative tier gaps, rescaled to fit.
 //
 // Session 65 refinement: depth alone left a real gap — a low tier would
 // still burn whatever time the GUI/clock gave it just to search shallower,
@@ -227,6 +234,53 @@ pub fn pick_noisy_move_index(candidates: &[(crate::types::Move, i32)], level: u8
     eligible[pick]
 }
 
+// ── Elo mapping (D43 — overrides D39's UCI_Elo rejection) ─────────────────────
+//
+// NOT a calibrated rating in any external sense. Built from exactly two
+// inputs: (1) Gokul's explicitly chosen anchor points, Skill 0 = 1200 and
+// Skill 20 = 2600; (2) this project's own real measured relative tier
+// gaps from Session 68's 200-games/pair `uci_match_runner` validation —
+// 0v5 -619.4 Elo, 5v10 -117.2, 10v15 -65.0, 15v20 -81.35 (avg of two
+// consistent runs) — rescaled by a single constant factor so the four
+// gaps sum to exactly 1400 (2600 - 1200) instead of their original
+// unscaled sum. Levels 1-4, 6-9, 11-14, 16-19 were NEVER individually
+// match-tested — they're linear interpolation within each rescaled
+// band, not measurements. The four scaled/anchored levels (0, 5, 10, 15,
+// 20) are the only entries with any real game data behind their relative
+// spacing; even those are relative gaps fitted to a chosen absolute
+// range, not an externally-calibrated rating.
+pub const ELO_TABLE: [i32; (MAX_SKILL_LEVEL as usize) + 1] = [
+    1200, 1396, 1593, 1789, 1986, // 0-4
+    2182, 2219, 2257, 2294, 2331, // 5-9
+    2368, 2389, 2409, 2430, 2451, // 10-14
+    2471, 2497, 2523, 2549, 2574, // 15-19
+    2600,                         // 20
+];
+
+/// Nearest-match a target Elo onto the closest `ELO_TABLE` entry's Skill
+/// Level. Input is clamped to `ELO_TABLE`'s own min/max first — the table
+/// is monotonically increasing, so nearest-match naturally saturates at
+/// the endpoints anyway, but clamping first keeps the search loop simple
+/// and avoids any edge-case ambiguity from an out-of-range input.
+///
+/// Ties (equidistant between two adjacent table entries) resolve to the
+/// LOWER Skill Level — deliberately conservative, since `UCI_LimitStrength`
+/// exists to make the engine weaker on request, and rounding up on a tie
+/// would silently give a slightly stronger engine than what was asked for.
+pub fn elo_to_skill_level(target_elo: i32) -> u8 {
+    let clamped = target_elo.clamp(ELO_TABLE[0], ELO_TABLE[MAX_SKILL_LEVEL as usize]);
+    let mut best_level = 0u8;
+    let mut best_dist   = i32::MAX;
+    for (level, &elo) in ELO_TABLE.iter().enumerate() {
+        let dist = (elo - clamped).abs();
+        if dist < best_dist {
+            best_dist = dist;
+            best_level = level as u8;
+        }
+    }
+    best_level
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -237,6 +291,60 @@ mod tests {
     fn test_max_level_has_no_depth_cap() {
         assert_eq!(skill_depth_cap(MAX_SKILL_LEVEL), None,
             "Skill Level 20 (default) should mean no depth cap at all");
+    }
+
+    #[test]
+    fn test_elo_table_endpoints_match_chosen_anchors() {
+        assert_eq!(ELO_TABLE[0], 1200);
+        assert_eq!(ELO_TABLE[MAX_SKILL_LEVEL as usize], 2600);
+    }
+
+    #[test]
+    fn test_elo_table_is_strictly_monotonic() {
+        for w in ELO_TABLE.windows(2) {
+            assert!(w[1] > w[0],
+                "ELO_TABLE must be strictly increasing so nearest-match is unambiguous: {:?}", w);
+        }
+    }
+
+    #[test]
+    fn test_elo_to_skill_level_exact_anchor_hits() {
+        // Every table entry should map back to its own exact level.
+        for (level, &elo) in ELO_TABLE.iter().enumerate() {
+            assert_eq!(elo_to_skill_level(elo), level as u8,
+                "Elo {} should map exactly back to Skill Level {}", elo, level);
+        }
+    }
+
+    #[test]
+    fn test_elo_to_skill_level_clamps_below_range() {
+        assert_eq!(elo_to_skill_level(0), 0,
+            "Below-range Elo should clamp to the weakest tier, not panic or underflow");
+        assert_eq!(elo_to_skill_level(-500), 0);
+    }
+
+    #[test]
+    fn test_elo_to_skill_level_clamps_above_range() {
+        assert_eq!(elo_to_skill_level(9999), MAX_SKILL_LEVEL,
+            "Above-range Elo should clamp to the strongest tier");
+    }
+
+    #[test]
+    fn test_elo_to_skill_level_ties_resolve_to_lower_level() {
+        // Midpoint between ELO_TABLE[0]=1200 and ELO_TABLE[1]=1396 is 1298.
+        // Distance to each is identical (98), so this must resolve to the
+        // lower level (0), per elo_to_skill_level's documented tie rule.
+        let midpoint = (ELO_TABLE[0] + ELO_TABLE[1]) / 2;
+        assert_eq!(elo_to_skill_level(midpoint), 0,
+            "Exact ties must resolve to the lower (weaker) Skill Level, never the higher one");
+    }
+
+    #[test]
+    fn test_elo_to_skill_level_nearest_match_not_exact() {
+        // An Elo strictly between two table entries, closer to the upper
+        // one, should map to the upper level.
+        let near_upper = ELO_TABLE[1] - 5; // 5 below Skill 1's exact value
+        assert_eq!(elo_to_skill_level(near_upper), 1);
     }
 
     #[test]
