@@ -142,6 +142,17 @@ struct EngineState {
     /// as `skill_level` above — see `SearchInfo::contempt`'s doc comment
     /// for the full sign convention.
     contempt: i32,
+
+    // ── Elo-limited strength (D43 — overrides D39's original UCI_Elo rejection) ──
+    /// UCI `UCI_LimitStrength` setting, default false. When true, `elo`
+    /// below overrides `skill_level` in cmd_go via
+    /// `search::skill::elo_to_skill_level()` — see that function's doc
+    /// comment and DECISIONS.md D43 for what these Elo numbers actually
+    /// are (two chosen anchors + this project's own real measured tier
+    /// gaps, NOT an externally-calibrated rating).
+    limit_strength: bool,
+    /// UCI `UCI_Elo` setting. Only used when `limit_strength` is true.
+    elo: i32,
 }
 
 impl EngineState {
@@ -172,6 +183,8 @@ impl EngineState {
             move_overhead_ms: pet_dragon_lib::search::time::OVERHEAD_MS,
             skill_level: pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
             contempt: 0,
+            limit_strength: false,
+            elo: pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
         }
     }
 
@@ -335,6 +348,19 @@ fn cmd_uci() {
     // behavior (see SearchInfo::contempt's doc comment for the full
     // root-relative sign convention).
     println!("option name Contempt type spin default 0 min -100 max 100");
+    // UCI_LimitStrength/UCI_Elo (D43, overrides D39's original rejection of
+    // this specific option). When UCI_LimitStrength is true, UCI_Elo
+    // overrides Skill Level via elo_to_skill_level() in cmd_go. Range
+    // matches search::skill::ELO_TABLE's own min/max exactly (1200-2600)
+    // — see that table's doc comment and DECISIONS.md D43 for what these
+    // numbers are and are not.
+    println!("option name UCI_LimitStrength type check default false");
+    println!(
+        "option name UCI_Elo type spin default {} min {} max {}",
+        pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
+        pet_dragon_lib::search::skill::ELO_TABLE[0],
+        pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize]
+    );
     println!();
     println!("uciok");
 }
@@ -424,6 +450,17 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
         "contempt" => {
             if let Ok(n) = value.parse::<i32>() {
                 state.contempt = n.clamp(-100, 100);
+            }
+        }
+        "uci_limitstrength" => {
+            state.limit_strength = value.eq_ignore_ascii_case("true");
+        }
+        "uci_elo" => {
+            if let Ok(n) = value.parse::<i32>() {
+                state.elo = n.clamp(
+                    pet_dragon_lib::search::skill::ELO_TABLE[0],
+                    pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
+                );
             }
         }
         "syzygypath" => {
@@ -611,7 +648,15 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let ponder_hit_soft_ms = Arc::clone(&state.ponder_hit_soft_ms);
     let ponder_hit_hard_ms = Arc::clone(&state.ponder_hit_hard_ms);
     let multipv   = state.multipv;
-    let skill_level = state.skill_level;
+    // UCI_LimitStrength/UCI_Elo (D43) overrides the manually-set Skill
+    // Level when enabled — same override relationship Stockfish's own
+    // UCI_LimitStrength has with its Skill Level option. When disabled
+    // (the default), this is exactly state.skill_level, unchanged.
+    let skill_level = if state.limit_strength {
+        pet_dragon_lib::search::skill::elo_to_skill_level(state.elo)
+    } else {
+        state.skill_level
+    };
     let contempt  = state.contempt;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
@@ -1054,6 +1099,87 @@ mod tests {
         // in search/mod.rs's and alpha_beta.rs's own tests. Here we just
         // confirm cmd_go wires the setting through without panicking.
         assert_eq!(state.contempt, 40);
+    }
+
+    #[test]
+    fn test_limit_strength_defaults_to_disabled() {
+        setup();
+        let state = EngineState::new();
+        assert!(!state.limit_strength,
+            "UCI_LimitStrength should default to false — full Skill Level \
+             control, unaffected by UCI_Elo, for any GUI that never touches this option");
+    }
+
+    #[test]
+    fn test_elo_defaults_to_max_table_value() {
+        setup();
+        let state = EngineState::new();
+        assert_eq!(state.elo,
+            pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
+            "UCI_Elo's default must be the table's max — so enabling \
+             UCI_LimitStrength without ever setting UCI_Elo can't silently weaken the engine");
+    }
+
+    #[test]
+    fn test_uci_limitstrength_setoption_toggles() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name UCI_LimitStrength value true");
+        assert!(state.limit_strength);
+        cmd_setoption(&mut state, "setoption name UCI_LimitStrength value false");
+        assert!(!state.limit_strength);
+    }
+
+    #[test]
+    fn test_uci_elo_setoption_clamps_to_table_range() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name UCI_Elo value 9999");
+        assert_eq!(state.elo,
+            pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize]);
+        cmd_setoption(&mut state, "setoption name UCI_Elo value 0");
+        assert_eq!(state.elo, pet_dragon_lib::search::skill::ELO_TABLE[0]);
+    }
+
+    #[test]
+    fn test_uci_elo_setoption_accepts_value_within_range() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name UCI_Elo value 2000");
+        assert_eq!(state.elo, 2000);
+    }
+
+    #[test]
+    fn test_limit_strength_disabled_leaves_skill_level_untouched() {
+        setup();
+        let mut state = EngineState::new();
+        state.skill_level = 7;
+        state.elo = pet_dragon_lib::search::skill::ELO_TABLE[0]; // would map to level 0 if active
+        cmd_go(&mut state, "go depth 4");
+        state.wait_for_search();
+        // limit_strength is false (default) — UCI_Elo must NOT override
+        // the explicitly-set Skill Level. state.skill_level itself isn't
+        // mutated by cmd_go (only a local copy is derived for the search),
+        // so this just confirms cmd_go completes cleanly with the two
+        // settings in this combination.
+        assert_eq!(state.skill_level, 7);
+    }
+
+    #[test]
+    fn test_limit_strength_enabled_overrides_skill_level() {
+        setup();
+        let mut state = EngineState::new();
+        state.skill_level = 20; // would be full strength if limit_strength were ignored
+        state.limit_strength = true;
+        state.elo = pet_dragon_lib::search::skill::ELO_TABLE[3]; // exact anchor for level 3
+        cmd_go(&mut state, "go depth 4");
+        state.wait_for_search();
+        // Same indirect-check style as the other cmd_go wiring tests above
+        // — elo_to_skill_level()'s own exactness is covered directly in
+        // skill.rs's tests. This just confirms cmd_go doesn't panic with
+        // limit_strength active and a stored skill_level that conflicts
+        // with what the Elo mapping would produce (20 vs the level-3 Elo).
+        assert_eq!(state.elo, pet_dragon_lib::search::skill::ELO_TABLE[3]);
     }
 
     #[test]
