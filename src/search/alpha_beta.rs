@@ -40,10 +40,13 @@ use crate::search::{
                update_ordering_on_cutoff},
     pruning::{pawn_hash, should_try_probcut, try_probcut},
     see::see,
-    SearchInfo, DRAW_SCORE, INFINITY, MATE_SCORE, MATE_THRESHOLD,
+    SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
     MIN_DEPTH_NULL_MOVE, MIN_DEPTH_RAZORING, MIN_DEPTH_SINGULAR,
+    draw_score,
 };
+#[cfg(test)]
+use crate::search::DRAW_SCORE;
 use crate::tt::{Bound, TranspositionTable};
 use crate::types::{Color, Move, PieceKind};
 
@@ -320,17 +323,17 @@ fn alpha_beta_with_excluded(
     // ── Draw detection ────────────────────────────────────────────────────────
     // Check repetition BEFORE TT lookup
     if !root_node && pos.is_repetition() {
-        return DRAW_SCORE;
+        return draw_score(ply, info.contempt);
     }
 
     // Fifty-move rule
     if pos.halfmove_clock >= 100 {
-        return DRAW_SCORE;
+        return draw_score(ply, info.contempt);
     }
 
     // Insufficient material
     if pos.is_insufficient_material() {
-        return DRAW_SCORE;
+        return draw_score(ply, info.contempt);
     }
 
     // ── Syzygy WDL probe (Phase 15.3 / 15.4) ─────────────────────────────────
@@ -499,7 +502,7 @@ fn alpha_beta_with_excluded(
             return -(MATE_SCORE - ply as i32);
         } else {
             // Stalemate — draw
-            return DRAW_SCORE;
+            return draw_score(ply, info.contempt);
         }
     }
 
@@ -804,6 +807,32 @@ mod tests {
         );
         assert_eq!(score, DRAW_SCORE,
             "50-move rule should return draw score");
+    }
+
+    #[test]
+    fn test_fifty_move_rule_with_contempt() {
+        // Same construction as test_fifty_move_rule, but with nonzero
+        // contempt — proves info.contempt actually reaches alpha_beta's
+        // draw path (not just that draw_score() itself is correct in
+        // isolation). The 50-move check has no `!root_node` guard, so it
+        // fires immediately at ply=0 with no search branching involved,
+        // making the exact expected score fully predictable.
+        setup();
+        let fen = "4k3/8/8/8/8/8/8/4K3 w - - 100 1";
+        let mut pos  = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt       = TranspositionTable::new(4);
+        info.time_allocated_ms = 60_000;
+        info.contempt = 25;
+
+        let score = alpha_beta(
+            &mut pos, 1, -INFINITY, INFINITY,
+            0, true, &mut info, &tt, Move::NULL,
+        );
+        // ply=0 is always the root side to move, so a positive contempt
+        // (dislikes draws) must score this exactly 25 worse than DRAW_SCORE.
+        assert_eq!(score, DRAW_SCORE - 25,
+            "50-move draw at root-side ply should reflect Contempt exactly");
     }
 
     #[test]

@@ -41,6 +41,28 @@ pub const INFINITY: i32 = 1_000_000;
 /// Score for a drawn position
 pub const DRAW_SCORE: i32 = 0;
 
+/// Draw score adjusted for the UCI `Contempt` setting (default 0, in which
+/// case this is always exactly `DRAW_SCORE` — byte-identical to pre-
+/// Contempt behavior).
+///
+/// Contempt is defined relative to the *root* side (positive = the root
+/// side dislikes draws and treats one as worth `-contempt` to itself).
+/// Since `alpha_beta` uses negamax convention (every returned score is
+/// from the current node's side-to-move perspective) and `ply` increments
+/// by exactly 1 per node starting at 0 at the root, `ply % 2 == 0` means
+/// the current node's side to move IS the root side — no separate
+/// root-side field needs to be threaded through the search for this.
+#[inline]
+pub fn draw_score(ply: usize, contempt: i32) -> i32 {
+    if contempt == 0 {
+        DRAW_SCORE
+    } else if ply % 2 == 0 {
+        DRAW_SCORE - contempt
+    } else {
+        DRAW_SCORE + contempt
+    }
+}
+
 /// Base mate score — actual mate score is MATE_SCORE - ply
 /// So mate in 1 = 999_999, mate in 2 = 999_998, etc.
 pub const MATE_SCORE: i32 = 999_999;
@@ -207,6 +229,16 @@ pub struct SearchInfo {
     /// `multipv` — NOT reset by `reset_for_search()`, since a Skill Level
     /// choice should carry across moves within a game, same as MultiPV.
     pub skill_level: u8,
+
+    // ── Contempt ─────────────────────────────────────────────────────────────
+    /// UCI `Contempt` setting, centipawns, default 0 (no change from prior
+    /// behavior). Positive = this engine dislikes draws and will steer away
+    /// from them when a genuinely better alternative exists; negative =
+    /// this engine actively seeks draws. Applied via `draw_score()` at every
+    /// draw-detection site in `alpha_beta` rather than stored per-node —
+    /// see `draw_score()`'s doc comment for how root-relative sign works.
+    /// Persistent across moves, same as `skill_level` above.
+    pub contempt: i32,
 }
 
 impl SearchInfo {
@@ -240,6 +272,7 @@ impl SearchInfo {
             #[cfg(not(target_arch = "wasm32"))]
             syzygy: None,
             skill_level: crate::search::skill::MAX_SKILL_LEVEL,
+            contempt: 0,
         }
     }
 
@@ -519,6 +552,39 @@ mod tests {
         assert!(INFINITY > MATE_SCORE);
         assert!(MATE_SCORE > MATE_THRESHOLD);
         assert_eq!(DRAW_SCORE, 0);
+    }
+
+    #[test]
+    fn test_draw_score_zero_contempt_matches_draw_score() {
+        // Default (contempt = 0) must be byte-identical to plain DRAW_SCORE
+        // at every ply — this is what every pre-Contempt test still relies on.
+        assert_eq!(draw_score(0, 0), DRAW_SCORE);
+        assert_eq!(draw_score(1, 0), DRAW_SCORE);
+        assert_eq!(draw_score(7, 0), DRAW_SCORE);
+    }
+
+    #[test]
+    fn test_draw_score_positive_contempt_penalizes_root_side_draw() {
+        // ply 0, 2, 4... = root side to move. Positive contempt = root
+        // side dislikes draws, so a draw here scores WORSE than neutral.
+        assert_eq!(draw_score(0, 30), DRAW_SCORE - 30);
+        assert_eq!(draw_score(2, 30), DRAW_SCORE - 30);
+    }
+
+    #[test]
+    fn test_draw_score_positive_contempt_rewards_opponent_side_draw() {
+        // ply 1, 3, 5... = opponent to move. From THEIR perspective, the
+        // root side's dislike of the draw is a positive (good for them).
+        assert_eq!(draw_score(1, 30), DRAW_SCORE + 30);
+        assert_eq!(draw_score(3, 30), DRAW_SCORE + 30);
+    }
+
+    #[test]
+    fn test_draw_score_negative_contempt_seeks_draws() {
+        // Negative contempt = this engine actively wants a draw, so at a
+        // root-side-to-move node a draw should score BETTER than neutral.
+        assert_eq!(draw_score(0, -40), DRAW_SCORE + 40);
+        assert_eq!(draw_score(1, -40), DRAW_SCORE - 40);
     }
 
     #[test]
