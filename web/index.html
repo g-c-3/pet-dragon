@@ -1048,8 +1048,11 @@
   .cdash-shape-pieces {
     font-size: clamp(1rem, calc(1.25rem * var(--s)), 1.7rem);
     line-height: 1; letter-spacing: -1px;
-    color: var(--piece-color);
-    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)) brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
+    /* Fixed to a light colour regardless of the user's chosen piece colour/hue/
+       brightness — these are just shape previews and must stay legible even
+       when the live piece colour is dark. */
+    color: #E8E8E8;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
   }
   .cdash-shape-name {
     font-family: 'DM Mono', monospace;
@@ -6566,12 +6569,13 @@ function handleClockTimeout(who) {
 // Both use currentColor so the colour/hue slider affects them identically.
 
 function _svgWrap(w, h, content, isWhite) {
-  const op  = isWhite ? '1'    : '0.82';
-  // White pieces are now hollow (fill:none on the inner <g>, see per-style sets below),
-  // so the stroke IS the piece — it must be fully opaque and a touch bolder than the
-  // old "subtle edge on a solid fill" look. Black pieces stay solid as before.
-  const sw  = isWhite ? '1.8'  : '1.8';
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="100%" height="100%" style="display:block;overflow:visible" fill="currentColor" stroke="currentColor" stroke-opacity="${isWhite ? '1' : '0.5'}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round" opacity="${op}">${content}</svg>`;
+  // Both colours render fully opaque now. White pieces are hollow (fill:none on
+  // the inner <g>, see per-style sets below), so the stroke IS the piece.
+  // Black pieces are solid-filled; previously their stroke sat at partial
+  // opacity on top of the solid fill, which produced a soft/smudged edge —
+  // now stroke and fill are both fully opaque so the edge stays crisp.
+  const sw = '1.8';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="100%" height="100%" style="display:block;overflow:visible" fill="currentColor" stroke="currentColor" stroke-opacity="1" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round" opacity="1">${content}</svg>`;
 }
 
 // ── Style 1: Classic Staunton — faithful Staunton silhouettes ─────────────────
