@@ -190,15 +190,28 @@ impl EngineState {
 
     /// Block until any active search thread finishes.
     /// Recovers the thread's SearchInfo and merges history tables for persistence.
-    fn wait_for_search(&mut self) {
+    /// Joins the search thread if one is running, folding its ordering
+    /// tables (history/countermoves/correction history) back into
+    /// `self.info` for the next move, same as before this signature
+    /// widened. Returns the joined thread's actual `SearchInfo` — the
+    /// genuine values it searched with (`skill_level`, `contempt`, etc.),
+    /// not merely a copy of what `EngineState` was configured with. Existing
+    /// non-test callers can keep ignoring the return value exactly as
+    /// before (`state.wait_for_search();` still compiles unchanged); tests
+    /// that need to verify a config value actually reached the search
+    /// thread — rather than just that `EngineState` itself wasn't
+    /// unexpectedly mutated — should capture and inspect this instead.
+    fn wait_for_search(&mut self) -> Option<SearchInfo> {
         if let Some(handle) = self.search_handle.take() {
             if let Ok(returned_info) = handle.join() {
                 // Preserve ordering tables across moves (gives better move ordering)
                 self.info.history      = returned_info.history;
                 self.info.countermoves = returned_info.countermoves;
-                self.info.correction_history = returned_info.correction_history;
+                self.info.correction_history = returned_info.correction_history.clone();
+                return Some(returned_info);
             }
         }
+        None
     }
 
     /// Stop any active search and wait for the thread to exit.
@@ -564,19 +577,50 @@ fn cmd_position(state: &mut EngineState, line: &str) {
 ///
 /// Spawns the search on a background thread (Lazy SMP). The UCI loop
 /// remains responsive for `stop`, `isready`, etc.
-fn cmd_go(state: &mut EngineState, line: &str) {
+/// Resolves the Skill Level actually used for a search: `UCI_Elo` (via
+/// `elo_to_skill_level()`) when `UCI_LimitStrength` is enabled, otherwise
+/// the manually-set `Skill Level` unchanged (D43's override relationship —
+/// same as Stockfish's own UCI_LimitStrength/Skill Level pairing).
+///
+/// Extracted as a pure function (no search, no threading) so both `cmd_go`
+/// and its depth-cap AND time-fraction consumers use one single source of
+/// truth for this value — and so it's directly unit-testable without
+/// spawning and joining a search thread just to check a config mapping.
+fn effective_skill_level(state: &EngineState) -> u8 {
+    if state.limit_strength {
+        pet_dragon_lib::search::skill::elo_to_skill_level(state.elo)
+    } else {
+        state.skill_level
+    }
+}
+
+/// Builds the `TimeControl` for a `go` command: parses the line, then
+/// applies the two persistent session settings that aren't part of the
+/// `go` line itself — Move Overhead and the Skill Level time-fraction
+/// pairing (Session 65 — depth cap alone isn't enough; a low tier also
+/// needs a smaller time budget, or it searches shallow and then just sits
+/// idle for the rest of its allocation, looking broken rather than weak).
+///
+/// Takes `skill_level` as an explicit parameter — the caller's
+/// `effective_skill_level(state)`, NOT `state.skill_level` directly —
+/// so the time-fraction pairing stays correct even when `UCI_LimitStrength`
+/// is active and the two diverge. Extracted as a pure function for the
+/// same testability reason as `effective_skill_level` above.
+fn build_time_control(state: &EngineState, line: &str, skill_level: u8) -> TimeControl {
     let mut tc = parse_go(line);
-    // Phase 19: apply the configured Move Overhead (default OVERHEAD_MS,
-    // overridable via `setoption name Move Overhead`) — not part of the
-    // `go` line itself, since it's a persistent session setting, not a
-    // per-search parameter.
     tc.overhead_ms = state.move_overhead_ms;
-    // Phase 20 / D39 (Session 65 refinement): Skill Level also scales the
-    // time budget, not just the depth cap below — otherwise a low tier on
-    // a long movetime/clock allocation would search shallow and then just
-    // sit idle for the rest, looking broken rather than weak.
     tc.skill_time_fraction_pct =
-        pet_dragon_lib::search::skill::skill_time_fraction_pct(state.skill_level);
+        pet_dragon_lib::search::skill::skill_time_fraction_pct(skill_level);
+    tc
+}
+
+fn cmd_go(state: &mut EngineState, line: &str) {
+    // Resolved once, up front, so the depth cap (applied later, per-thread)
+    // and the time-fraction pairing (applied here) can never diverge —
+    // see build_time_control's doc comment for why that divergence was a
+    // real bug until this extraction.
+    let skill_level = effective_skill_level(state);
+    let tc = build_time_control(state, line, skill_level);
 
     // Reset stop flag for the new search
     state.stop_flag.store(false, Ordering::SeqCst);
@@ -648,15 +692,10 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let ponder_hit_soft_ms = Arc::clone(&state.ponder_hit_soft_ms);
     let ponder_hit_hard_ms = Arc::clone(&state.ponder_hit_hard_ms);
     let multipv   = state.multipv;
-    // UCI_LimitStrength/UCI_Elo (D43) overrides the manually-set Skill
-    // Level when enabled — same override relationship Stockfish's own
-    // UCI_LimitStrength has with its Skill Level option. When disabled
-    // (the default), this is exactly state.skill_level, unchanged.
-    let skill_level = if state.limit_strength {
-        pet_dragon_lib::search::skill::elo_to_skill_level(state.elo)
-    } else {
-        state.skill_level
-    };
+    // skill_level was already resolved once at the top of this function
+    // (via effective_skill_level) — reused here as-is for both threads'
+    // SearchInfo, same value build_time_control used for the time-fraction
+    // pairing above.
     let contempt  = state.contempt;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
@@ -1044,18 +1083,33 @@ mod tests {
     }
 
     #[test]
+    fn test_effective_skill_level_matches_manual_setting_when_limit_strength_off() {
+        setup();
+        let mut state = EngineState::new();
+        state.skill_level = 5;
+        state.limit_strength = false; // default, but explicit here for clarity
+        assert_eq!(effective_skill_level(&state), 5,
+            "With UCI_LimitStrength off, effective_skill_level must be exactly \
+             the manually-set Skill Level, regardless of UCI_Elo's value");
+    }
+
+    #[test]
     fn test_cmd_go_applies_skill_level_to_search() {
         setup();
         let mut state = EngineState::new();
         state.skill_level = 0; // weakest tier -> depth cap of 1
         cmd_go(&mut state, "go depth 10");
-        state.wait_for_search();
-        // Indirect check, same style as test_cmd_go_applies_move_overhead_
-        // to_time_control above: the depth-cap mechanics themselves are
-        // covered directly in iterative.rs's own tests. Here we just
-        // confirm cmd_go wires the setting through without panicking and
-        // that the state still reflects the low tier afterward.
-        assert_eq!(state.skill_level, 0);
+        let returned = state.wait_for_search();
+        // Real proof, not an indirect state check: the SearchInfo the
+        // search thread actually built and searched with (joined via the
+        // now-widened wait_for_search()) must itself carry skill_level=0
+        // — this fails if cmd_go ever stops correctly threading the value
+        // into main_info, even if EngineState.skill_level itself is
+        // untouched (which it always is — cmd_go only ever reads it).
+        let returned = returned.expect("search should have produced a SearchInfo");
+        assert_eq!(returned.skill_level, 0,
+            "The SearchInfo actually used by the search thread must reflect \
+             the configured Skill Level, not just EngineState's own copy of it");
     }
 
     #[test]
@@ -1093,12 +1147,19 @@ mod tests {
         let mut state = EngineState::new();
         state.contempt = 40;
         cmd_go(&mut state, "go depth 4");
-        state.wait_for_search();
-        // Same indirect-check style as test_cmd_go_applies_skill_level_to_
-        // search above — the draw_score() math itself is covered directly
-        // in search/mod.rs's and alpha_beta.rs's own tests. Here we just
-        // confirm cmd_go wires the setting through without panicking.
-        assert_eq!(state.contempt, 40);
+        let returned = state.wait_for_search()
+            .expect("search should have produced a SearchInfo");
+        // Real proof: the SearchInfo the search thread actually built and
+        // searched with must itself carry contempt=40 — this is exactly
+        // the kind of copy-paste bug (e.g. `main_info.contempt = 0`
+        // instead of `= contempt`) a state-field-only check can never
+        // catch, since cmd_go never writes contempt back to EngineState
+        // either way. draw_score()'s own math is covered separately in
+        // search/mod.rs's and alpha_beta.rs's tests; this test's job is
+        // narrower and different: prove cmd_go's wiring, not the formula.
+        assert_eq!(returned.contempt, 40,
+            "The SearchInfo actually used by the search thread must reflect \
+             the configured Contempt value, not just EngineState's own copy of it");
     }
 
     #[test]
@@ -1150,36 +1211,75 @@ mod tests {
     }
 
     #[test]
-    fn test_limit_strength_disabled_leaves_skill_level_untouched() {
+    fn test_effective_skill_level_ignores_elo_when_limit_strength_off() {
         setup();
         let mut state = EngineState::new();
         state.skill_level = 7;
+        state.limit_strength = false;
         state.elo = pet_dragon_lib::search::skill::ELO_TABLE[0]; // would map to level 0 if active
-        cmd_go(&mut state, "go depth 4");
-        state.wait_for_search();
-        // limit_strength is false (default) — UCI_Elo must NOT override
-        // the explicitly-set Skill Level. state.skill_level itself isn't
-        // mutated by cmd_go (only a local copy is derived for the search),
-        // so this just confirms cmd_go completes cleanly with the two
-        // settings in this combination.
-        assert_eq!(state.skill_level, 7);
+        assert_eq!(effective_skill_level(&state), 7,
+            "UCI_Elo must be completely ignored while UCI_LimitStrength is off, \
+             even when it's set to a value that would map to a very different level");
     }
 
     #[test]
-    fn test_limit_strength_enabled_overrides_skill_level() {
+    fn test_effective_skill_level_uses_elo_when_limit_strength_on() {
         setup();
         let mut state = EngineState::new();
-        state.skill_level = 20; // would be full strength if limit_strength were ignored
+        state.skill_level = 20; // must be ignored once limit_strength is active
+        state.limit_strength = true;
+        state.elo = pet_dragon_lib::search::skill::ELO_TABLE[3]; // exact anchor for level 3
+        assert_eq!(effective_skill_level(&state), 3,
+            "UCI_LimitStrength=true must make UCI_Elo override the manually-set \
+             Skill Level entirely, not blend or average with it");
+    }
+
+    #[test]
+    fn test_cmd_go_search_reflects_elo_override_not_raw_skill_level() {
+        setup();
+        let mut state = EngineState::new();
+        state.skill_level = 20; // would be full strength if the override didn't apply
         state.limit_strength = true;
         state.elo = pet_dragon_lib::search::skill::ELO_TABLE[3]; // exact anchor for level 3
         cmd_go(&mut state, "go depth 4");
-        state.wait_for_search();
-        // Same indirect-check style as the other cmd_go wiring tests above
-        // — elo_to_skill_level()'s own exactness is covered directly in
-        // skill.rs's tests. This just confirms cmd_go doesn't panic with
-        // limit_strength active and a stored skill_level that conflicts
-        // with what the Elo mapping would produce (20 vs the level-3 Elo).
-        assert_eq!(state.elo, pet_dragon_lib::search::skill::ELO_TABLE[3]);
+        let returned = state.wait_for_search()
+            .expect("search should have produced a SearchInfo");
+        // Real end-to-end proof, not just the pure-function checks above:
+        // the SearchInfo the search thread actually used must carry the
+        // Elo-derived level (3), never the raw stored Skill Level (20) —
+        // this is the specific case a state-field-only check could never
+        // catch, since it's exactly the two values disagreeing that
+        // matters here.
+        assert_eq!(returned.skill_level, 3,
+            "The SearchInfo actually used by the search thread must reflect \
+             the Elo-derived Skill Level when UCI_LimitStrength is active, \
+             not EngineState's raw (and here deliberately conflicting) Skill Level");
+    }
+
+    #[test]
+    fn test_build_time_control_uses_elo_derived_skill_level_not_raw() {
+        // Regression test for the bug this refactor fixed: before
+        // effective_skill_level() was resolved once up front, cmd_go
+        // computed tc.skill_time_fraction_pct from state.skill_level
+        // directly — BEFORE the Elo override was applied — so a low
+        // UCI_Elo request got the correct (shallow) depth cap but the
+        // WRONG (full, unreduced) time budget, defeating the whole point
+        // of the Session 65 depth+time pairing for low tiers.
+        setup();
+        let mut state = EngineState::new();
+        state.skill_level = 20; // raw setting says "no time reduction"
+        let elo_derived_level = 3; // but the Elo-derived level says otherwise
+        let tc = build_time_control(&state, "go movetime 1000", elo_derived_level);
+        let expected_pct =
+            pet_dragon_lib::search::skill::skill_time_fraction_pct(elo_derived_level);
+        assert_eq!(tc.skill_time_fraction_pct, expected_pct,
+            "build_time_control must use the skill_level PARAMETER it was given \
+             (the Elo-derived effective level), never state.skill_level directly");
+        assert_ne!(tc.skill_time_fraction_pct,
+            pet_dragon_lib::search::skill::skill_time_fraction_pct(state.skill_level),
+            "This assertion only means something because level 20's time \
+             fraction (100%, no reduction) genuinely differs from level 3's — \
+             confirming the test setup actually exercises the bug scenario");
     }
 
     #[test]
@@ -1282,15 +1382,18 @@ mod tests {
         setup();
         let mut state = EngineState::new();
         state.move_overhead_ms = 250;
-        cmd_go(&mut state, "go movetime 1000");
-        state.wait_for_search();
-        // Indirect check: movetime 1000 with overhead 250 should have
-        // allocated (1000 - 250) = 750ms, not the default 30ms's 970ms.
-        // We can't reach into the spawned thread's TimeControl directly,
-        // so this is verified at the allocate_time() level in time.rs's
-        // own tests; here we just confirm cmd_go doesn't panic and still
-        // produces a completed search with the custom overhead set.
-        assert_eq!(state.move_overhead_ms, 250);
+        // Real, direct proof — build_time_control is the exact function
+        // cmd_go itself calls, so this isn't "can't reach into the spawned
+        // thread" hand-waving anymore, it's the actual value construction.
+        let tc = build_time_control(&state, "go movetime 1000", state.skill_level);
+        assert_eq!(tc.overhead_ms, 250,
+            "build_time_control must apply state.move_overhead_ms to overhead_ms exactly");
+        assert_eq!(tc.movetime, 1000,
+            "The go line's own movetime must still parse through unchanged");
+        // allocate_time()'s own tests (search/time.rs) cover the actual
+        // (movetime - overhead) budget-reduction arithmetic; this test's
+        // job is narrower: prove cmd_go's config wiring into TimeControl,
+        // not re-derive allocate_time's math.
     }
 
     #[test]
