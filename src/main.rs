@@ -135,6 +135,13 @@ struct EngineState {
     /// (time budget, via `allocate_time()`) — see skill.rs for the full
     /// per-tier table and Session 65's reasoning for needing both.
     skill_level: u8,
+
+    // ── Contempt ─────────────────────────────────────────────────────────────
+    /// UCI `Contempt` setting, centipawns, -100..=100, default 0. Threaded
+    /// into `main_info.contempt`/`h_info.contempt` in cmd_go, same pattern
+    /// as `skill_level` above — see `SearchInfo::contempt`'s doc comment
+    /// for the full sign convention.
+    contempt: i32,
 }
 
 impl EngineState {
@@ -164,6 +171,7 @@ impl EngineState {
             multipv: 1,
             move_overhead_ms: pet_dragon_lib::search::time::OVERHEAD_MS,
             skill_level: pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
+            contempt: 0,
         }
     }
 
@@ -312,6 +320,21 @@ fn cmd_uci() {
         pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
         pet_dragon_lib::search::skill::MAX_SKILL_LEVEL
     );
+    // Standard UCI option some GUIs check for before ever sending
+    // "go ... ponder"/"ponderhit" — the underlying logic (cmd_go's
+    // pending_ponder_allocation, cmd_ponderhit) already works regardless
+    // of this declaration; it was just never advertised. No setoption
+    // state needed: whether pondering actually happens is entirely
+    // determined by whether the GUI sends "go ... ponder", not by this
+    // toggle's value (same as how Stockfish treats it).
+    println!("option name Ponder type check default true");
+    // Contempt: positive = this engine dislikes draws and steers away from
+    // them when a genuinely better alternative exists; negative = actively
+    // seeks draws. Applied via draw_score() at every draw-detection site
+    // in alpha_beta.rs. Default 0 = byte-identical to pre-Contempt
+    // behavior (see SearchInfo::contempt's doc comment for the full
+    // root-relative sign convention).
+    println!("option name Contempt type spin default 0 min -100 max 100");
     println!();
     println!("uciok");
 }
@@ -390,6 +413,17 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
             // records the setting.
             if let Ok(n) = value.parse::<u8>() {
                 state.skill_level = n.min(pet_dragon_lib::search::skill::MAX_SKILL_LEVEL);
+            }
+        }
+        "ponder" => {
+            // Accepted for GUI compatibility, but genuinely a no-op: unlike
+            // every other option here, whether pondering happens is decided
+            // entirely by whether the GUI sends "go ... ponder", not by
+            // this toggle's value — there's no engine-side state to record.
+        }
+        "contempt" => {
+            if let Ok(n) = value.parse::<i32>() {
+                state.contempt = n.clamp(-100, 100);
             }
         }
         "syzygypath" => {
@@ -578,6 +612,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let ponder_hit_hard_ms = Arc::clone(&state.ponder_hit_hard_ms);
     let multipv   = state.multipv;
     let skill_level = state.skill_level;
+    let contempt  = state.contempt;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -611,6 +646,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                 // shared TT with deeper, full-strength lines that leak back
                 // into a low-skill main search's move ordering/scores.
                 h_info.skill_level = skill_level;
+                h_info.contempt = contempt;
                 iterative_deepening(&mut h_pos, &h_tc, &mut h_info, &*h_tt)
             }));
         }
@@ -630,6 +666,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         // leaving their SearchInfo at the single-PV default.
         main_info.multipv = multipv;
         main_info.skill_level = skill_level;
+        main_info.contempt = contempt;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -974,6 +1011,62 @@ mod tests {
         // confirm cmd_go wires the setting through without panicking and
         // that the state still reflects the low tier afterward.
         assert_eq!(state.skill_level, 0);
+    }
+
+    #[test]
+    fn test_contempt_option_defaults_to_zero() {
+        setup();
+        let state = EngineState::new();
+        assert_eq!(state.contempt, 0,
+            "Contempt should default to 0 — byte-identical to pre-Contempt \
+             behavior for any GUI that never touches this option");
+    }
+
+    #[test]
+    fn test_contempt_option_clamps_to_declared_range() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name Contempt value 500");
+        assert_eq!(state.contempt, 100,
+            "Contempt should clamp to the declared max of 100");
+        cmd_setoption(&mut state, "setoption name Contempt value -500");
+        assert_eq!(state.contempt, -100,
+            "Contempt should clamp to the declared min of -100");
+    }
+
+    #[test]
+    fn test_contempt_option_accepts_value_within_range() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name Contempt value 30");
+        assert_eq!(state.contempt, 30);
+    }
+
+    #[test]
+    fn test_cmd_go_applies_contempt_to_search() {
+        setup();
+        let mut state = EngineState::new();
+        state.contempt = 40;
+        cmd_go(&mut state, "go depth 4");
+        state.wait_for_search();
+        // Same indirect-check style as test_cmd_go_applies_skill_level_to_
+        // search above — the draw_score() math itself is covered directly
+        // in search/mod.rs's and alpha_beta.rs's own tests. Here we just
+        // confirm cmd_go wires the setting through without panicking.
+        assert_eq!(state.contempt, 40);
+    }
+
+    #[test]
+    fn test_ponder_setoption_accepted_without_error() {
+        setup();
+        let mut state = EngineState::new();
+        // Ponder has no engine-side state to record — this just confirms
+        // setoption accepts it cleanly (doesn't fall through to a path
+        // that would panic or corrupt unrelated state).
+        state.skill_level = 12;
+        cmd_setoption(&mut state, "setoption name Ponder value true");
+        assert_eq!(state.skill_level, 12,
+            "Ponder setoption must not disturb unrelated state");
     }
 
     #[test]

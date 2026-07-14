@@ -174,6 +174,88 @@ pub fn search_from_fen(fen: &str, movetime_ms: u32, skill_level: u8) -> String {
     }
 }
 
+/// Same search as `search_from_fen`, but also returns the evaluation —
+/// added so the browser can show a real eval bar instead of the material
+/// + mobility heuristic it previously had to fall back to (that heuristic
+/// never had access to an actual search score, since this function's
+/// sibling above only ever returned the bare move).
+///
+/// Returns a two-token, space-separated string: `"<uci_move> <eval>"`.
+/// `<eval>` is one of:
+/// - a plain signed integer, in centipawns, **from White's perspective**
+///   (positive = White is better) — deliberately NOT the UCI/negamax
+///   convention of "from side-to-move's perspective," since a GUI eval
+///   bar needs a stable reference frame that doesn't flip depending on
+///   whose turn it is.
+/// - `"mateN"` / `"mate-N"` for a forced mate, same White-relative sign:
+///   positive = White delivers mate in N, negative = Black does.
+///
+/// Returns `"0000 0"` if the position is illegal or has no legal moves —
+/// callers should check for the `"0000"` move token first, same as
+/// `search_from_fen`, before reading the eval token.
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn search_from_fen_with_eval(fen: &str, movetime_ms: u32, skill_level: u8) -> String {
+    use search::iterative::iterative_deepening;
+    use search::time::TimeControl;
+    use search::SearchInfo;
+    use tt::TranspositionTable;
+    use types::{Color, Move};
+
+    // Parse position
+    let mut pos = match position::Position::from_fen(fen) {
+        Ok(p)  => p,
+        Err(_) => return String::from("0000 0"),
+    };
+
+    // Captured BEFORE the search mutates `pos` via make/unmake, so this is
+    // reliably the side that was actually asked to move here, regardless
+    // of internal search bookkeeping.
+    let root_side = pos.side_to_move;
+
+    // Record starting position in game history
+    pos.push_game_history();
+
+    // Clamp defensively rather than error — see search_from_fen's doc
+    // comment above for the full reasoning (same applies here verbatim).
+    let skill_level = skill_level.min(search::skill::MAX_SKILL_LEVEL);
+
+    let tc = TimeControl {
+        movetime: movetime_ms as u64,
+        skill_time_fraction_pct: search::skill::skill_time_fraction_pct(skill_level),
+        ..TimeControl::default()
+    };
+
+    let mut info = SearchInfo::new();
+    info.skill_level = skill_level;
+    let mut tt   = TranspositionTable::new(32); // 32MB TT for browser
+
+    // Run search
+    let result = iterative_deepening(&mut pos, &tc, &mut info, &mut tt);
+
+    if result.best_move == Move::NULL {
+        return String::from("0000 0");
+    }
+
+    let eval_token = if result.is_mate {
+        let mate_from_white = if root_side == Color::White {
+            result.mate_in
+        } else {
+            -result.mate_in
+        };
+        format!("mate{}", mate_from_white)
+    } else {
+        let score_from_white = if root_side == Color::White {
+            result.score
+        } else {
+            -result.score
+        };
+        score_from_white.to_string()
+    };
+
+    format!("{} {}", result.best_move.to_uci(), eval_token)
+}
+
 /// Return all legal moves from a FEN position as a space-separated UCI string.
 /// Used by the browser UI to highlight legal destinations for a picked piece.
 ///
