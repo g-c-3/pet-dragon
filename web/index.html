@@ -345,10 +345,15 @@
   }
   .share-sq .sp {
     color: var(--piece-color, #E8E8E8);
-    filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)) brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
+    filter: brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
     line-height: 1;
     display: flex; align-items: center; justify-content: center;
     width: 100%; height: 100%;
+  }
+  /* Black pieces are solid — a drop-shadow just blurs their edges, so only
+     hollow white pieces get the lift-off-the-board shadow. */
+  .share-sq .sp.piece-w {
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)) brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
   }
   .share-sq.light { background: var(--sq-light, #F0D9B5); }
   .share-sq.dark  { background: var(--sq-dark,  #B58863); }
@@ -634,7 +639,7 @@
   }
 
   #board { transition: box-shadow 0.4s ease; filter: brightness(var(--board-brightness,1)) hue-rotate(var(--board-hue,0deg)); }
-  .piece { transition: opacity 0.1s; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)) brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg)); }
+  .piece { transition: opacity 0.1s; filter: brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg)); }
   .board-wrap { position: relative; }
   .board-wrap::after {
     content: '';
@@ -1355,6 +1360,12 @@
     transition: opacity 0.1s;
     pointer-events: none;
     color: var(--piece-color);
+    filter: brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
+  }
+  /* White pieces are hollow/outlined, so a soft drop-shadow helps them read
+     against the board. Black pieces are solid — the same shadow just blurs
+     their edges into a smudge, so they skip it and stay crisp. */
+  .piece.piece-w {
     filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)) brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
   }
   /* SVG pieces: child svg fills the piece cell */
@@ -1374,6 +1385,9 @@
     line-height: 1;
     transform: translate(-50%, -50%);
     color: var(--piece-color);
+    filter: brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
+  }
+  .dragging-ghost.piece-w {
     filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6)) brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
   }
 
@@ -3623,7 +3637,7 @@ function renderBoard() {
       const piece = customBoard[fromSqName(sq)];
       if (piece && sq !== dragFrom) {
         const pEl = document.createElement('div');
-        pEl.className = 'piece';
+        pEl.className = 'piece piece-' + piece.color;
         if (_cdashIsSvgShape(_cdashActiveShape)) {
           pEl.innerHTML = _cdashPieceSvg(piece.color, piece.type, _cdashActiveShape) || '';
         } else {
@@ -3764,6 +3778,7 @@ function handlePickup(sq, cx, cy, mode) {
     dragFrom = sq;
 
     // Show ghost
+    dragGhost.className = 'dragging-ghost piece-' + piece.color;
     if (_cdashIsSvgShape(_cdashActiveShape)) {
       dragGhost.innerHTML = _cdashPieceSvg(piece.color, piece.type, _cdashActiveShape) || '';
     } else {
@@ -4263,14 +4278,15 @@ function showSnapshot(idx) {
     sq.classList.remove('selected','highlight','capture-hint','last-move','check');
     if (p) {
       const pe = document.createElement('div');
-      pe.className = 'piece';
+      pe.className = 'piece piece-' + p.color;
       if (_cdashIsSvgShape(_cdashActiveShape)) {
         pe.innerHTML = _cdashPieceSvg(p.color, p.type, _cdashActiveShape) || '';
       } else {
         pe.textContent = PIECES[p.color + p.type.toUpperCase()];
         pe.style.color = PIECE_STYLES[activePieceStyle].color || '#E8E8E8';
-        // No inline filter — let the .piece CSS class carry the full chain:
-        // drop-shadow + brightness(--piece-brightness) + hue-rotate(--piece-hue)
+        // No inline filter — the .piece / .piece-w CSS classes carry the full
+        // chain: brightness(--piece-brightness) + hue-rotate(--piece-hue),
+        // plus drop-shadow for white (hollow) pieces only.
       }
       sq.appendChild(pe);
     }
@@ -7425,7 +7441,8 @@ function showShareCard() {
   grid.style.filter = boardFilterStr;
   grid.style.setProperty('--sq-light', d.sqLight);
   grid.style.setProperty('--sq-dark',  d.sqDark);
-  const pieceFilterStr = `drop-shadow(0 1px 2px rgba(0,0,0,0.5)) brightness(${d.pieceBrightness / 100})`;
+  const pieceFilterBase = `brightness(${d.pieceBrightness / 100})`;
+  const pieceFilterShadow = `drop-shadow(0 1px 2px rgba(0,0,0,0.5)) ${pieceFilterBase}`;
   const resolvedPieceColor = d.pieceColorResolved || d.pieceColor;
   const isSvgShape = _cdashIsSvgShape(d.pieceShape);
   if (d.startBoard) {
@@ -7440,9 +7457,11 @@ function showShareCard() {
         sq.className = 'share-sq ' + (isLight ? 'light' : 'dark');
         if (piece) {
           const span = document.createElement('span');
-          span.className = 'sp';
+          span.className = 'sp piece-' + piece.color;
           span.style.color = resolvedPieceColor;
-          span.style.filter = pieceFilterStr;
+          // Black pieces are solid — a drop-shadow just smudges their edges,
+          // so only hollow white pieces get the lift-off-the-board shadow.
+          span.style.filter = piece.color === 'w' ? pieceFilterShadow : pieceFilterBase;
           if (isSvgShape) {
             const svgHtml = _cdashPieceSvg(piece.color, piece.type, d.pieceShape);
             if (svgHtml) {
