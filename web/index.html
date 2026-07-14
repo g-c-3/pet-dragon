@@ -3017,13 +3017,13 @@
   // browser, Firefox included, while still lazily loading the ES module.
   const _dragonWorkerSrc = `
 let ready = false;
-let _searchFromFen = null;
+let _searchFromFenWithEval = null;
 
 (async () => {
   try {
     const mod = await import(${JSON.stringify(_dragonPkgUrl)});
     await mod.default(); // init()
-    _searchFromFen = mod.search_from_fen;
+    _searchFromFenWithEval = mod.search_from_fen_with_eval;
     ready = true;
     postMessage({ type: 'ready' });
   } catch (err) {
@@ -3040,8 +3040,21 @@ onmessage = (e) => {
   try {
     // skill: 0-20 (20 = full/uncapped strength). Default to 20 if the caller
     // didn't specify one, matching search_from_fen's own pre-Skill-Level behaviour.
-    const bestmove = _searchFromFen(fen, ms, typeof skill === 'number' ? skill : 20);
-    postMessage({ type: 'result', reqId, bestmove });
+    const raw = _searchFromFenWithEval(fen, ms, typeof skill === 'number' ? skill : 20);
+    // raw is "<uci_move> <eval>" — eval is either a plain signed centipawn
+    // integer or "mateN"/"mate-N", always from White's perspective (see
+    // search_from_fen_with_eval's doc comment on the Rust side).
+    const spaceIdx = raw.indexOf(' ');
+    const bestmove = spaceIdx === -1 ? raw : raw.slice(0, spaceIdx);
+    const evalToken = spaceIdx === -1 ? '0' : raw.slice(spaceIdx + 1);
+    let evalCp = null, isMate = false, mateIn = 0;
+    if (evalToken.startsWith('mate')) {
+      isMate = true;
+      mateIn = parseInt(evalToken.slice(4), 10) || 0;
+    } else {
+      evalCp = parseInt(evalToken, 10) || 0;
+    }
+    postMessage({ type: 'result', reqId, bestmove, evalCp, isMate, mateIn });
   } catch (err) {
     postMessage({ type: 'result', reqId, error: String((err && err.message) || err) });
   }
@@ -3069,7 +3082,12 @@ onmessage = (e) => {
           if (p) {
             pending.delete(msg.reqId);
             if (msg.error) p.reject(new Error(msg.error));
-            else p.resolve(msg.bestmove);
+            else p.resolve({
+              bestmove: msg.bestmove,
+              evalCp:   msg.evalCp,
+              isMate:   msg.isMate,
+              mateIn:   msg.mateIn,
+            });
           }
         }
       };
@@ -3081,7 +3099,11 @@ onmessage = (e) => {
   _dragon = _spawnDragonWorker();
   window.petDragonWorkerReadyPromise = _dragon.readyPromise;
 
-  // Returns a Promise<string> resolving to a UCI bestmove string.
+  // Returns a Promise<{bestmove, evalCp, isMate, mateIn}>. evalCp is a
+  // signed centipawn integer from White's perspective (null when isMate is
+  // true); mateIn is signed moves-to-mate from White's perspective (0 when
+  // isMate is false). See search_from_fen_with_eval's Rust-side doc comment
+  // for the full sign convention.
   // skill: 0-20 (Pet Dragon's own Skill Level; 20 = full/uncapped strength).
   window.petDragonSearch = function(fen, ms, skill) {
     return new Promise((resolve, reject) => {
@@ -3192,10 +3214,12 @@ function setEngineStatus(state, txt) {
 }
 
 // ─── Eval bar heuristic ───────────────────────────────────────────────────────
-// Pet Dragon's WASM API only exposes a best move (search_from_fen), not a
-// numeric evaluation score, so this is a heuristic estimate — material,
-// mobility, center control, king safety, and pawn structure — not a true
-// engine evaluation. All sub-scores below are already expressed in
+// Fallback estimate (material, mobility, center control, king safety, pawn
+// structure) for moments a real engine score isn't available yet — right
+// after a human move, or while the "thinking" animation below is filling
+// the gap during a search. _renderRealEvalResult() overrides this with the
+// genuine search score once an actual search completes. All sub-scores
+// below are already expressed in
 // centipawn-ish units so they can be summed directly with material*100.
 function _dragonLegalCount(side) {
   if (!engineReady || !window.PetDragon) return 0;
@@ -3365,9 +3389,10 @@ function updateEvalBar() {
 }
 
 // ─── Simulated "thinking" eval animation ───────────────────────────────────
-// search_from_fen is an opaque single-shot WASM call with no progress
-// callback, so we have no real intermediate scores to show. To avoid the bar
-// sitting frozen for up to engineMoveTime ms, we animate it: start from the
+// search_from_fen_with_eval is still an opaque single-shot WASM call —
+// it returns a final score once the whole search budget is used, but has
+// no progress callback for intermediate depths along the way. To avoid the
+// bar sitting frozen for up to engineMoveTime ms, we animate it: start from the
 // current position's real heuristic value, wobble around it with an
 // amplitude that decays over the engine's think-time budget, and settle back
 // on the exact real value once the search resolves and the true new position
@@ -3400,6 +3425,40 @@ function _stopEvalThinkingAnimation() {
     clearInterval(_evalThinkInterval);
     _evalThinkInterval = null;
   }
+}
+
+// Renders the REAL engine evaluation once a search actually completes —
+// called after applyEngineMove() so it wins over that move's own automatic
+// updateEvalBar() heuristic refresh (see the render pipeline around
+// updatePlayerBars()). evalCp/mateIn arrive from White's perspective (see
+// search_from_fen_with_eval's Rust-side doc comment).
+function _renderRealEvalResult(evalCp, isMate, mateIn) {
+  const bar = document.getElementById('eval-bar');
+  const scoreEl = document.getElementById('eval-score');
+  if (!bar || !scoreEl) return;
+
+  if (isMate) {
+    // mateIn > 0 means White delivers mate; < 0 means Black does. No
+    // equivalent case exists in _renderEvalDiff (the heuristic can't detect
+    // real forced mates), so this is handled directly rather than reused.
+    const playerIsMating = playerColor === 'w' ? mateIn > 0 : mateIn < 0;
+    const displayMateIn = Math.abs(mateIn);
+    scoreEl.textContent = 'Eval: ' + (playerIsMating ? '+M' : '-M') + displayMateIn;
+    bar.style.width = (playerIsMating ? 95 : 5) + '%';
+    return;
+  }
+
+  if (evalCp === null || evalCp === undefined) return; // malformed result — leave prior display alone
+
+  // evalCp is already centipawns on the same White-relative scale
+  // _renderEvalDiff's `diff` parameter expects (see _computeEvalDiff's own
+  // `(whiteMaterial - blackMaterial) * 100` term) — reusing it keeps the
+  // real result visually identical in style to the heuristic and the
+  // thinking animation, just fed a genuine engine score instead of an
+  // estimate. `turn` is irrelevant here since sideToMoveMobility=true
+  // always takes _renderEvalDiff's sigmoid branch, never its no-legal-
+  // moves fallback.
+  _renderEvalDiff(evalCp, true, customTurn);
 }
 
 // Build a UCI move string from a move object, including promotion suffix if needed.
@@ -3491,7 +3550,8 @@ async function engineMove() {
     const movingForPlayer = (customTurn === playerColor);
     const moveSkill = movingForPlayer ? playerEngineSkillLevel : engineSkillLevel;
     const moveTime  = movingForPlayer ? playerEngineMoveTime  : engineMoveTime;
-    const bestmove = await window.petDragonSearch(currentFen, moveTime, moveSkill);
+    const { bestmove, evalCp, isMate, mateIn } =
+      await window.petDragonSearch(currentFen, moveTime, moveSkill);
 
     _stopEvalThinkingAnimation();
 
@@ -3507,6 +3567,13 @@ async function engineMove() {
     }
 
     applyEngineMove(bestmove); // handles its own autoplay continuation internally
+
+    // Real engine evaluation from the search that just completed — called
+    // AFTER applyEngineMove (not before) so it overrides that move's own
+    // automatic updateEvalBar() heuristic refresh rather than being
+    // immediately overwritten by it. See _renderRealEvalResult's own
+    // comment for why evalCp reuses _renderEvalDiff directly.
+    _renderRealEvalResult(evalCp, isMate, mateIn);
   } catch (e) {
     // Absolute last-resort net: no matter what throws anywhere above (a
     // rejected/aborted search, a bug in applyEngineMove, a DOM lookup
@@ -4496,7 +4563,8 @@ function setupPickColor(color) {
 
 // 20 difficulty presets: 4 Easiest, 4 Easy, 4 Medium, 4 Hard, 4 Hardest
 // skill: Pet Dragon's own Skill Level parameter (0-20, 20 = full/uncapped
-// strength) — passed straight through to search_from_fen(fen, ms, skill).
+// strength) — passed straight through to search_from_fen_with_eval(fen, ms,
+// skill) via the Worker (see petDragonSearch).
 // Linear 1-to-1 mapping: preset index 0..19 → skill 1..20.
 // movetime: ms per move given to the engine's search budget.
 // blunder: % chance (0-100) the engine plays a random legal move instead of its best move
