@@ -339,11 +339,24 @@
     line-height: 1;
     position: relative;
   }
+  /* Same fix as the live board: filter the square colour on a background-only
+     pseudo-element instead of the whole grid, so it doesn't also tint the
+     piece spans painted on top of it. */
+  .share-sq::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: inherit;
+    filter: brightness(var(--share-board-brightness,1)) hue-rotate(var(--share-board-hue,0deg));
+    z-index: 0;
+  }
   /* Use a container-query-safe trick: font-size relative to the square via cqi */
   @supports (font-size: 1cqi) {
     .share-sq { font-size: 9.5cqi; }
   }
   .share-sq .sp {
+    position: relative;
+    z-index: 1;
     color: var(--piece-color, #E8E8E8);
     filter: brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
     line-height: 1;
@@ -638,7 +651,7 @@
     color: var(--accent2);
   }
 
-  #board { transition: box-shadow 0.4s ease; filter: brightness(var(--board-brightness,1)) hue-rotate(var(--board-hue,0deg)); }
+  #board { transition: box-shadow 0.4s ease; }
   .piece { transition: opacity 0.1s; filter: brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg)); }
   .board-wrap { position: relative; }
   .board-wrap::after {
@@ -860,7 +873,8 @@
   }
   .console-filter-btn:hover { background: rgba(255,255,255,0.1); }
   .console-filter-btn.active { background: rgba(233,69,96,0.18); border-color: rgba(233,69,96,0.5); color: var(--accent); }
-  .console-clear-btn {
+  .console-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .console-clear-btn, .console-fen-btn {
     padding: 0.28rem 0.7rem;
     border-radius: 14px;
     border: 1px solid var(--border);
@@ -870,8 +884,10 @@
     font-size: 0.7rem;
     cursor: pointer;
     transition: background 0.15s;
+    white-space: nowrap;
   }
   .console-clear-btn:hover { background: rgba(255,255,255,0.12); }
+  .console-fen-btn:hover { background: rgba(69,160,233,0.16); border-color: rgba(69,160,233,0.4); }
 
   .console-log-list {
     background: #0B0B14;
@@ -1316,6 +1332,22 @@
     font-size: calc(var(--sq) * 0.8);
     line-height: 1;
     transition: background 0.15s;
+  }
+
+  /* Board brightness/hue is applied here, on a flat background-only layer,
+     instead of on #board itself — #board wraps the pieces too, and a filter
+     on an ancestor affects the whole painted subtree, which was bleeding the
+     board's brightness/hue onto the pieces on top of it. This pseudo-element
+     just copies the square's own background colour (via `inherit`) and sits
+     behind the piece/dot content (z-index 0 vs. their 2/3), so only the
+     square colour is filtered. */
+  .sq::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: inherit;
+    filter: brightness(var(--board-brightness,1)) hue-rotate(var(--board-hue,0deg));
+    z-index: 0;
   }
 
   .sq.light { background: var(--sq-light); }
@@ -2602,7 +2634,7 @@
 <!-- Piece Style Picker -->
 <div class="picker-overlay" id="piece-overlay">
   <div class="picker-modal">
-    <h3>♟ Piece Style</h3>
+    <h3>♟ Piece Shades</h3>
     <div class="picker-grid" id="piece-grid"></div>
     <button class="picker-close" onclick="closePickers()">Done</button>
   </div>
@@ -2661,7 +2693,10 @@
         <button class="console-filter-btn"        data-level="warn"  onclick="_consoleSetFilter('warn')">Warn</button>
         <button class="console-filter-btn"        data-level="error" onclick="_consoleSetFilter('error')">Error</button>
       </div>
-      <button class="console-clear-btn" onclick="_consoleClear()">🧹 Clear</button>
+      <div class="console-actions">
+        <button class="console-fen-btn" onclick="_consoleDownloadFen()" title="Download current position + game history as .txt, for diagnosing engine issues">📋 FEN</button>
+        <button class="console-clear-btn" onclick="_consoleClear()">🧹 Clear</button>
+      </div>
     </div>
     <div class="console-log-list" id="console-log-list"></div>
     <button class="picker-close" onclick="closePickers()">Close</button>
@@ -3471,14 +3506,11 @@ function _mvToUci(mv) {
 
 // ─── Engine move — single entry point, always dispatches to Pet Dragon ──────
 function _showEngineDiagnostic(msg) {
+  // Diagnostics are for the in-app Console (window._consoleDash buffers this
+  // console.error call automatically) — not for the AI Engine status line,
+  // which should keep showing its normal ready/thinking/offline state rather
+  // than a raw error string.
   console.error('Pet Dragon diagnostic:', msg);
-  const t = document.getElementById('status-text');
-  if (!t) return;
-  // Persists until the next setEngineStatus() call (e.g. the next move
-  // attempt, or New Game) — not on a timer — so it can't disappear before
-  // you get a chance to read/screenshot it.
-  t.textContent = msg;
-  t.style.color = '#ff6b6b';
 }
 
 // Re-entrancy guard is the very FIRST thing checked, before any other side
@@ -7478,8 +7510,11 @@ function showShareCard() {
   // Starting board mini-grid — reflects live piece shape, colour, brightness & hue
   const grid = document.getElementById('share-board-grid');
   grid.innerHTML = '';
-  const boardFilterStr = `brightness(${d.boardBrightness / 100}) hue-rotate(${d.boardHue}deg)`;
-  grid.style.filter = boardFilterStr;
+  // Scoped custom properties (read by .share-sq::before) instead of a filter
+  // on the grid itself — a filter here would also tint the piece spans
+  // painted on top of each square, same issue as the live board.
+  grid.style.setProperty('--share-board-brightness', d.boardBrightness / 100);
+  grid.style.setProperty('--share-board-hue', d.boardHue + 'deg');
   grid.style.setProperty('--sq-light', d.sqLight);
   grid.style.setProperty('--sq-dark',  d.sqDark);
   const pieceFilterBase = `brightness(${d.pieceBrightness / 100})`;
@@ -7979,6 +8014,74 @@ function _consoleSetFilter(level) {
 function _consoleClear() {
   if (window._consoleDash) window._consoleDash.clear();
   _consoleDashRenderAll();
+}
+
+// ─── FEN diagnostic export ───────────────────────────────────────────────────
+// Dumps everything needed to reproduce an engine issue outside the app:
+// the game's starting FEN, move list, current position (both standard FEN
+// and the exact engine-flavoured FEN Pet Dragon was actually sent), and the
+// strength/skill settings in effect for each side. Downloaded as .txt rather
+// than shown in-app since it's meant to be attached to a bug report, not read
+// on the phone.
+function _consoleDownloadFen() {
+  const lines = [];
+  lines.push('Pet Dragon — diagnostic FEN export');
+  lines.push('Generated: ' + new Date().toString());
+  lines.push('');
+
+  if (!customBoard) {
+    lines.push('No game in progress — nothing to export.');
+  } else {
+    const engPreset = DIFFICULTY_PRESETS[selectedDifficulty] || null;
+    const plyPreset = DIFFICULTY_PRESETS[riggerPlayerDifficulty] || null;
+
+    lines.push('── Game ──');
+    lines.push('Status: ' + (customGameOver ? 'Game over' : 'In progress') + (customInCheck ? ' (in check)' : ''));
+    lines.push('Turn to move: ' + (customTurn === 'w' ? 'White' : 'Black'));
+    lines.push('Player is playing: ' + (playerColor === 'w' ? 'White' : 'Black'));
+    lines.push('Autoplay (AI plays for player): ' + (autoPlayEnabled ? 'ON' : 'OFF'));
+    lines.push('');
+
+    lines.push('── Strength / skill level ──');
+    lines.push('Opponent — ' + (engPreset ? engPreset.name : '?') + '  (Skill Level ' + engineSkillLevel + ', movetime ' + engineMoveTime + 'ms, blunder ' + (engPreset ? engPreset.blunder : '?') + ')');
+    lines.push('Player side AI (used when autoplay is on) — ' + (plyPreset ? plyPreset.name : '?') + '  (Skill Level ' + playerEngineSkillLevel + ', movetime ' + playerEngineMoveTime + 'ms)');
+    lines.push('');
+
+    lines.push('── Moves so far (SAN) ──');
+    lines.push(moveHistory.length ? moveHistory.join(' ') : '(none — start position)');
+    lines.push('');
+
+    lines.push('── Starting FEN ──');
+    lines.push(gameStartFen || '(not set)');
+    lines.push('');
+
+    lines.push('── Current position — standard FEN ──');
+    lines.push(boardStateToFen(customBoard, customTurn));
+    lines.push('');
+
+    lines.push('── Current position — engine FEN (exact string sent to Pet Dragon, includes its non-standard pawn-starts field) ──');
+    lines.push(boardStateToEngineFen(customBoard, customTurn));
+    lines.push('');
+  }
+
+  lines.push('── Recent console messages ──');
+  const entries = window._consoleDash ? window._consoleDash.buffer : [];
+  if (entries.length) {
+    entries.forEach(e => lines.push('[' + _consoleDashFormatTime(e.time) + '] ' + e.level.toUpperCase() + ': ' + e.text));
+  } else {
+    lines.push('(none)');
+  }
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  a.href = url;
+  a.download = 'pet-dragon-fen-' + ts + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 </script>
 </body>
