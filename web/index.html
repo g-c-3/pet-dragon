@@ -928,6 +928,68 @@
     margin: 0; text-align: center; letter-spacing: 0.3px;
   }
 
+  /* ── Game Rigger Dashboard (secret: triple-tap the Level badge) ───────────── */
+  #rigger-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.62);
+    display: none; align-items: center; justify-content: center;
+    z-index: 850; backdrop-filter: blur(5px);
+  }
+  #rigger-overlay.show { display: flex; }
+
+  #rigger-modal {
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: clamp(10px, calc(18px * var(--s)), 22px);
+    padding: clamp(0.7rem, calc(1.3rem * var(--s)), 1.9rem)
+             clamp(0.7rem, calc(1.4rem * var(--s)), 2rem);
+    width: min(clamp(300px, calc(460px * var(--s)), 540px), 94vw);
+    max-height: min(90dvh, 90vh);
+    overflow-y: auto;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.75);
+    display: flex; flex-direction: column;
+    gap: clamp(0.6rem, calc(0.9rem * var(--s)), 1.3rem);
+  }
+
+  #rigger-modal h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(0.85rem, calc(1.1rem * var(--s)), 1.4rem);
+    background: linear-gradient(135deg, #fff 0%, var(--accent2) 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0; text-align: center; letter-spacing: 0.3px;
+  }
+
+  .rigger-hint {
+    font-family: 'DM Mono', monospace;
+    font-size: clamp(0.5rem, calc(0.62rem * var(--s)), 0.7rem);
+    color: var(--text-muted); line-height: 1.4; text-align: center;
+    margin-top: -0.3rem;
+  }
+
+  .rigger-side-block {
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: clamp(8px, calc(12px * var(--s)), 16px);
+    padding: clamp(0.5rem, calc(0.7rem * var(--s)), 1rem);
+    display: flex; flex-direction: column;
+    gap: clamp(0.35rem, calc(0.45rem * var(--s)), 0.6rem);
+    background: rgba(255,255,255,0.02);
+  }
+  .rigger-side-block.engine-block { border-color: rgba(233,69,96,0.28); }
+  .rigger-side-block.player-block { border-color: rgba(245,166,35,0.28); }
+
+  .rigger-side-label {
+    font-family: 'DM Mono', monospace;
+    font-size: clamp(0.56rem, calc(0.68rem * var(--s)), 0.78rem);
+    letter-spacing: 0.6px; text-transform: uppercase; color: var(--text);
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    flex-wrap: wrap;
+  }
+  .rigger-side-label .rigger-side-note {
+    text-transform: none; letter-spacing: 0; color: var(--text-muted);
+    font-size: clamp(0.5rem, calc(0.58rem * var(--s)), 0.64rem);
+  }
+
   /* Tab selector — Board / Pieces */
   .cdash-tabs {
     display: flex; border-radius: 999px;
@@ -2638,6 +2700,52 @@
   </div>
 </div>
 
+<!-- Game Rigger Dashboard (secret: triple-tap the Level badge, in-game only) -->
+<div id="rigger-overlay">
+  <div id="rigger-modal">
+    <h3>🎲 Game Rigger</h3>
+    <div class="rigger-hint">Set each side's engine strength independently — only the Engine's Side ever shows on the Level badge.</div>
+
+    <!-- Engine's Side -->
+    <div class="rigger-side-block engine-block">
+      <div class="rigger-side-label">⚔️ Engine's Side <span class="rigger-side-note">shown on badge</span></div>
+      <div class="diff-info-row">
+        <span class="diff-name-badge" id="rig-eng-skill-label">Medium I</span>
+        <span class="diff-elo" id="rig-eng-elo">⚔️</span>
+      </div>
+      <div class="diff-desc" id="rig-eng-desc">Thinks ahead carefully</div>
+      <div class="diff-tier-grid" id="rig-eng-tier-grid">
+        <button class="diff-tier-card" data-tier="0" onclick="_riggerPickTier('eng',0)"><span class="diff-tier-emoji">😴</span><span class="diff-tier-name">Easiest</span></button>
+        <button class="diff-tier-card" data-tier="1" onclick="_riggerPickTier('eng',1)"><span class="diff-tier-emoji">🙂</span><span class="diff-tier-name">Easy</span></button>
+        <button class="diff-tier-card" data-tier="2" onclick="_riggerPickTier('eng',2)"><span class="diff-tier-emoji">⚡</span><span class="diff-tier-name">Medium</span></button>
+        <button class="diff-tier-card" data-tier="3" onclick="_riggerPickTier('eng',3)"><span class="diff-tier-emoji">🔥</span><span class="diff-tier-name">Hard</span></button>
+        <button class="diff-tier-card" data-tier="4" onclick="_riggerPickTier('eng',4)"><span class="diff-tier-emoji">💀</span><span class="diff-tier-name">Hardest</span></button>
+      </div>
+      <div class="diff-sub-box"><div class="diff-sub-pips" id="rig-eng-sub-pips"></div></div>
+    </div>
+
+    <!-- Player's Engine Side -->
+    <div class="rigger-side-block player-block">
+      <div class="rigger-side-label">🤺 Player's Engine Side <span class="rigger-side-note">autoplay only, hidden</span></div>
+      <div class="diff-info-row">
+        <span class="diff-name-badge" id="rig-ply-skill-label">Medium I</span>
+        <span class="diff-elo" id="rig-ply-elo">⚔️</span>
+      </div>
+      <div class="diff-desc" id="rig-ply-desc">Thinks ahead carefully</div>
+      <div class="diff-tier-grid" id="rig-ply-tier-grid">
+        <button class="diff-tier-card" data-tier="0" onclick="_riggerPickTier('ply',0)"><span class="diff-tier-emoji">😴</span><span class="diff-tier-name">Easiest</span></button>
+        <button class="diff-tier-card" data-tier="1" onclick="_riggerPickTier('ply',1)"><span class="diff-tier-emoji">🙂</span><span class="diff-tier-name">Easy</span></button>
+        <button class="diff-tier-card" data-tier="2" onclick="_riggerPickTier('ply',2)"><span class="diff-tier-emoji">⚡</span><span class="diff-tier-name">Medium</span></button>
+        <button class="diff-tier-card" data-tier="3" onclick="_riggerPickTier('ply',3)"><span class="diff-tier-emoji">🔥</span><span class="diff-tier-name">Hard</span></button>
+        <button class="diff-tier-card" data-tier="4" onclick="_riggerPickTier('ply',4)"><span class="diff-tier-emoji">💀</span><span class="diff-tier-name">Hardest</span></button>
+      </div>
+      <div class="diff-sub-box"><div class="diff-sub-pips" id="rig-ply-sub-pips"></div></div>
+    </div>
+
+    <button class="picker-close" onclick="_riggerClose()">Done</button>
+  </div>
+</div>
+
 <div class="main">
   <!-- Left column: stacked player bars -->
   <div class="board-section">
@@ -3014,6 +3122,17 @@ let blunderChance = 0;
 const ENGINE_MOVE_TIME_MS = 30000;
 let engineMoveTime = ENGINE_MOVE_TIME_MS;  // ms think-time given to Pet Dragon per move
 let engineSkillLevel = 9;  // Pet Dragon's Skill Level (0-20, 20 = full strength)
+
+// ── Game Rigger ───────────────────────────────────────────────────────────
+// A second, fully independent skill level used ONLY for moves the engine
+// plays on the human's behalf via the AI-assist/autoplay toggle. The real
+// opponent always uses engineSkillLevel above (the only thing ever shown on
+// the #difficulty-badge). Set/read via the secret dashboard (triple-tap the
+// badge); mirrored back to engineSkillLevel every time a new game starts —
+// nothing here persists across games or reloads.
+let playerEngineSkillLevel = 9;
+let playerEngineMoveTime   = ENGINE_MOVE_TIME_MS; // fixed budget, same as engine's side — skill alone drives strength
+let riggerPlayerDifficulty = 8; // index into DIFFICULTY_PRESETS, mirrors selectedDifficulty by default
 let dragFrom = null;
 let dragGhost = document.getElementById('drag-ghost');
 
@@ -3351,7 +3470,14 @@ async function engineMove() {
     // this awaits a postMessage round-trip rather than blocking the main
     // thread — the UI, clock, and Abort/Resign buttons all stay responsive
     // even during a 30-second "Hardest" think.
-    const bestmove = await window.petDragonSearch(currentFen, engineMoveTime, engineSkillLevel);
+    // Game Rigger: if this move is being made FOR the human (autoplay is on
+    // and it's the player's turn), use the independent playerEngineSkillLevel
+    // instead of the real opponent's engineSkillLevel. The badge only ever
+    // reflects engineSkillLevel, so this stays invisible either way.
+    const movingForPlayer = (customTurn === playerColor);
+    const moveSkill = movingForPlayer ? playerEngineSkillLevel : engineSkillLevel;
+    const moveTime  = movingForPlayer ? playerEngineMoveTime  : engineMoveTime;
+    const bestmove = await window.petDragonSearch(currentFen, moveTime, moveSkill);
 
     _stopEvalThinkingAnimation();
 
@@ -4486,6 +4612,12 @@ function setupStart() {
   blunderChance = preset.blunder;
   engineMoveTime = ENGINE_MOVE_TIME_MS; // fixed for all difficulties — skill alone drives strength/timing
   engineSkillLevel = preset.skill;  // Pet Dragon's own Skill Level (0-20)
+  // Game Rigger: reset the player's-side (autoplay) level to mirror the
+  // engine's side by default at the start of every game — any rigging from
+  // a previous game never carries over.
+  riggerPlayerDifficulty = selectedDifficulty;
+  playerEngineSkillLevel = preset.skill;
+  playerEngineMoveTime   = ENGINE_MOVE_TIME_MS;
   playerColor = setupColor === 'white' ? 'w' : 'b';
   boardFlipped = playerColor === 'b';
 
@@ -4514,6 +4646,144 @@ function setupStart() {
   // Start
   startGame();
 }
+
+// ─── Game Rigger Dashboard ──────────────────────────────────────────────────
+// Secret trigger  : triple-tap/click #difficulty-badge (in-game header only —
+//                    the pre-game setup screen's own label is untouched).
+// Engine's Side   : the real opponent. Same source of truth as the normal
+//                    setup picker (selectedDifficulty/engineSkillLevel) — the
+//                    only thing ever shown on the Level badge.
+// Player's Side   : used ONLY for moves the AI-assist/autoplay toggle makes
+//                    on the human's behalf. Fully independent, never shown
+//                    anywhere in the UI.
+// Persistence     : none by design — always resets to mirror the Engine's
+//                    Side the moment a new game starts (see setupStart()).
+
+function _riggerBuildSubPips(side, tier) {
+  const pipsEl = document.getElementById('rig-' + side + '-sub-pips');
+  if (!pipsEl) return;
+
+  const level  = side === 'eng' ? selectedDifficulty : riggerPlayerDifficulty;
+  const count  = 4;
+  const subIdx = level - tier * 4;
+  const color  = TIER_COLORS[tier];
+  const romans = ['I','II','III','IV'];
+
+  pipsEl.innerHTML = '';
+
+  const row = document.createElement('div');
+  row.className = 'diff-notch-row';
+  for (let i = 0; i < count; i++) {
+    const notch = document.createElement('div');
+    const isActive = i === subIdx;
+    const isFilled = i < subIdx;
+    notch.className = 'diff-notch' + (isActive ? ' active' : isFilled ? ' filled' : '');
+    notch.style.setProperty('--diff-notch-color', color);
+    notch.title = DIFFICULTY_PRESETS[tier * 4 + i].name;
+    notch.onclick = () => _riggerPickLevel(side, tier * 4 + i);
+    row.appendChild(notch);
+  }
+
+  const labelRow = document.createElement('div');
+  labelRow.className = 'diff-notch-labels';
+  for (let i = 0; i < count; i++) {
+    const lbl = document.createElement('div');
+    lbl.className = 'diff-notch-label' + (i === subIdx ? ' active' : '');
+    lbl.style.setProperty('--diff-notch-color', color);
+    lbl.textContent = romans[i];
+    lbl.onclick = () => _riggerPickLevel(side, tier * 4 + i);
+    labelRow.appendChild(lbl);
+  }
+
+  pipsEl.appendChild(row);
+  pipsEl.appendChild(labelRow);
+}
+
+function _riggerRenderPicker(side, level) {
+  const preset     = DIFFICULTY_PRESETS[level];
+  const activeTier = preset.tier;
+  const color      = TIER_COLORS[activeTier];
+
+  const cards = document.querySelectorAll('#rig-' + side + '-tier-grid .diff-tier-card');
+  cards.forEach(card => {
+    const t = parseInt(card.dataset.tier);
+    card.style.setProperty('--tc', TIER_COLORS[t]);
+    card.classList.toggle('active', t === activeTier);
+  });
+
+  const nameBadge = document.getElementById('rig-' + side + '-skill-label');
+  const eloEl     = document.getElementById('rig-' + side + '-elo');
+  const descEl    = document.getElementById('rig-' + side + '-desc');
+  if (nameBadge) { nameBadge.textContent = preset.name; nameBadge.style.color = color; }
+  if (eloEl)     eloEl.textContent = preset.elo;
+  if (descEl)    descEl.textContent = preset.desc;
+
+  _riggerBuildSubPips(side, activeTier);
+}
+
+function _riggerPickTier(side, tier) {
+  _riggerPickLevel(side, tier * 4);
+}
+
+function _riggerPickLevel(side, level) {
+  const preset = DIFFICULTY_PRESETS[level];
+  if (side === 'eng') {
+    // Engine's Side IS the real opponent — route through the same state the
+    // normal setup picker uses, so the badge, engineSkillLevel/engineMoveTime
+    // and blunder chance all update exactly as if picked at game setup.
+    selectedDifficulty = level;
+    engineSkillLevel = preset.skill;
+    engineMoveTime   = ENGINE_MOVE_TIME_MS;
+    blunderChance    = preset.blunder;
+    const badge = document.getElementById('difficulty-badge');
+    if (badge) badge.textContent = 'Level: ' + preset.emoji + ' ' + preset.name;
+  } else {
+    // Player's Side — only ever consulted when autoplay is making a move for
+    // the human. Never touches the badge or blunder chance.
+    riggerPlayerDifficulty = level;
+    playerEngineSkillLevel = preset.skill;
+    playerEngineMoveTime   = ENGINE_MOVE_TIME_MS;
+  }
+  _riggerRenderPicker(side, level);
+}
+
+function _riggerOpen() {
+  _riggerRenderPicker('eng', selectedDifficulty);
+  _riggerRenderPicker('ply', riggerPlayerDifficulty);
+  document.getElementById('rigger-overlay').classList.add('show');
+}
+
+function _riggerClose() {
+  document.getElementById('rigger-overlay').classList.remove('show');
+}
+
+// ── Triple-tap trigger on the in-game Level badge only ─────────────────────
+(function () {
+  let tapCount = 0;
+  let tapTimer = null;
+  const TAP_WINDOW_MS = 600;
+
+  function armBadgeTapTrigger() {
+    const badge = document.getElementById('difficulty-badge');
+    if (!badge) return;
+    badge.addEventListener('click', () => {
+      tapCount++;
+      clearTimeout(tapTimer);
+      if (tapCount >= 3) {
+        tapCount = 0;
+        _riggerOpen();
+        return;
+      }
+      tapTimer = setTimeout(() => { tapCount = 0; }, TAP_WINDOW_MS);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', armBadgeTapTrigger);
+  } else {
+    armBadgeTapTrigger();
+  }
+})();
 
 function newGame() {
   // If a game was started but not finished, count as an engine win (forfeit)
