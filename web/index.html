@@ -2701,8 +2701,8 @@
              oninput="_cdashOnHue(this.value)">
     </div>
 
-    <!-- Piece shapes -->
-    <div>
+    <!-- Piece shapes (hidden) -->
+    <div style="display:none">
       <div class="cdash-shapes-label">Piece Shape</div>
       <div class="cdash-shape-grid" id="cdash-shape-grid"></div>
     </div>
@@ -6856,8 +6856,16 @@ function handleClockTimeout(who) {
 // Each shape set is { name, svg: { K,Q,R,B,N,P } } where each piece fn(isWhite)
 // returns an inline SVG string using currentColor so --piece-color, brightness
 // and hue-rotate all apply automatically via the .piece CSS filter chain.
-// White pieces: filled + light stroke. Black pieces: filled darker + bolder stroke.
+// White pieces: hollow (fill:none, stroke only). Black pieces: solid filled.
 // Both use currentColor so the colour/hue slider affects them identically.
+//
+// All 11 non-standard sets are built from ONE shared, clearly-readable piece
+// silhouette (King=cross, Queen=5-point crown, Rook=castle, Bishop=mitre+slit,
+// Knight=actual horse-head profile, Pawn=round head) via _mkPieceSet(), varying
+// corner rounding / stroke weight / small accents per style so every style stays
+// visually distinct while every piece stays easy to identify at a glance.
+// Style 11 (Pixel) is hand-built separately since it's a genuinely different
+// blocky construction rather than a rounding variant.
 
 function _svgWrap(w, h, content, isWhite) {
   // Both colours render fully opaque now. White pieces are hollow (fill:none on
@@ -6869,115 +6877,80 @@ function _svgWrap(w, h, content, isWhite) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="100%" height="100%" style="display:block;overflow:visible" fill="currentColor" stroke="currentColor" stroke-opacity="1" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round" opacity="1">${content}</svg>`;
 }
 
-// ── Style 1: Classic Staunton — faithful Staunton silhouettes ─────────────────
-const _SVG_CLASSIC = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><rect x="15" y="11" width="15" height="5" rx="1.5"/><rect x="20" y="2" width="5" height="8.0" rx="1.5"/><rect x="17.5" y="5" width="10" height="4" rx="1.5"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><path d="M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="1.5"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><rect x="12" y="8" width="6" height="7" rx="1.5"/><rect x="19.5" y="8" width="6" height="7" rx="1.5"/><rect x="27" y="8" width="6" height="7" rx="1.5"/><rect x="12" y="15" width="21" height="18" rx="1.5"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/><line x1="19.5" y1="12.5" x2="25.5" y2="15" stroke-width="1.30"/><path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><path d="M13 33 L13 24 Q10 18 12 12 Q14 6 20 5 Q23 3 27 6 Q31 4 33 8 Q32 13 29 13 Q31 18 28 24 Q26 29 26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><circle cx="22.5" cy="10" r="6" rx="1.5"/><path d="M17 33 Q16 24 18 16 L27 16 Q29 24 28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-};
+// Shared silhouette generator for the 10 "smooth family" styles.
+// opts: rx (corner rounding), sw (stroke width), slit (bishop mitre slit),
+// grain (wood-grain accent line), rivets (metal rivet dots on rook/queen),
+// tallSpikes (taller king cross / queen crown points), pointedMerlons (rook
+// battlements as pointed roofs instead of square merlons).
+function _mkPieceSet(opts) {
+  const o = Object.assign({ rx: 1.5, sw: 1.6, slit: false, grain: false, rivets: false, tallSpikes: false, pointedMerlons: false }, opts);
+  const rx = o.rx, sw = o.sw;
+  const baseRx = Math.min(rx, 2), footRx = Math.min(rx, 1.5);
+  const base = `<rect x="9" y="33" width="27" height="4" rx="${baseRx}"/><rect x="7" y="37" width="31" height="3" rx="${footRx}"/>`;
+  const dot = (cx, cy, r, w) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${w ? 'currentColor' : 'rgba(255,255,255,0.5)'}" stroke="none"/>`;
+  const crossH = o.tallSpikes ? 10 : 8;
+  const crown = o.tallSpikes
+    ? 'M13 11 L17 2 L20 11 L22.5 0.5 L25 11 L28 2 L32 11 Z'
+    : 'M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z';
+  const merlons = o.pointedMerlons
+    ? `<path d="M12 15 L12 8 L15 5 L18 8 L18 15 Z"/><path d="M19.5 15 L19.5 8 L22.5 5 L25.5 8 L25.5 15 Z"/><path d="M27 15 L27 8 L30 5 L33 8 L33 15 Z"/>`
+    : `<rect x="12" y="8" width="6" height="7" rx="${rx}"/><rect x="19.5" y="8" width="6" height="7" rx="${rx}"/><rect x="27" y="8" width="6" height="7" rx="${rx}"/>`;
 
-// ── Style 2: Modern Staunton — sleek, refined Staunton with smooth curves ──────
-const _SVG_MODERN_STAUNTON = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><rect x="15" y="11" width="15" height="5" rx="3"/><rect x="20" y="2" width="5" height="8.0" rx="3"/><rect x="17.5" y="5" width="10" height="4" rx="3"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><path d="M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="3"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><rect x="12" y="8" width="6" height="7" rx="3"/><rect x="19.5" y="8" width="6" height="7" rx="3"/><rect x="27" y="8" width="6" height="7" rx="3"/><rect x="12" y="15" width="21" height="18" rx="3"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/><path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><path d="M13 33 L13 24 Q10 18 12 12 Q14 6 20 5 Q23 3 27 6 Q31 4 33 8 Q32 13 29 13 Q31 18 28 24 Q26 29 26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><circle cx="22.5" cy="10" r="6" rx="3"/><path d="M17 33 Q16 24 18 16 L27 16 Q29 24 28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-};
+  return {
+    K: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><rect x="15" y="11" width="15" height="5" rx="${rx}"/><rect x="20" y="2" width="5" height="${crossH}" rx="${rx}"/><rect x="17.5" y="5" width="10" height="4" rx="${rx}"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/>${o.grain ? '<path d="M17 21 Q22.5 25 18 30" fill="none"/>' : ''}${base}</g>`, w),
 
-// ── Style 3: Flat Minimal — clean flat icons, no gradients ────────────────────
-const _SVG_FLAT_MINIMAL = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.2"><rect x="15" y="11" width="15" height="5" rx="4"/><rect x="20" y="2" width="5" height="8.0" rx="4"/><rect x="17.5" y="5" width="10" height="4" rx="4"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="4"/><rect x="7" y="37" width="31" height="3" rx="4"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.2"><path d="M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="4"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="4"/><rect x="7" y="37" width="31" height="3" rx="4"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.2"><rect x="12" y="8" width="6" height="7" rx="4"/><rect x="19.5" y="8" width="6" height="7" rx="4"/><rect x="27" y="8" width="6" height="7" rx="4"/><rect x="12" y="15" width="21" height="18" rx="4"/><rect x="9" y="33" width="27" height="4" rx="4"/><rect x="7" y="37" width="31" height="3" rx="4"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.2"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/><path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="4"/><rect x="7" y="37" width="31" height="3" rx="4"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.2"><path d="M13 33 L13 24 Q10 18 12 12 Q14 6 20 5 Q23 3 27 6 Q31 4 33 8 Q32 13 29 13 Q31 18 28 24 Q26 29 26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="4"/><rect x="7" y="37" width="31" height="3" rx="4"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.2"><circle cx="22.5" cy="10" r="6" rx="4"/><path d="M17 33 Q16 24 18 16 L27 16 Q29 24 28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="4"/><rect x="7" y="37" width="31" height="3" rx="4"/></g>`,w),
-};
+    Q: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><path d="${crown}"/><rect x="13" y="11" width="19" height="5" rx="${rx}"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/>${o.grain ? '<path d="M17 21 Q22.5 25 18 30" fill="none"/>' : ''}${o.rivets ? dot(22.5, 13.5, 1, w) : ''}${base}</g>`, w),
 
-// ── Style 4: Wooden — carved warm wood texture feel with grain lines ───────────
-const _SVG_WOODEN = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><rect x="15" y="11" width="15" height="5" rx="2"/><rect x="20" y="2" width="5" height="8.0" rx="2"/><rect x="17.5" y="5" width="10" height="4" rx="2"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="2"/><rect x="7" y="37" width="31" height="3" rx="2"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><path d="M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="2"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="2"/><rect x="7" y="37" width="31" height="3" rx="2"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><rect x="12" y="8" width="6" height="7" rx="2"/><rect x="19.5" y="8" width="6" height="7" rx="2"/><rect x="27" y="8" width="6" height="7" rx="2"/><rect x="12" y="15" width="21" height="18" rx="2"/><rect x="9" y="33" width="27" height="4" rx="2"/><rect x="7" y="37" width="31" height="3" rx="2"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/><line x1="19.5" y1="12.5" x2="25.5" y2="15" stroke-width="1.30"/><path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="2"/><rect x="7" y="37" width="31" height="3" rx="2"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><path d="M13 33 L13 24 Q10 18 12 12 Q14 6 20 5 Q23 3 27 6 Q31 4 33 8 Q32 13 29 13 Q31 18 28 24 Q26 29 26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="2"/><rect x="7" y="37" width="31" height="3" rx="2"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.6"><circle cx="22.5" cy="10" r="6" rx="2"/><path d="M17 33 Q16 24 18 16 L27 16 Q29 24 28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="2"/><rect x="7" y="37" width="31" height="3" rx="2"/></g>`,w),
-};
+    R: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}">${merlons}<rect x="12" y="15" width="21" height="18" rx="${Math.min(rx, 3)}"/>${o.rivets ? dot(15, 11.5, 1, w) + dot(22.5, 11.5, 1, w) + dot(30, 11.5, 1, w) : ''}${base}</g>`, w),
 
-// ── Style 5: Marble — smooth, sculpted, classical look ────────────────────────
-const _SVG_MARBLE = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.3"><rect x="15" y="11" width="15" height="5" rx="3"/><rect x="20" y="2" width="5" height="8.0" rx="3"/><rect x="17.5" y="5" width="10" height="4" rx="3"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.3"><path d="M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="3"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.3"><rect x="12" y="8" width="6" height="7" rx="3"/><rect x="19.5" y="8" width="6" height="7" rx="3"/><rect x="27" y="8" width="6" height="7" rx="3"/><rect x="12" y="15" width="21" height="18" rx="3"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.3"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/><path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.3"><path d="M13 33 L13 24 Q10 18 12 12 Q14 6 20 5 Q23 3 27 6 Q31 4 33 8 Q32 13 29 13 Q31 18 28 24 Q26 29 26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.3"><circle cx="22.5" cy="10" r="6" rx="3"/><path d="M17 33 Q16 24 18 16 L27 16 Q29 24 28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-};
+    B: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/>${o.slit ? `<line x1="19.5" y1="12.5" x2="25.5" y2="15" stroke-width="${(sw * 0.85).toFixed(2)}"/>` : ''}<path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/>${base}</g>`, w),
 
-// ── Style 6: Outline — clean stroke only, no fill ─────────────────────────────
-const _SVG_OUTLINE = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="2.2"><rect x="15" y="11" width="15" height="5" rx="1.5"/><rect x="20" y="2" width="5" height="8.0" rx="1.5"/><rect x="17.5" y="5" width="10" height="4" rx="1.5"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="2.2"><path d="M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="1.5"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="2.2"><rect x="12" y="8" width="6" height="7" rx="1.5"/><rect x="19.5" y="8" width="6" height="7" rx="1.5"/><rect x="27" y="8" width="6" height="7" rx="1.5"/><rect x="12" y="15" width="21" height="18" rx="1.5"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="2.2"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/><path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="2.2"><path d="M13 33 L13 24 Q10 18 12 12 Q14 6 20 5 Q23 3 27 6 Q31 4 33 8 Q32 13 29 13 Q31 18 28 24 Q26 29 26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="2.2"><circle cx="22.5" cy="10" r="6" rx="1.5"/><path d="M17 33 Q16 24 18 16 L27 16 Q29 24 28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1.5"/><rect x="7" y="37" width="31" height="3" rx="1.5"/></g>`,w),
-};
+    N: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><path d="M14 33 L14 25 Q10 23 10 19 Q9 15 11 12 Q9 11 9 9 Q9 7 13 6 Q14 4 17 5 L17 9 L20 3 L23 8 Q26 6 30 7 Q33 9 32 12 Q35 14 32 17 Q30 20 30 24 L30 33 Z"/>${dot(11.5, 10.5, 1, !w)}${base}</g>`, w),
 
-// ── Style 7: Metal — bold bevelled, industrial shapes ─────────────────────────
-const _SVG_METAL = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><rect x="15" y="11" width="15" height="5" rx="1"/><rect x="20" y="2" width="5" height="8.0" rx="1"/><rect x="17.5" y="5" width="10" height="4" rx="1"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1"/><rect x="7" y="37" width="31" height="3" rx="1"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><path d="M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="1"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1"/><rect x="7" y="37" width="31" height="3" rx="1"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><rect x="12" y="8" width="6" height="7" rx="1"/><rect x="19.5" y="8" width="6" height="7" rx="1"/><rect x="27" y="8" width="6" height="7" rx="1"/><rect x="12" y="15" width="21" height="18" rx="1"/><rect x="9" y="33" width="27" height="4" rx="1"/><rect x="7" y="37" width="31" height="3" rx="1"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/><line x1="19.5" y1="12.5" x2="25.5" y2="15" stroke-width="1.60"/><path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1"/><rect x="7" y="37" width="31" height="3" rx="1"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><path d="M13 33 L13 24 Q10 18 12 12 Q14 6 20 5 Q23 3 27 6 Q31 4 33 8 Q32 13 29 13 Q31 18 28 24 Q26 29 26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="1"/><rect x="7" y="37" width="31" height="3" rx="1"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><circle cx="22.5" cy="10" r="6" rx="1"/><path d="M17 33 Q16 24 18 16 L27 16 Q29 24 28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="1"/><rect x="7" y="37" width="31" height="3" rx="1"/></g>`,w),
-};
+    P: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><circle cx="22.5" cy="10" r="6"/><path d="M17 33 Q16 23 18.5 16 L26.5 16 Q29 23 28 33 Z"/>${o.grain ? '<path d="M19 20 Q22.5 24 19 29" fill="none"/>' : ''}${base}</g>`, w),
+  };
+}
 
-// ── Style 8: Glass — translucent outline with subtle highlights ────────────────
-const _SVG_GLASS = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><rect x="15" y="11" width="15" height="5" rx="3"/><rect x="20" y="2" width="5" height="8.0" rx="3"/><rect x="17.5" y="5" width="10" height="4" rx="3"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><path d="M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="3"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><rect x="12" y="8" width="6" height="7" rx="3"/><rect x="19.5" y="8" width="6" height="7" rx="3"/><rect x="27" y="8" width="6" height="7" rx="3"/><rect x="12" y="15" width="21" height="18" rx="3"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/><path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><path d="M13 33 L13 24 Q10 18 12 12 Q14 6 20 5 Q23 3 27 6 Q31 4 33 8 Q32 13 29 13 Q31 18 28 24 Q26 29 26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.4"><circle cx="22.5" cy="10" r="6" rx="3"/><path d="M17 33 Q16 24 18 16 L27 16 Q29 24 28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="3"/><rect x="7" y="37" width="31" height="3" rx="3"/></g>`,w),
-};
+// ── Style 1: Classic — faithful Staunton silhouettes ──────────────────────────
+const _SVG_CLASSIC = _mkPieceSet({ rx: 1.5, sw: 1.6, slit: true });
 
-// ── Style 9: Medieval — blocky castle / heraldic style ────────────────────────
-const _SVG_MEDIEVAL = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><rect x="15" y="11" width="15" height="5"/><rect x="20" y="2.00" width="5" height="8.0"/><rect x="17.5" y="5" width="10" height="4"/><path d="M13 33 L15 23 L17 16 L28 16 L30 23 L32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><path d="M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="0"/><path d="M13 33 L15 23 L17 16 L28 16 L30 23 L32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><rect x="12" y="8" width="6" height="7" rx="0"/><rect x="19.5" y="8" width="6" height="7" rx="0"/><rect x="27" y="8" width="6" height="7" rx="0"/><rect x="12" y="15" width="21" height="18" rx="0"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 L27 11 L26 16 L19 16 L18 11 Z"/><path d="M13 33 L15 23 L18 16 L27 16 L30 23 L32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><path d="M13 33 L13 24 L11 18 L12 12 L15 7 L20 5 L23 3 L27 6 L31 4 L33 8 L32 13 L29 13 L28 18 L26 24 L26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.9"><circle cx="22.5" cy="10" r="6" rx="0"/><path d="M17 33 L16.5 24 L18 16 L27 16 L28.5 24 L28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-};
+// ── Style 2: Modern — sleek, refined Staunton with smooth curves ──────────────
+const _SVG_MODERN_STAUNTON = _mkPieceSet({ rx: 3, sw: 1.4 });
 
-// ── Style 10: Gothic — tall pointed arches, ornate spires ─────────────────────
-const _SVG_GOTHIC = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.7"><rect x="15" y="11" width="15" height="5" rx="0"/><rect x="20" y="2" width="5" height="12.8" rx="0"/><rect x="17.5" y="5" width="10" height="4" rx="0"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.7"><path d="M13 11 L17 3 L20 11 L22.5 1 L25 11 L28 3 L32 11 Z"/><rect x="13" y="11" width="19" height="5" rx="0"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.7"><polygon points="12,15 12,8 15,5 18,8 18,15"/><polygon points="19.5,15 19.5,8 22.5,5 25.5,8 25.5,15"/><polygon points="27,15 27,8 30,5 33,8 33,15"/><rect x="12" y="15" width="21" height="18" rx="0"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.7"><circle cx="22.5" cy="1" r="2.3"/><path d="M22.5 4 Q28 7 27 16 L18 16 Q17 7 22.5 4 Z"/><path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.7"><path d="M13 33 L13 24 Q10 18 12 12 Q14 6 20 5 Q26 0 27 6 Q31 4 33 8 Q32 13 29 13 Q31 18 28 24 Q26 29 26 33 Z"/><circle cx="17" cy="14" r="2" fill="${w?'rgba(0,0,0,0.35)':'rgba(255,255,255,0.45)'}" stroke="none"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" stroke-width="1.7"><path d="M22.5 2 Q27 8 25 16 L20 16 Q18 8 22.5 2 Z"/><path d="M17 33 Q16 24 18 16 L27 16 Q29 24 28 33 Z"/><rect x="9" y="33" width="27" height="4" rx="0"/><rect x="7" y="37" width="31" height="3" rx="0"/></g>`,w),
-};
+// ── Style 3: Minimal — clean flat icons, no accents ────────────────────────────
+const _SVG_FLAT_MINIMAL = _mkPieceSet({ rx: 4.5, sw: 1.1 });
 
-// ── Style 11: Pixel — 8-bit blocky pixel art pieces ───────────────────────────
+// ── Style 4: Wooden — carved warm-wood feel with a grain line ─────────────────
+const _SVG_WOODEN = _mkPieceSet({ rx: 2, sw: 1.6, slit: true, grain: true });
+
+// ── Style 5: Marble — smooth, sculpted, classical look ─────────────────────────
+const _SVG_MARBLE = _mkPieceSet({ rx: 3, sw: 1.3 });
+
+// ── Style 6: Outline — bold stroke, clean silhouette ────────────────────────────
+const _SVG_OUTLINE = _mkPieceSet({ rx: 1.5, sw: 2.2 });
+
+// ── Style 7: Metal — bold bevelled, industrial rivets ──────────────────────────
+const _SVG_METAL = _mkPieceSet({ rx: 1, sw: 1.9, slit: true, rivets: true });
+
+// ── Style 8: Glass — light, rounded, translucent-feeling stroke ────────────────
+const _SVG_GLASS = _mkPieceSet({ rx: 3, sw: 1.4 });
+
+// ── Style 9: Medieval — blocky, square-cut heraldic style ─────────────────────
+const _SVG_MEDIEVAL = _mkPieceSet({ rx: 0, sw: 1.9, slit: true });
+
+// ── Style 10: Gothic — tall spires, pointed battlements ────────────────────────
+const _SVG_GOTHIC = _mkPieceSet({ rx: 0, sw: 1.7, tallSpikes: true, pointedMerlons: true });
+
+// ── Style 11: Pixel — 8-bit blocky pixel art, including a real pixel horse head
 const _SVG_PIXEL = {
   K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="20" y="2" width="5" height="4"/><rect x="17" y="6" width="11" height="4"/><rect x="16" y="10" width="13" height="5"/><rect x="12" y="15" width="21" height="18"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
   Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="10" y="4" width="4" height="6"/><rect x="20" y="2" width="5" height="6"/><rect x="31" y="4" width="4" height="6"/><rect x="14" y="10" width="17" height="5"/><rect x="12" y="15" width="21" height="18"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
   R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="12" y="5" width="5" height="6"/><rect x="20" y="5" width="5" height="6"/><rect x="28" y="5" width="5" height="6"/><rect x="12" y="11" width="21" height="4"/><rect x="12" y="15" width="21" height="18"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
   B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="20" y="3" width="5" height="4"/><rect x="17" y="7" width="11" height="6"/><rect x="15" y="13" width="15" height="5"/><rect x="13" y="18" width="19" height="15"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="10" y="6" width="14" height="4"/><rect x="8" y="10" width="14" height="4"/><rect x="10" y="14" width="18" height="4"/><rect x="14" y="18" width="18" height="15"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
+  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="27" y="3" width="3" height="3"/><rect x="24" y="6" width="9" height="3"/><rect x="21" y="9" width="15" height="3"/><rect x="18" y="12" width="18" height="3"/><rect x="12" y="15" width="21" height="3"/><rect x="9" y="18" width="9" height="3"/><rect x="24" y="18" width="12" height="3"/><rect x="15" y="21" width="21" height="3"/><rect x="18" y="24" width="18" height="3"/><rect x="21" y="27" width="12" height="3"/><rect x="21" y="30" width="12" height="3"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
   P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="18" y="4" width="9" height="8"/><rect x="16" y="16" width="13" height="17"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
 };
+
 
 
 // ── Master shape registry ──────────────────────────────────────────────────────
@@ -6987,8 +6960,8 @@ const _SVG_PIXEL = {
 
 const _CDASH_SHAPES = [
   { name: 'Standard',        svgSet: null                   }, // index 0 — unicode fallback
-  { name: 'C Staun',         svgSet: _SVG_CLASSIC           },
-  { name: 'M Staun',         svgSet: _SVG_MODERN_STAUNTON   },
+  { name: 'Classic',         svgSet: _SVG_CLASSIC           },
+  { name: 'Modern',          svgSet: _SVG_MODERN_STAUNTON   },
   { name: 'Minimal',         svgSet: _SVG_FLAT_MINIMAL      },
   { name: 'Wooden',          svgSet: _SVG_WOODEN            },
   { name: 'Marble',          svgSet: _SVG_MARBLE            },
