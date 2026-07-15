@@ -85,7 +85,12 @@ pub struct Position {
     // ⚠️ Pet Dragon: hash encodes pawn start configuration, so positions
     // from different Pet Dragon games with same piece placement but different
     // pawn starts will have different hashes — no false repetition detection.
-    pub game_history: Vec<u64>,
+    //
+    // D45: each entry also caches a "repetition" distance, matching
+    // Stockfish's StateInfo::repetition field exactly — see
+    // push_game_history()'s doc comment for the full algorithm. This makes
+    // is_repetition() an O(1) lookup instead of an unbounded backward scan.
+    pub game_history: Vec<(u64, i32)>,
 }
 
 /// State saved before making a move, restored during unmake
@@ -512,15 +517,74 @@ impl Position {
     }
 }
 
-// ── Repetition detection ──────────────────────────────────────────────────────
-
+// ── Repetition detection (D45 — Stockfish-equivalent algorithm) ────────────────
+//
+// Mirrors Stockfish's Position::set_state()/is_draw(ply) exactly, adapted to
+// this project's flat Vec<(hash, repetition)> history instead of Stockfish's
+// linked StateInfo chain. Two ideas, both load-bearing:
+//
+// 1. BOUNDED, CACHED backward walk. push_game_history() looks back at most
+//    halfmove_clock plies (no point checking further than the last pawn
+//    move/capture — that position is provably not a repeat) and caches the
+//    result once, at push time — O(halfmove_clock/2) amortized per push,
+//    O(1) per is_repetition() lookup, instead of the previous unbounded
+//    O(game_length) scan on every single draw check. Pet Dragon's null-move
+//    pruning (alpha_beta.rs) mutates pos.hash/side_to_move directly and
+//    never calls push_game_history() at all, so — unlike Stockfish, which
+//    also bounds by pliesFromNull — there's no separate null-move-poisoning
+//    concern to guard against here.
+//
+// 2. PLY-RELATIVE draw decision. The cached value's SIGN distinguishes "this
+//    position has been seen once before" (positive: draw only if that seen-
+//    before position was itself reached by moves the search chose, not
+//    purely inherited from real game history that predates the search) from
+//    "this position is part of a genuine 3-fold chain" (negative: always a
+//    draw, since a real 3-fold on the board is a real draw regardless of
+//    when in the search tree it's noticed). This is what keeps the search
+//    from treating a single repeat sitting in real, unchangeable game
+//    history as an artificial draw it can't actually do anything about,
+//    while still fully respecting an actual 3-fold the moment one exists.
 impl Position {
-    /// Record the current position hash in game history.
-    /// Call this AFTER make_move() — records the new position.
-    /// The search calls this to track positions for repetition detection.
+    /// Record the current position hash in game history, computing and
+    /// caching its "repetition" distance in the same step — this is the
+    /// Pet Dragon equivalent of Stockfish's `Position::set_state()` repetition
+    /// block. Call this AFTER make_move() — records the new position.
+    ///
+    /// The cached value is:
+    /// - `0` if no match was found within the bounded backward walk.
+    /// - `+i` if a match was found `i` plies back, and that matched
+    ///   position's OWN cached value was `0` (a first repeat).
+    /// - `-i` if a match was found `i` plies back, and that matched
+    ///   position's own cached value was already nonzero — meaning this is
+    ///   now the second link in a real repetition chain (functionally a
+    ///   3-fold), encoded via sign rather than a separate flag.
+    ///
+    /// The walk starts at `i = 4`, not `2`: a position cannot repeat after
+    /// only 2 plies (one move by each side) in legal chess, since every
+    /// individual move is a real, irreversible-for-this-purpose change to
+    /// the board — the shortest possible repetition cycle is 4 plies (e.g.
+    /// each side shuffles a piece out and back). Matches Stockfish's own
+    /// loop bounds exactly.
     #[inline]
     pub fn push_game_history(&mut self) {
-        self.game_history.push(self.hash);
+        let current = self.hash;
+        let mut repetition = 0i32;
+
+        let end = self.halfmove_clock as usize;
+        let n   = self.game_history.len();
+        if end >= 4 {
+            let mut i = 4usize;
+            while i <= end && i <= n {
+                let (stp_hash, stp_repetition) = self.game_history[n - i];
+                if stp_hash == current {
+                    repetition = if stp_repetition != 0 { -(i as i32) } else { i as i32 };
+                    break;
+                }
+                i += 2;
+            }
+        }
+
+        self.game_history.push((current, repetition));
     }
 
     /// Remove the last recorded position from game history.
@@ -530,46 +594,40 @@ impl Position {
         self.game_history.pop();
     }
 
-    /// Has the current position occurred before in this game?
-    /// Returns true if the current hash appears 1+ times in game history
-    /// (meaning it has occurred before — this would be the 2nd occurrence,
-    /// making it a draw claim available, or 3rd occurrence = forced draw).
+    /// Is the CURRENT position (the last one pushed to game history) a draw
+    /// by repetition, from the search's point of view at ply `ply` (distance
+    /// from the search root, 0 at root)?
     ///
-    /// We use count >= 1 (not 2) because:
-    /// - game_history contains past positions
-    /// - current position is NOT yet in game_history
-    /// - if current hash appears once in history = 2nd occurrence = draw claimable
-    /// - if appears twice in history = 3rd occurrence = draw by repetition
+    /// `O(1)` — just reads the cached value push_game_history() already
+    /// computed. Returns true if:
+    /// - the cached value is negative (a genuine repetition chain — always
+    ///   a draw, regardless of whether it's within the search tree), OR
+    /// - the cached value is positive AND less than `ply` — meaning the
+    ///   first-repeat's target position was itself reached via moves this
+    ///   search chose along the current branch (`ply - i > 0`), not purely
+    ///   inherited from real game history that predates the search root.
     ///
-    /// For search purposes we return true at 2nd occurrence (draw claimable)
-    /// to be safe and avoid repetition cycles.
+    /// Both conditions collapse into the single Stockfish-equivalent
+    /// expression below: a negative value is always `< ply` for any
+    /// non-root `ply >= 1`, so no separate branch is needed.
     #[inline]
-    pub fn is_repetition(&self) -> bool {
-        let current = self.hash;
-        // game_history contains the current position hash (pushed by
-        // make_move_with_history after the move). So we need count >= 2
-        // in history to mean the position appeared before this move too.
-        // count == 1 means only the just-pushed entry (not a repetition)
-        // count >= 2 means it appeared in a previous position too (repetition)
-        let mut count = 0u32;
-        for &hash in self.game_history.iter().rev() {
-            if hash == current {
-                count += 1;
-                if count >= 2 {
-                    return true;
-                }
-            }
+    pub fn is_repetition(&self, ply: usize) -> bool {
+        match self.game_history.last() {
+            Some(&(_, repetition)) => repetition != 0 && (repetition as i64) < (ply as i64),
+            None => false,
         }
-        false
     }
 
-    /// Is this position a draw by threefold repetition?
-    /// Returns true only if position has occurred 3 or more times total.
-    /// Use is_repetition() in search (conservative), this for game adjudication.
+    /// Is this position a draw by threefold repetition, for actual game-end
+    /// adjudication (NOT the search-tree-relative heuristic above)? Returns
+    /// true only if the position has occurred 3 or more times total, full
+    /// stop — this intentionally does NOT use the cached repetition
+    /// distance or ply-relative logic, since real game-end adjudication
+    /// cares about the literal rule, not what the search tree can see.
     pub fn is_threefold_repetition(&self) -> bool {
         let current = self.hash;
         let mut count = 0u32;
-        for &hash in self.game_history.iter() {
+        for &(hash, _) in self.game_history.iter() {
             if hash == current {
                 count += 1;
             }
@@ -579,10 +637,32 @@ impl Position {
         count >= 3
     }
 
-    /// Load the game history from a list of position hashes.
-    /// Used when loading a game via UCI position command with move list.
+    /// Load the game history from a list of position hashes, in the order
+    /// they occurred. Used when loading a game via UCI position command
+    /// with move list. Currently unused (no caller replays a hash list this
+    /// way — the real `position ... moves ...` handler in main.rs replays
+    /// actual moves through push_game_history() directly instead), but kept
+    /// correct rather than left broken: replays each hash through the exact
+    /// same bounded-walk-and-cache logic push_game_history() uses, so the
+    /// resulting cached values are identical to what they'd be had these
+    /// positions actually been pushed one at a time during real play.
+    ///
+    /// NOTE: this cannot correctly reconstruct halfmove_clock history for
+    /// each intermediate position from a bare hash list alone — it uses
+    /// self.halfmove_clock's CURRENT value for every entry's bound, which
+    /// is only correct if the position's halfmove_clock hasn't changed
+    /// across the entries being loaded (e.g. no pawn moves/captures in the
+    /// replayed sequence). Replaying real moves (as main.rs actually does)
+    /// doesn't have this limitation, since each move naturally updates
+    /// halfmove_clock before its own push_game_history() call.
     pub fn set_game_history(&mut self, hashes: Vec<u64>) {
-        self.game_history = hashes;
+        self.game_history.clear();
+        for hash in hashes {
+            let saved_hash = self.hash;
+            self.hash = hash;
+            self.push_game_history();
+            self.hash = saved_hash;
+        }
     }
 
     /// Clear game history (called on ucinewgame)
@@ -811,5 +891,193 @@ mod tests {
         let display = format!("{}", pos);
         assert!(display.contains('K')); // White king
         assert!(display.contains('k')); // Black king
+    }
+
+    // ── Repetition detection (D45) ──────────────────────────────────────────
+
+    /// Builds the same 4-ply king-shuffle cycle used in alpha_beta.rs's own
+    /// integration test: Ke1-e2, Ke8-e7, Ke2-e1, Ke7-e8 returns to the exact
+    /// starting position, with halfmove_clock correctly reaching 4 (king
+    /// moves don't reset it) — the shortest possible repetition cycle in
+    /// legal chess.
+    fn build_king_shuffle_repetition() -> Position {
+        let fen = "4k3/8/8/8/8/8/8/4K3 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        // Push the starting position first — matches how iterative_deepening()
+        // actually pushes the search root before any moves are made. Without
+        // this, the bounded walk never has enough entries to look back the
+        // full 4 plies to find the match.
+        pos.push_game_history();
+        let find_move = |pos: &Position, from: Square, to: Square| -> Move {
+            crate::movegen::generate_moves(pos)
+                .iter()
+                .find(|m| m.from == from && m.to == to)
+                .copied()
+                .expect("expected king move to be legal")
+        };
+        for (from, to) in [
+            (Square::E1, Square::E2), (Square::E8, Square::E7),
+            (Square::E2, Square::E1), (Square::E7, Square::E8),
+        ] {
+            let mv = find_move(&pos, from, to);
+            pos.make_move_with_history(mv);
+        }
+        pos
+    }
+
+    #[test]
+    fn test_no_repetition_before_the_cycle_completes() {
+        setup();
+        let fen = "4k3/8/8/8/8/8/8/4K3 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        pos.push_game_history(); // matches real search usage — see build_king_shuffle_repetition's comment
+        let find_move = |pos: &Position, from: Square, to: Square| -> Move {
+            crate::movegen::generate_moves(pos)
+                .iter()
+                .find(|m| m.from == from && m.to == to)
+                .copied()
+                .expect("expected king move to be legal")
+        };
+        // Only 2 plies in — Ke1-e2, Ke8-e7. Genuinely impossible for this to
+        // match anything yet (below the i=4 minimum cycle length), so the
+        // cached repetition value must be exactly 0.
+        let mv1 = find_move(&pos, Square::E1, Square::E2);
+        pos.make_move_with_history(mv1);
+        let mv2 = find_move(&pos, Square::E8, Square::E7);
+        pos.make_move_with_history(mv2);
+        assert_eq!(pos.game_history.last().unwrap().1, 0,
+            "No repetition is possible after only 2 plies — cached value must be 0");
+    }
+
+    #[test]
+    fn test_repetition_cached_as_positive_four_at_the_cycle_completes() {
+        setup();
+        let pos = build_king_shuffle_repetition();
+        let (last_hash, last_repetition) = *pos.game_history.last().unwrap();
+        assert_eq!(last_hash, pos.hash,
+            "The final pushed entry must be the current position's own hash");
+        assert_eq!(last_repetition, 4,
+            "First repeat at exactly 4 plies back must cache +4 (positive: a \
+             first repeat, not yet part of a chain — see push_game_history's doc comment)");
+    }
+
+    #[test]
+    fn test_is_repetition_true_when_repeat_is_within_search_tree() {
+        setup();
+        let pos = build_king_shuffle_repetition();
+        // The repeat is 4 plies back; from a search node whose own ply is
+        // anything greater than 4, that repeat happened via moves the
+        // search itself chose along this branch — must be a draw.
+        assert!(pos.is_repetition(5),
+            "A first repeat within the search tree (ply > repetition distance) must be a draw");
+        assert!(pos.is_repetition(10));
+    }
+
+    #[test]
+    fn test_is_repetition_false_when_repeat_predates_search_root() {
+        setup();
+        let pos = build_king_shuffle_repetition();
+        // ply=4 (or less) means the repeated position is at or before the
+        // search root itself — purely inherited from real game history the
+        // search didn't choose, not something it can avoid. Must NOT be
+        // scored as a draw (matches Stockfish's repetition < ply exactly).
+        assert!(!pos.is_repetition(4),
+            "A first repeat exactly at the search root boundary must NOT be scored as a draw");
+        assert!(!pos.is_repetition(1),
+            "A first repeat entirely predating the search tree must NOT be scored as a draw");
+        assert!(!pos.is_repetition(0));
+    }
+
+    #[test]
+    fn test_repetition_chain_cached_as_negative() {
+        setup();
+        let mut pos = build_king_shuffle_repetition();
+        let find_move = |pos: &Position, from: Square, to: Square| -> Move {
+            crate::movegen::generate_moves(pos)
+                .iter()
+                .find(|m| m.from == from && m.to == to)
+                .copied()
+                .expect("expected king move to be legal")
+        };
+        // One more full king-shuffle cycle (4 more plies) returns to the
+        // SAME position a third time. The position 4 plies back from here
+        // is the one built by build_king_shuffle_repetition(), which itself
+        // already had a nonzero (positive) cached repetition — so this new
+        // entry must cache a NEGATIVE value, marking a genuine chain.
+        for (from, to) in [
+            (Square::E1, Square::E2), (Square::E8, Square::E7),
+            (Square::E2, Square::E1), (Square::E7, Square::E8),
+        ] {
+            let mv = find_move(&pos, from, to);
+            pos.make_move_with_history(mv);
+        }
+        let (_, repetition) = *pos.game_history.last().unwrap();
+        assert_eq!(repetition, -4,
+            "A repeat of an already-repeated position must cache a NEGATIVE value \
+             (chain detected), not another plain +4");
+    }
+
+    #[test]
+    fn test_is_repetition_chain_always_true_regardless_of_ply() {
+        setup();
+        let mut pos = build_king_shuffle_repetition();
+        let find_move = |pos: &Position, from: Square, to: Square| -> Move {
+            crate::movegen::generate_moves(pos)
+                .iter()
+                .find(|m| m.from == from && m.to == to)
+                .copied()
+                .expect("expected king move to be legal")
+        };
+        for (from, to) in [
+            (Square::E1, Square::E2), (Square::E8, Square::E7),
+            (Square::E2, Square::E1), (Square::E7, Square::E8),
+        ] {
+            let mv = find_move(&pos, from, to);
+            pos.make_move_with_history(mv);
+        }
+        // Unlike a plain first repeat, a genuine chain (negative cached
+        // value) must be treated as a draw at ANY ply, including ply=1 —
+        // a real 3-fold on the board is a real draw no matter when in the
+        // search tree it's noticed. This is the one case where "purely
+        // inherited from game history" doesn't matter.
+        assert!(pos.is_repetition(1),
+            "A genuine repetition chain must be a draw even at a very shallow ply");
+    }
+
+    #[test]
+    fn test_is_repetition_false_with_no_history() {
+        setup();
+        let pos = Position::start_pos().unwrap();
+        assert!(!pos.is_repetition(5),
+            "A position with no game history at all can't be a repetition");
+    }
+
+    #[test]
+    fn test_is_threefold_repetition_still_uses_plain_count_not_ply() {
+        setup();
+        let mut pos = build_king_shuffle_repetition();
+        // Only 2 occurrences so far (the fen start + this repeat) —
+        // is_threefold_repetition() must NOT fire yet, regardless of ply.
+        assert!(!pos.is_threefold_repetition(),
+            "Only 2 occurrences exist so far — real threefold adjudication must not fire");
+
+        let find_move = |pos: &Position, from: Square, to: Square| -> Move {
+            crate::movegen::generate_moves(pos)
+                .iter()
+                .find(|m| m.from == from && m.to == to)
+                .copied()
+                .expect("expected king move to be legal")
+        };
+        for (from, to) in [
+            (Square::E1, Square::E2), (Square::E8, Square::E7),
+            (Square::E2, Square::E1), (Square::E7, Square::E8),
+        ] {
+            let mv = find_move(&pos, from, to);
+            pos.make_move_with_history(mv);
+        }
+        // Now genuinely the 3rd occurrence — real adjudication must fire,
+        // independent of the search-tree-relative is_repetition() logic.
+        assert!(pos.is_threefold_repetition(),
+            "3rd occurrence must be a real threefold regardless of search ply");
     }
 }
