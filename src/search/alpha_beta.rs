@@ -723,6 +723,7 @@ mod tests {
     use crate::bitboard::magic::init_magic;
     use crate::bitboard::masks::init_masks;
     use crate::position::Position;
+    use crate::types::Square;
     use crate::position::zobrist::init_zobrist;
     use crate::search::SearchInfo;
     use crate::tt::TranspositionTable;
