@@ -2076,6 +2076,7 @@
     flex: 1 1 0; min-width: 0; text-align: center;
     padding-left: calc(0.2rem * var(--s)); padding-right: calc(0.2rem * var(--s));
   }
+  .time-custom-input.time-custom-dhm::placeholder { font-size: 0.82em; letter-spacing: -0.2px; }
   .time-custom-unit { font-size: clamp(0.6rem, calc(0.7rem * var(--s)), 0.8rem); color: var(--text-muted); flex-shrink: 0; }
   .time-custom-set {
     padding: calc(0.3rem * var(--s)) calc(0.6rem * var(--s));
@@ -2979,11 +2980,11 @@
         <div class="time-custom-row">
           <span class="time-custom-label">Custom:</span>
           <div class="time-custom-group">
-            <input class="time-custom-input time-custom-dhm" id="time-custom-days" type="number" min="0" max="365" placeholder="0" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
+            <input class="time-custom-input time-custom-dhm" id="time-custom-days" type="number" min="0" max="365" placeholder="0 - 365" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
             <span class="time-custom-unit">d</span>
-            <input class="time-custom-input time-custom-dhm" id="time-custom-hours" type="number" min="0" max="23" placeholder="0" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
+            <input class="time-custom-input time-custom-dhm" id="time-custom-hours" type="number" min="0" max="23" placeholder="0 - 23" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
             <span class="time-custom-unit">h</span>
-            <input class="time-custom-input time-custom-dhm" id="time-custom-mins" type="number" min="0" max="59" placeholder="0" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
+            <input class="time-custom-input time-custom-dhm" id="time-custom-mins" type="number" min="0" max="59" placeholder="0 - 59" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
             <span class="time-custom-unit">m</span>
           </div>
           <button class="time-custom-set" onclick="applyCustomTime()">Set</button>
