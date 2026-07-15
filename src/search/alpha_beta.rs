@@ -322,7 +322,7 @@ fn alpha_beta_with_excluded(
 
     // ── Draw detection ────────────────────────────────────────────────────────
     // Check repetition BEFORE TT lookup
-    if !root_node && pos.is_repetition() {
+    if !root_node && pos.is_repetition(ply) {
         return draw_score(ply, info.contempt);
     }
 
@@ -773,14 +773,42 @@ mod tests {
     #[test]
     fn test_draw_by_repetition() {
         setup();
-        let mut pos  = Position::start_pos().unwrap();
+        let fen = "4k3/p7/8/8/8/8/P7/4K3 w - - 0 1";
+        let mut pos  = Position::from_fen(fen).unwrap();
         let mut info = SearchInfo::new();
         let tt       = TranspositionTable::new(4);
         info.time_allocated_ms = 60_000;
+        pos.push_game_history(); // matches real search usage — iterative_deepening() pushes the root first
 
-        // Push same position to history multiple times to trigger repetition
-        pos.game_history.push(pos.hash);
-        pos.game_history.push(pos.hash);
+        // Build a REAL 4-ply repetition cycle via legitimate moves and the
+        // real push_game_history() caching (D45) — Ke1-e2, Ke8-e7, Ke2-e1,
+        // Ke7-e8 returns to the exact starting position after 4 plies, with
+        // halfmove_clock correctly reaching 4 (king moves don't reset it).
+        // This is the shortest possible repetition cycle in legal chess —
+        // see D45's doc comment on why push_game_history()'s walk starts at
+        // i=4, not i=2.
+        let find_move = |pos: &Position, from: Square, to: Square| -> Move {
+            crate::movegen::generate_moves(pos)
+                .iter()
+                .find(|m| m.from == from && m.to == to)
+                .copied()
+                .expect("expected king move to be legal")
+        };
+
+        let mv1 = find_move(&pos, Square::E1, Square::E2);
+        pos.make_move_with_history(mv1);
+        let mv2 = find_move(&pos, Square::E8, Square::E7);
+        pos.make_move_with_history(mv2);
+        let mv3 = find_move(&pos, Square::E2, Square::E1);
+        pos.make_move_with_history(mv3);
+        let mv4 = find_move(&pos, Square::E7, Square::E8);
+        pos.make_move_with_history(mv4);
+
+        // Sanity check the setup itself before trusting the search result:
+        // this must be a genuine repetition per is_threefold_repetition()'s
+        // own independent (non-ply-relative) count, or this test wouldn't
+        // actually be exercising what it claims to.
+        assert!(pos.game_history.last().unwrap().0 == pos.hash);
 
         // Search should handle repetition without panicking
         let score = alpha_beta(

@@ -85,7 +85,7 @@ pub fn iterative_deepening(
     // before spawning the search thread. Tests create fresh TTs.
 
     // Record root position in game history
-    pos.game_history.push(pos.hash);
+    pos.push_game_history();
 
     let mut best_move   = Move::NULL;
     let mut best_score  = -INFINITY;
@@ -316,7 +316,7 @@ pub fn iterative_deepening(
     }
 
     // Remove root position from game history
-    pos.game_history.pop();
+    pos.pop_game_history();
 
     // Age history tables for next move
     info.age_history();
