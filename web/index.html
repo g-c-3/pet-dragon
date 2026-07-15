@@ -2071,6 +2071,12 @@
     -webkit-user-select: text !important; user-select: text !important;
   }
   .time-custom-input:focus { border-color: #4FC3F7; }
+  .time-custom-group { display: flex; align-items: center; gap: calc(0.18rem * var(--s)); flex: 1; min-width: 0; }
+  .time-custom-input.time-custom-dhm {
+    flex: 1 1 0; min-width: 0; text-align: center;
+    padding-left: calc(0.2rem * var(--s)); padding-right: calc(0.2rem * var(--s));
+  }
+  .time-custom-unit { font-size: clamp(0.6rem, calc(0.7rem * var(--s)), 0.8rem); color: var(--text-muted); flex-shrink: 0; }
   .time-custom-set {
     padding: calc(0.3rem * var(--s)) calc(0.6rem * var(--s));
     border-radius: calc(7px * var(--s));
@@ -2972,7 +2978,14 @@
         </div>
         <div class="time-custom-row">
           <span class="time-custom-label">Custom:</span>
-          <input class="time-custom-input" id="time-custom-input" type="number" min="1" max="999" placeholder="minutes" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
+          <div class="time-custom-group">
+            <input class="time-custom-input time-custom-dhm" id="time-custom-days" type="number" min="0" max="365" placeholder="0" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
+            <span class="time-custom-unit">d</span>
+            <input class="time-custom-input time-custom-dhm" id="time-custom-hours" type="number" min="0" max="23" placeholder="0" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
+            <span class="time-custom-unit">h</span>
+            <input class="time-custom-input time-custom-dhm" id="time-custom-mins" type="number" min="0" max="59" placeholder="0" inputmode="numeric" pattern="[0-9]*" oninput="onCustomTimeInput()">
+            <span class="time-custom-unit">m</span>
+          </div>
           <button class="time-custom-set" onclick="applyCustomTime()">Set</button>
         </div>
       </div>
@@ -4744,12 +4757,17 @@ function setupStart() {
   boardFlipped = playerColor === 'b';
 
   // Apply custom time if user typed one but didn't click Set
-  const ci = document.getElementById('time-custom-input');
-  if (ci && ci.value && parseInt(ci.value) >= 1) {
-    selectedTimeMinutes = parseInt(ci.value);
+  const cd = document.getElementById('time-custom-days');
+  const ch = document.getElementById('time-custom-hours');
+  const cm = document.getElementById('time-custom-mins');
+  if (cd || ch || cm) {
+    const d = _clampCustomTimeField(cd, 365);
+    const h = _clampCustomTimeField(ch, 23);
+    const m = _clampCustomTimeField(cm, 59);
+    const total = d * 1440 + h * 60 + m;
+    if (total >= 1) selectedTimeMinutes = total;
+    [cd, ch, cm].forEach(el => { if (el) el.blur(); });
   }
-  // Blur any focused input so mobile browser doesn't retain its scroll position
-  if (ci) ci.blur();
   if (document.activeElement && document.activeElement !== document.body) {
     document.activeElement.blur();
   }
@@ -6812,9 +6830,11 @@ function selectTimePreset(mins) {
   document.querySelectorAll('.time-preset-btn').forEach(b => {
     b.classList.toggle('selected', parseInt(b.dataset.mins) === mins);
   });
-  // Clear custom input
-  const ci = document.getElementById('time-custom-input');
-  if (ci) ci.value = '';
+  // Clear custom inputs
+  ['time-custom-days', 'time-custom-hours', 'time-custom-mins'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   // Update display label
   updateTimeDisplay();
 }
@@ -6824,16 +6844,31 @@ function onCustomTimeInput() {
   document.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('selected'));
 }
 
-// Apply custom minutes from text input
+// Clamp a custom day/hour/minute field to [0, max], sanitize its displayed
+// value, and return the numeric amount (empty/invalid treated as 0).
+function _clampCustomTimeField(el, max) {
+  if (!el) return 0;
+  if (el.value === '') return 0;
+  let v = parseInt(el.value);
+  if (isNaN(v) || v < 0) v = 0;
+  if (v > max) v = max;
+  el.value = String(v);
+  return v;
+}
+
+// Apply custom days/hours/minutes from the three text inputs
 function applyCustomTime() {
-  const ci = document.getElementById('time-custom-input');
-  const v  = parseInt(ci ? ci.value : '');
-  if (!isNaN(v) && v >= 1) {
-    selectedTimeMinutes = v;
+  const d = _clampCustomTimeField(document.getElementById('time-custom-days'), 365);
+  const h = _clampCustomTimeField(document.getElementById('time-custom-hours'), 23);
+  const m = _clampCustomTimeField(document.getElementById('time-custom-mins'), 59);
+  const total = d * 1440 + h * 60 + m;
+  if (total >= 1) {
+    selectedTimeMinutes = total;
     document.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('selected'));
     updateTimeDisplay();
   } else {
-    if (ci) { ci.value = ''; ci.focus(); }
+    const dEl = document.getElementById('time-custom-days');
+    if (dEl) dEl.focus();
   }
 }
 
@@ -6842,20 +6877,35 @@ function updateTimeDisplay() {
   if (!el) return;
   if (selectedTimeMinutes === 0) {
     el.textContent = '∞ No limit';
+  } else if (selectedTimeMinutes <= 60) {
+    el.textContent = selectedTimeMinutes + ' min';   // unchanged: matches every preset button (max 60 min)
   } else {
-    el.textContent = selectedTimeMinutes + ' min';
+    // Only reachable via the custom Days/Hours/Minutes fields (presets top out at 60 min)
+    const days  = Math.floor(selectedTimeMinutes / 1440);
+    const hours = Math.floor((selectedTimeMinutes % 1440) / 60);
+    const mins  = selectedTimeMinutes % 60;
+    const parts = [];
+    if (days)  parts.push(days + 'd');
+    if (hours) parts.push(hours + 'h');
+    if (mins || parts.length === 0) parts.push(mins + 'm');
+    el.textContent = parts.join(' ');
   }
 }
 
-// Format seconds → MM:SS or HH:MM:SS
+// Format seconds → MM:SS, HH:MM:SS, or (once past 24h) Nd Hh Mm
 function formatClock(secs) {
   if (secs < 0) secs = 0;
-  const h = Math.floor(secs / 3600);
+  const totalHours = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
+  if (totalHours >= 24) {
+    const days = Math.floor(totalHours / 24);
+    const h = totalHours % 24;
+    return days + 'd ' + h + 'h ' + m + 'm';
+  }
   const mm = String(m).padStart(2, '0');
   const ss = String(s).padStart(2, '0');
-  if (h > 0) return h + ':' + mm + ':' + ss;
+  if (totalHours > 0) return totalHours + ':' + mm + ':' + ss;
   return mm + ':' + ss;
 }
 
