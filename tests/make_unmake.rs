@@ -20,6 +20,7 @@ use pet_dragon_lib::movegen::generate_moves;
 use pet_dragon_lib::position::Position;
 use pet_dragon_lib::position::zobrist::init_zobrist;
 use pet_dragon_lib::types::Color;
+use pet_dragon_lib::types::{Move, Square};
 
 fn setup() {
     init_masks();
@@ -276,8 +277,8 @@ fn test_pawn_start_map_unchanged_after_make_unmake() {
 fn test_no_repetition_at_start() {
     setup();
     let pos = Position::start_pos().unwrap();
-    // Fresh position — no history — no repetition
-    assert!(!pos.is_repetition(),
+    // Fresh position — no history — no repetition at any ply
+    assert!(!pos.is_repetition(5),
         "Fresh position should not be a repetition");
 }
 
@@ -286,34 +287,45 @@ fn test_repetition_detected_after_moves() {
     setup();
     let mut pos = Position::start_pos().unwrap();
     let original_hash = pos.hash;
+    // Push the starting position first — matches how iterative_deepening()
+    // actually pushes the search root before any moves are made. Without
+    // this, the bounded walk never has enough entries to look back the
+    // full 4 plies to find the match.
+    pos.push_game_history();
 
-    // Record the starting position twice to simulate it having been
-    // seen before (is_repetition needs count >= 2 in history)
-    pos.game_history.push(original_hash);
-    pos.game_history.push(original_hash);
-
-    // Make two moves (White then Black) then unmake both
-    // to return to start position
-    let moves1 = generate_moves(&pos);
-    let mv1 = moves1.get(0);
+    // Real reversible round-trip: Ng1-f3, Ng8-f6, Nf3-g1, Nf6-g8 returns to
+    // the exact start position after 4 plies (knight moves don't reset
+    // halfmove_clock) — the minimum distance D45's bounded walk can detect
+    // (a position cannot repeat after only 2 plies in legal chess, since
+    // every individual move is a real change — see push_game_history's own
+    // doc comment in position/mod.rs for the full reasoning).
+    let find_move = |pos: &Position, from: Square, to: Square| -> Move {
+        generate_moves(pos)
+            .iter()
+            .find(|m| m.from == from && m.to == to)
+            .copied()
+            .expect("expected knight move to be legal")
+    };
+    let mv1 = find_move(&pos, Square::G1, Square::F3);
     pos.make_move_with_history(mv1);
-
-    let moves2 = generate_moves(&pos);
-    let mv2 = moves2.get(0);
+    let mv2 = find_move(&pos, Square::G8, Square::F6);
     pos.make_move_with_history(mv2);
+    let mv3 = find_move(&pos, Square::F3, Square::G1);
+    pos.make_move_with_history(mv3);
+    let mv4 = find_move(&pos, Square::F6, Square::G8);
+    pos.make_move_with_history(mv4);
 
-    pos.unmake_move_with_history(mv2);
-    pos.unmake_move_with_history(mv1);
-
-    // We are back at start position
-    // game_history contains: [start_hash, after_mv1_hash, after_mv2_hash]
-    // Wait — unmake_with_history pops. So after two unmakes:
-    // game_history contains: [start_hash] (we pushed start manually)
-    // current hash == start_hash == game_history[0] → repetition!
     assert_eq!(pos.hash, original_hash,
         "Should be back at start position");
-    assert!(pos.is_repetition(),
-        "Returning to a previously recorded position should be repetition");
+    // ply must exceed the repeat's own cached distance (4) for
+    // is_repetition to fire — this is D45's ply-relative distinction
+    // between "the search chose to walk back into this" (draw) vs "this
+    // repeat is purely inherited from real game history predating the
+    // search root" (not scored as a draw). ply=5 here means the search
+    // has gone one level deeper than the repeat itself.
+    assert!(pos.is_repetition(5),
+        "Returning to a previously recorded position should be a repetition \
+         once the search ply exceeds the repeat's own distance");
 }
 
 #[test]
@@ -321,45 +333,43 @@ fn test_threefold_repetition() {
     setup();
     let mut pos = Position::start_pos().unwrap();
     let original_hash = pos.hash;
+    pos.push_game_history(); // matches real search usage — see test_repetition_detected_after_moves
 
-    // Record start position
-    pos.game_history.push(original_hash);
-
-    let moves1 = generate_moves(&pos);
-    let mv1 = moves1.get(0);
-
-    let moves2 = {
-        let mut p = pos.clone();
-        p.make_move(mv1);
-        generate_moves(&p)
+    let find_move = |pos: &Position, from: Square, to: Square| -> Move {
+        generate_moves(pos)
+            .iter()
+            .find(|m| m.from == from && m.to == to)
+            .copied()
+            .expect("expected knight move to be legal")
     };
-    let mv2 = moves2.get(0);
+    let round_trip = |pos: &mut Position| {
+        for (from, to) in [
+            (Square::G1, Square::F3), (Square::G8, Square::F6),
+            (Square::F3, Square::G1), (Square::F6, Square::G8),
+        ] {
+            let mv = find_move(pos, from, to);
+            pos.make_move_with_history(mv);
+        }
+    };
 
-    // Second visit: make and unmake
-    pos.make_move_with_history(mv1);
-    pos.make_move_with_history(mv2);
-    pos.unmake_move_with_history(mv2);
-    pos.unmake_move_with_history(mv1);
-
-    // Back at start — record it again (2nd occurrence in history)
-    pos.game_history.push(original_hash);
-
-    // Third visit: make and unmake
-    pos.make_move_with_history(mv1);
-    pos.make_move_with_history(mv2);
-    pos.unmake_move_with_history(mv2);
-    pos.unmake_move_with_history(mv1);
-
-    // game_history now contains original_hash three times:
-    // once pushed manually at start, once from second visit unmake sequence,
-    // and once from third visit unmake sequence
-    // Plus we pushed it manually a second time above
-    // is_threefold_repetition needs count >= 3 in history
+    // First round trip — returns to start, 2nd occurrence, caches +4.
+    round_trip(&mut pos);
     assert_eq!(pos.hash, original_hash);
-    // Push one more to make count reach 3 in history
-    pos.game_history.push(original_hash);
+
+    // Second round trip — returns to start again, 3rd occurrence. The
+    // position 4 plies back already had a nonzero cached repetition, so
+    // this new entry caches NEGATIVE (D45's chain encoding).
+    round_trip(&mut pos);
+    assert_eq!(pos.hash, original_hash);
+
     assert!(pos.is_threefold_repetition(),
         "Position appearing 3 times in history should be threefold repetition");
+    // D45's chain detection: a genuine chain must be a draw at ANY ply,
+    // unlike a plain first repeat which is ply-gated — see
+    // test_is_repetition_chain_always_true_regardless_of_ply in
+    // position/mod.rs's own tests for the direct unit-level equivalent.
+    assert!(pos.is_repetition(1),
+        "A genuine repetition chain must be a draw even at a very shallow ply");
 }
 
 #[test]
@@ -367,32 +377,26 @@ fn test_repetition_not_triggered_by_different_positions() {
     setup();
     let mut pos = Position::start_pos().unwrap();
 
-    // Record start position
-    pos.game_history.push(pos.hash);
+    // Record start position via the real wrapper (not a raw push), so
+    // it's correctly cached under D45.
+    pos.push_game_history();
 
-    // Make moves forward — each new position should NOT be a repetition
     let moves = generate_moves(&pos);
     let mv1 = moves.get(0);
     pos.make_move_with_history(mv1);
-
-    // After mv1 — new position, not seen before
-    assert!(!pos.is_repetition(),
+    assert!(!pos.is_repetition(1),
         "New position after first move should not be repetition");
 
     let moves2 = generate_moves(&pos);
     let mv2 = moves2.get(0);
     pos.make_move_with_history(mv2);
-
-    // After mv2 — new position, not seen before
-    assert!(!pos.is_repetition(),
+    assert!(!pos.is_repetition(2),
         "New position after second move should not be repetition");
 
     let moves3 = generate_moves(&pos);
     let mv3 = moves3.get(0);
     pos.make_move_with_history(mv3);
-
-    // After mv3 — new position, not seen before
-    assert!(!pos.is_repetition(),
+    assert!(!pos.is_repetition(3),
         "New position after third move should not be repetition");
 }
 
@@ -401,17 +405,30 @@ fn test_pet_dragon_repetition_uses_pawn_start_hash() {
     setup();
     // Two different Pet Dragon positions with same piece placement
     // but different pawn starts should NOT be considered equal
-    // (Zobrist hash includes pawn start configuration)
+    // (Zobrist hash includes pawn start configuration).
     let pos1 = Position::generate_with_seed(0);
     let pos2 = Position::generate_with_seed(1);
 
-    // If hashes differ (almost guaranteed), repetition won't be triggered
-    // This test verifies the hash encodes enough to distinguish them
+    // If hashes differ (almost guaranteed), repetition won't be triggered.
+    // Directly constructs a game_history with pos2's hash sitting exactly
+    // 4 plies back (D45's minimum detectable distance) and halfmove_clock
+    // set to make that distance reachable — a direct boundary-condition
+    // test of the hash-comparison itself, rather than depending on finding
+    // a specific legal move sequence for two arbitrary random seeds (Pet
+    // Dragon's other pieces are randomly placed per seed, so a generic
+    // "shuffle a piece out and back" isn't guaranteed available here the
+    // way it is for the fixed start position in the tests above).
     if pos1.hash != pos2.hash {
         let mut test_pos = pos1.clone();
-        // Push pos2's hash as if it were a previous position
-        test_pos.game_history.push(pos2.hash);
-        assert!(!test_pos.is_repetition(),
-            "Different Pet Dragon positions should not be considered repetitions");
+        test_pos.halfmove_clock = 4;
+        test_pos.game_history = vec![
+            (pos2.hash, 0), // exactly 4 plies back from the entry pushed below
+            (0, 0), (0, 0), (0, 0), // 2, 3, and (unused) filler — irrelevant here
+        ];
+        test_pos.push_game_history(); // pushes pos1.hash (== test_pos.hash)
+        assert!(!test_pos.is_repetition(5),
+            "Different Pet Dragon positions (different pawn starts, different \
+             hashes) sitting at the same backward distance must not be \
+             confused as a repetition, even though the distance matches");
     }
 }
