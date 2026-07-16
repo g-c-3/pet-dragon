@@ -3,6 +3,7 @@ name: Build & Release
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main ]
 
@@ -132,7 +133,7 @@ jobs:
     name: Publish Release
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
 
     permissions:
       contents: write
@@ -150,16 +151,25 @@ jobs:
         id: sha
         run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Create or update rolling release
+      - name: Create or update release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: Pet Dragon — Latest Build
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('Pet Dragon {0}', github.ref_name) || 'Pet Dragon — Latest Build' }}
           body: |
             ## Pet Dragon Chess Engine
 
-            **Automatically built from latest source.**
+            ${{ startsWith(github.ref, 'refs/tags/v') && format('**Tagged release {0}.**', github.ref_name) || '**Automatically built from latest `main` (rolling — may be ahead of the last tagged version).**' }}
             Commit: ${{ steps.sha.outputs.short }}
+
+            Pet Dragon is an original chess variant engine, built natively in
+            Rust, where every game starts from one of 2,162,160 distinct
+            legal opening positions. Alpha-beta search with PVS and Lazy
+            SMP, Texel-tuned handcrafted evaluation, full UCI protocol
+            (pondering, MultiPV, Skill Levels, Contempt), Syzygy tablebase
+            support.
+
+            Play in the browser: https://g-c-3.github.io/pet-dragon
 
             ### Downloads
             | Platform | File |
@@ -174,5 +184,5 @@ jobs:
 
             Copyright © 2026 Gokul Chandar. Licensed under GPL v3.
           files: dist/**/*
-          make_latest: true
+          make_latest: ${{ startsWith(github.ref, 'refs/tags/v') }}
           prerelease: false
