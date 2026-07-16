@@ -14,7 +14,8 @@
 
 🎮 **[Play Pet Dragon in your browser](https://g-c-3.github.io/pet-dragon)**
 
-No download required. Play against Stockfish directly in your browser.
+No download required. Play against the Pet Dragon engine directly in
+your browser — runs entirely client-side via WebAssembly.
 
 ---
 
@@ -87,7 +88,15 @@ Pet Dragon is powered by a purpose-built Rust chess engine:
 - **Transposition table** — never evaluates the same position twice
 - **UCI protocol** — works with any chess GUI
 - **WebAssembly** — runs natively in any modern browser
-- **Target: 3000+ Elo** without neural networks
+- **Handcrafted evaluation, Texel-tuned** — internal pinned-reference
+  testing shows a ~39 Elo gain from Texel tuning alone over the
+  starting Ethereal-derived weights; since Pet Dragon is a custom
+  variant with no external rating pool, treat any absolute Elo figure
+  as a relative internal comparison, not a calibrated FIDE-style rating
+- **Experimental NNUE component** — implemented and trainable, currently
+  disabled by default (0% blend weight) after A/B testing showed the
+  current network doesn't yet outperform the handcrafted evaluation;
+  the architecture is in place for future improvement
 
 ### Evaluation draws from (GPL v3, with attribution)
 - **Ethereal** (Andrew Grant) — piece-square tables, mobility weights
@@ -123,18 +132,22 @@ Requires Rust 1.75+ and wasm-pack for WASM builds.
 
 ## Project Status
 
-| Phase | Status | Description |
-|---|---|---|
-| Scaffold & types | 🔄 In progress | Core data types |
-| Bitboards | ⏳ In progress | Board representation |
-| Position generator | ⏳ In progress | Pet Dragon setup |
-| Move generation | ⏳ In progress | All legal moves |
-| Search | ⏳ Pending | Alpha-beta + PVS |
-| Evaluation | ⏳ Pending | HCE |
-| UCI protocol | ⏳ Pending | GUI compatibility |
-| Browser deployment | ⏳ Pending | WASM + GitHub Pages |
-| Search improvements | ⏳ Pending | LMR, null move, etc. |
-| Texel tuning | ⏳ Pending | 3000+ Elo target |
+**Core engine complete and fully tested.**
+
+| Component | Status |
+|---|---|
+| Bitboard + magic bitboard move generation | ✅ Complete |
+| Pet Dragon position generator (2,162,160 legal starts) | ✅ Complete |
+| Search — alpha-beta, PVS, iterative deepening, Lazy SMP | ✅ Complete |
+| Handcrafted evaluation — Texel-tuned | ✅ Complete |
+| Transposition table (lock-free, age-based) | ✅ Complete |
+| UCI protocol — pondering, MultiPV, Skill Levels, Contempt | ✅ Complete |
+| Browser deployment — WebAssembly + GitHub Pages | ✅ Complete |
+| NNUE evaluation | 🧪 Implemented, disabled by default (see above) |
+| Syzygy tablebase support | ✅ Complete |
+
+521 automated tests passing, 0 failing, run on every commit via
+GitHub Actions.
 
 ---
 
