@@ -102,6 +102,95 @@ jobs:
           path: dist/${{ matrix.asset_name }}
           retention-days: 7
 
+  # ── Build WASM package: .wasm, JS bindings, standalone bundle ────────
+  build-wasm:
+    name: Build — WASM
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WebAssembly package
+        run: |
+          wasm-pack build \
+            --target web \
+            --release \
+            --out-dir dist-wasm \
+            --out-name pet_dragon \
+            -- --features wasm
+
+      - name: Generate standalone base64-embedded bundle
+        run: |
+          mkdir -p dist
+          cp dist-wasm/pet_dragon_bg.wasm dist/pet_dragon_bg.wasm
+          cp dist-wasm/pet_dragon.js dist/pet_dragon.js
+          node -e "
+            const fs = require('fs');
+            const bytes = fs.readFileSync('dist-wasm/pet_dragon_bg.wasm');
+            const b64 = bytes.toString('base64');
+            const out = [
+              '// Pet Dragon — standalone WASM bundle (auto-generated, do not edit by hand)',
+              '// Embeds the compiled .wasm binary as base64 so it can be initialized',
+              '// without a separate network fetch of pet_dragon_bg.wasm. Still needs',
+              '// pet_dragon.js alongside this file (same directory/import path) —',
+              '// this file supplies the bytes, pet_dragon.js supplies the bindings.',
+              '//',
+              '// Usage:',
+              '//   import { initPetDragon } from \'./pet_dragon_standalone.js\';',
+              '//   const engine = await initPetDragon();',
+              '//   engine.engine_name();',
+              'import init, * as bindings from \'./pet_dragon.js\';',
+              '',
+              'const WASM_BASE64 = \"' + b64 + '\";',
+              '',
+              'function base64ToBytes(base64) {',
+              '  const binary = atob(base64);',
+              '  const bytes = new Uint8Array(binary.length);',
+              '  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
+              '  return bytes;',
+              '}',
+              '',
+              'export async function initPetDragon() {',
+              '  const bytes = base64ToBytes(WASM_BASE64);',
+              '  await init(bytes);',
+              '  return bindings;',
+              '}',
+              '',
+              'export * from \'./pet_dragon.js\';',
+              ''
+            ].join('\n');
+            fs.writeFileSync('dist/pet_dragon_standalone.js', out);
+          "
+
+      - name: Verify build output
+        run: ls -la dist/
+
+      - name: Upload WASM package as artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: pet-dragon-wasm
+          path: |
+            dist/pet_dragon_bg.wasm
+            dist/pet_dragon.js
+            dist/pet_dragon_standalone.js
+          retention-days: 7
+
   # ── Node count benchmarks (tracks search pruning efficiency) ─────────
   bench:
     name: Node Count Bench
@@ -131,7 +220,7 @@ jobs:
   # ── Publish release when tests pass & binaries are built ─────────────
   release:
     name: Publish Release
-    needs: build
+    needs: [ build, build-wasm ]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
 
@@ -178,6 +267,9 @@ jobs:
             | macOS Apple Silicon | `pet-dragon-macos-arm64` |
             | macOS Intel | `pet-dragon-macos-x64` |
             | Linux 64-bit | `pet-dragon-linux-x64` |
+            | WASM binary | `pet_dragon_bg.wasm` |
+            | WASM JS bindings | `pet_dragon.js` |
+            | WASM standalone bundle (embeds the binary as base64 — no separate `.wasm` fetch needed, still requires `pet_dragon.js` alongside it) | `pet_dragon_standalone.js` |
 
             ### How to use
             Connect to any UCI chess GUI (Arena, BanksiaGUI, CuteChess).
