@@ -1,5 +1,5 @@
 <!--
-  Copyright (c) 2026 G.C. All rights reserved.
+  Copyright (c) 2026 Gokul Chandar. All rights reserved.
   Unauthorized copying, modification, or distribution of this source code via any medium is strictly prohibited. Proprietary and confidential.
 -->
 <!DOCTYPE html>
@@ -368,11 +368,6 @@
     line-height: 1;
     display: flex; align-items: center; justify-content: center;
     width: 100%; height: 100%;
-  }
-  /* Black pieces are solid — a drop-shadow just blurs their edges, so only
-     hollow white pieces get the lift-off-the-board shadow. */
-  .share-sq .sp.piece-w {
-    filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)) brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
   }
   .share-sq.light { background: var(--sq-light, #F0D9B5); }
   .share-sq.dark  { background: var(--sq-dark,  #B58863); }
@@ -1105,51 +1100,6 @@
       hsl(360,80%,50%));
   }
 
-  /* Piece shape grid */
-  .cdash-shapes-label {
-    font-family: 'DM Mono', monospace;
-    font-size: clamp(0.54rem, calc(0.66rem * var(--s)), 0.8rem);
-    letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-muted);
-    margin-bottom: clamp(0.1rem, calc(0.2rem * var(--s)), 0.3rem);
-  }
-  .cdash-shape-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: clamp(0.28rem, calc(0.45rem * var(--s)), 0.65rem);
-  }
-  .cdash-shape-swatch {
-    display: flex; flex-direction: column; align-items: center;
-    gap: clamp(0.15rem, calc(0.22rem * var(--s)), 0.32rem);
-    padding: clamp(0.35rem, calc(0.5rem * var(--s)), 0.75rem) clamp(0.2rem, calc(0.3rem * var(--s)), 0.45rem);
-    border-radius: clamp(7px, calc(10px * var(--s)), 14px);
-    border: 1.5px solid rgba(255,255,255,0.07);
-    background: rgba(255,255,255,0.03);
-    cursor: pointer;
-    transition: border-color 0.17s, background 0.17s, transform 0.15s;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .cdash-shape-swatch:hover { background: rgba(255,255,255,0.08); transform: scale(1.04); }
-  .cdash-shape-swatch.active {
-    border-color: var(--accent2);
-    background: rgba(245,166,35,0.1);
-    box-shadow: 0 0 8px 2px rgba(245,166,35,0.18);
-  }
-  .cdash-shape-pieces {
-    font-size: clamp(1rem, calc(1.25rem * var(--s)), 1.7rem);
-    line-height: 1; letter-spacing: -1px;
-    /* Fixed to a light colour regardless of the user's chosen piece colour/hue/
-       brightness — these are just shape previews and must stay legible even
-       when the live piece colour is dark. */
-    color: #E8E8E8;
-    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
-  }
-  .cdash-shape-name {
-    font-family: 'DM Mono', monospace;
-    font-size: clamp(0.44rem, calc(0.55rem * var(--s)), 0.68rem);
-    color: var(--text-muted); text-align: center; letter-spacing: 0.2px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
-  }
-
   /* ── Responsive tweaks ── */
   @media (max-height: 500px) and (orientation: landscape) {
     #cdash-modal {
@@ -1400,12 +1350,6 @@
     color: var(--piece-color);
     filter: brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
   }
-  /* White pieces are hollow/outlined, so a soft drop-shadow helps them read
-     against the board. Black pieces are solid — the same shadow just blurs
-     their edges into a smudge, so they skip it and stay crisp. */
-  .piece.piece-w {
-    filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)) brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
-  }
   /* SVG pieces: child svg fills the piece cell */
   .piece > svg {
     width: 82%;
@@ -1424,9 +1368,6 @@
     transform: translate(-50%, -50%);
     color: var(--piece-color);
     filter: brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
-  }
-  .dragging-ghost.piece-w {
-    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6)) brightness(var(--piece-brightness,1)) hue-rotate(var(--piece-hue,0deg));
   }
 
   /* Side panel — width mirrors player section (--panel-w set by JS) */
@@ -2749,12 +2690,6 @@
              oninput="_cdashOnHue(this.value)">
     </div>
 
-    <!-- Piece shapes (hidden) -->
-    <div style="display:none">
-      <div class="cdash-shapes-label">Piece Shape</div>
-      <div class="cdash-shape-grid" id="cdash-shape-grid"></div>
-    </div>
-
     <div style="display:flex;gap:0.5rem;margin-top:0.25rem">
       <button class="picker-close" id="cdash-reset-btn" onclick="_cdashReset()" style="background:rgba(233,69,96,0.08);border-color:rgba(233,69,96,0.3);color:var(--accent)">↺ Reset</button>
       <button class="picker-close" onclick="_cdashClose()">Done</button>
@@ -3180,7 +3115,7 @@ onmessage = (e) => {
   };
 </script>
 <script>
-// ─── Piece Unicode (Copyrighted to G.C.) ────────────────────────────────────────────────────────────
+// ─── Piece Unicode (Copyrighted to Gokul Chandar) ────────────────────────────────────────────────────────────
 const PIECES = {
   wK:'♔', wQ:'♕', wR:'♖', wB:'♗', wN:'♘', wP:'♙',
   bK:'♚', bQ:'♛', bR:'♜', bB:'♝', bN:'♞', bP:'♟'
@@ -4403,9 +4338,8 @@ function showSnapshot(idx) {
       } else {
         pe.textContent = PIECES[p.color + p.type.toUpperCase()];
         pe.style.color = PIECE_STYLES[activePieceStyle].color || '#E8E8E8';
-        // No inline filter — the .piece / .piece-w CSS classes carry the full
-        // chain: brightness(--piece-brightness) + hue-rotate(--piece-hue),
-        // plus drop-shadow for white (hollow) pieces only.
+        // No inline filter — the .piece CSS class carries the full chain:
+        // brightness(--piece-brightness) + hue-rotate(--piece-hue).
       }
       sq.appendChild(pe);
     }
@@ -5875,7 +5809,7 @@ const PIECE_STYLES = [
   { name: 'Rose Gold',  color: '#F48FB1', stroke: '#880E4F', wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙', bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟' },
   { name: 'Neon',       color: '#CCFF00', stroke: '#3A5A00', wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙', bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟' },
   // ── Dark pieces ──
-  { name: 'Onyx',       color: '#424242', stroke: '#000',    wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙', bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟' },
+  { name: 'Charcoal',    color: '#000000', stroke: '#000',    wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙', bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟' },
   { name: 'Crimson',    color: '#C0142A', stroke: '#5A000E', wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙', bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟' },
   { name: 'Ocean',      color: '#1565C0', stroke: '#07213E', wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙', bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟' },
   { name: 'Emerald',    color: '#2E7D32', stroke: '#0A2E0C', wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙', bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟' },
@@ -5883,7 +5817,7 @@ const PIECE_STYLES = [
   { name: 'Midnight',   color: '#1A2A6C', stroke: '#060D24', wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙', bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟' },
 ];
 
-let activePieceStyle = 6; // default: Onyx
+let activePieceStyle = 6; // default: Charcoal
 
 function applyPieceStyle(idx) {
   activePieceStyle = idx;
@@ -7007,128 +6941,13 @@ function handleClockTimeout(who) {
 // Secret trigger  : double-tap #difficulty-badge (replaces old engine-config trigger).
 // Board tab       : brightness & hue sliders affect #board via CSS filter vars.
 // Pieces tab      : brightness & hue sliders affect .piece via CSS filter vars.
-// Shape grid      : 12 unicode piece sets — first is the game's Classic default.
+// Shape grid      : unicode piece set only — the game's Classic default.
 // Persistence     : all settings survive page reloads via localStorage.
 
-// ── SVG piece rendering ────────────────────────────────────────────────────────
-// Each shape set is { name, svg: { K,Q,R,B,N,P } } where each piece fn(isWhite)
-// returns an inline SVG string using currentColor so --piece-color, brightness
-// and hue-rotate all apply automatically via the .piece CSS filter chain.
-// White pieces: hollow (fill:none, stroke only). Black pieces: solid filled.
-// Both use currentColor so the colour/hue slider affects them identically.
-//
-// All 11 non-standard sets are built from ONE shared, clearly-readable piece
-// silhouette (King=cross, Queen=5-point crown, Rook=castle, Bishop=mitre+slit,
-// Knight=actual horse-head profile, Pawn=round head) via _mkPieceSet(), varying
-// corner rounding / stroke weight / small accents per style so every style stays
-// visually distinct while every piece stays easy to identify at a glance.
-// Style 11 (Pixel) is hand-built separately since it's a genuinely different
-// blocky construction rather than a rounding variant.
-
-function _svgWrap(w, h, content, isWhite) {
-  // Both colours render fully opaque now. White pieces are hollow (fill:none on
-  // the inner <g>, see per-style sets below), so the stroke IS the piece.
-  // Black pieces are solid-filled; previously their stroke sat at partial
-  // opacity on top of the solid fill, which produced a soft/smudged edge —
-  // now stroke and fill are both fully opaque so the edge stays crisp.
-  const sw = '1.8';
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="100%" height="100%" style="display:block;overflow:visible" fill="currentColor" stroke="currentColor" stroke-opacity="1" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round" opacity="1">${content}</svg>`;
-}
-
-// Shared silhouette generator for the 10 "smooth family" styles.
-// opts: rx (corner rounding), sw (stroke width), slit (bishop mitre slit),
-// grain (wood-grain accent line), rivets (metal rivet dots on rook/queen),
-// tallSpikes (taller king cross / queen crown points), pointedMerlons (rook
-// battlements as pointed roofs instead of square merlons).
-function _mkPieceSet(opts) {
-  const o = Object.assign({ rx: 1.5, sw: 1.6, slit: false, grain: false, rivets: false, tallSpikes: false, pointedMerlons: false }, opts);
-  const rx = o.rx, sw = o.sw;
-  const baseRx = Math.min(rx, 2), footRx = Math.min(rx, 1.5);
-  const base = `<rect x="9" y="33" width="27" height="4" rx="${baseRx}"/><rect x="7" y="37" width="31" height="3" rx="${footRx}"/>`;
-  const dot = (cx, cy, r, w) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${w ? 'currentColor' : 'rgba(255,255,255,0.5)'}" stroke="none"/>`;
-  const crossH = o.tallSpikes ? 10 : 8;
-  const crown = o.tallSpikes
-    ? 'M13 11 L17 2 L20 11 L22.5 0.5 L25 11 L28 2 L32 11 Z'
-    : 'M13 11 L17 4 L20 11 L22.5 2 L25 11 L28 4 L32 11 Z';
-  const merlons = o.pointedMerlons
-    ? `<path d="M12 15 L12 8 L15 5 L18 8 L18 15 Z"/><path d="M19.5 15 L19.5 8 L22.5 5 L25.5 8 L25.5 15 Z"/><path d="M27 15 L27 8 L30 5 L33 8 L33 15 Z"/>`
-    : `<rect x="12" y="8" width="6" height="7" rx="${rx}"/><rect x="19.5" y="8" width="6" height="7" rx="${rx}"/><rect x="27" y="8" width="6" height="7" rx="${rx}"/>`;
-
-  return {
-    K: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><rect x="15" y="11" width="15" height="5" rx="${rx}"/><rect x="20" y="2" width="5" height="${crossH}" rx="${rx}"/><rect x="17.5" y="5" width="10" height="4" rx="${rx}"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/>${o.grain ? '<path d="M17 21 Q22.5 25 18 30" fill="none"/>' : ''}${base}</g>`, w),
-
-    Q: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><path d="${crown}"/><rect x="13" y="11" width="19" height="5" rx="${rx}"/><path d="M13 33 Q13 24 17 16 L28 16 Q32 24 32 33 Z"/>${o.grain ? '<path d="M17 21 Q22.5 25 18 30" fill="none"/>' : ''}${o.rivets ? dot(22.5, 13.5, 1, w) : ''}${base}</g>`, w),
-
-    R: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}">${merlons}<rect x="12" y="15" width="21" height="18" rx="${Math.min(rx, 3)}"/>${o.rivets ? dot(15, 11.5, 1, w) + dot(22.5, 11.5, 1, w) + dot(30, 11.5, 1, w) : ''}${base}</g>`, w),
-
-    B: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><circle cx="22.5" cy="4" r="2.3"/><path d="M22.5 7 Q28 10 27 16 L18 16 Q17 10 22.5 7 Z"/>${o.slit ? `<line x1="19.5" y1="12.5" x2="25.5" y2="15" stroke-width="${(sw * 0.85).toFixed(2)}"/>` : ''}<path d="M13 33 Q13 24 18 16 L27 16 Q32 24 32 33 Z"/>${base}</g>`, w),
-
-    N: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><path d="M14 33 L14 25 Q10 23 10 19 Q9 15 11 12 Q9 11 9 9 Q9 7 13 6 Q14 4 17 5 L17 9 L20 3 L23 8 Q26 6 30 7 Q33 9 32 12 Q35 14 32 17 Q30 20 30 24 L30 33 Z"/>${dot(11.5, 10.5, 1, !w)}${base}</g>`, w),
-
-    P: w => _svgWrap(45, 45, `<g fill="${w ? 'none' : 'currentColor'}" stroke-width="${sw}"><circle cx="22.5" cy="10" r="6"/><path d="M17 33 Q16 23 18.5 16 L26.5 16 Q29 23 28 33 Z"/>${o.grain ? '<path d="M19 20 Q22.5 24 19 29" fill="none"/>' : ''}${base}</g>`, w),
-  };
-}
-
-// ── Style 1: Classic — faithful Staunton silhouettes ──────────────────────────
-const _SVG_CLASSIC = _mkPieceSet({ rx: 1.5, sw: 1.6, slit: true });
-
-// ── Style 2: Modern — sleek, refined Staunton with smooth curves ──────────────
-const _SVG_MODERN_STAUNTON = _mkPieceSet({ rx: 3, sw: 1.4 });
-
-// ── Style 3: Minimal — clean flat icons, no accents ────────────────────────────
-const _SVG_FLAT_MINIMAL = _mkPieceSet({ rx: 4.5, sw: 1.1 });
-
-// ── Style 4: Wooden — carved warm-wood feel with a grain line ─────────────────
-const _SVG_WOODEN = _mkPieceSet({ rx: 2, sw: 1.6, slit: true, grain: true });
-
-// ── Style 5: Marble — smooth, sculpted, classical look ─────────────────────────
-const _SVG_MARBLE = _mkPieceSet({ rx: 3, sw: 1.3 });
-
-// ── Style 6: Outline — bold stroke, clean silhouette ────────────────────────────
-const _SVG_OUTLINE = _mkPieceSet({ rx: 1.5, sw: 2.2 });
-
-// ── Style 7: Metal — bold bevelled, industrial rivets ──────────────────────────
-const _SVG_METAL = _mkPieceSet({ rx: 1, sw: 1.9, slit: true, rivets: true });
-
-// ── Style 8: Glass — light, rounded, translucent-feeling stroke ────────────────
-const _SVG_GLASS = _mkPieceSet({ rx: 3, sw: 1.4 });
-
-// ── Style 9: Medieval — blocky, square-cut heraldic style ─────────────────────
-const _SVG_MEDIEVAL = _mkPieceSet({ rx: 0, sw: 1.9, slit: true });
-
-// ── Style 10: Gothic — tall spires, pointed battlements ────────────────────────
-const _SVG_GOTHIC = _mkPieceSet({ rx: 0, sw: 1.7, tallSpikes: true, pointedMerlons: true });
-
-// ── Style 11: Pixel — 8-bit blocky pixel art, including a real pixel horse head
-const _SVG_PIXEL = {
-  K: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="20" y="2" width="5" height="4"/><rect x="17" y="6" width="11" height="4"/><rect x="16" y="10" width="13" height="5"/><rect x="12" y="15" width="21" height="18"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
-  Q: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="10" y="4" width="4" height="6"/><rect x="20" y="2" width="5" height="6"/><rect x="31" y="4" width="4" height="6"/><rect x="14" y="10" width="17" height="5"/><rect x="12" y="15" width="21" height="18"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
-  R: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="12" y="5" width="5" height="6"/><rect x="20" y="5" width="5" height="6"/><rect x="28" y="5" width="5" height="6"/><rect x="12" y="11" width="21" height="4"/><rect x="12" y="15" width="21" height="18"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
-  B: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="20" y="3" width="5" height="4"/><rect x="17" y="7" width="11" height="6"/><rect x="15" y="13" width="15" height="5"/><rect x="13" y="18" width="19" height="15"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
-  N: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="27" y="3" width="3" height="3"/><rect x="24" y="6" width="9" height="3"/><rect x="21" y="9" width="15" height="3"/><rect x="18" y="12" width="18" height="3"/><rect x="12" y="15" width="21" height="3"/><rect x="9" y="18" width="9" height="3"/><rect x="24" y="18" width="12" height="3"/><rect x="15" y="21" width="21" height="3"/><rect x="18" y="24" width="18" height="3"/><rect x="21" y="27" width="12" height="3"/><rect x="21" y="30" width="12" height="3"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
-  P: w => _svgWrap(45,45,`<g fill="${w?'none':'currentColor'}" shape-rendering="crispEdges" stroke-width="1.2"><rect x="18" y="4" width="9" height="8"/><rect x="16" y="16" width="13" height="17"/><rect x="9" y="33" width="27" height="4"/><rect x="7" y="37" width="31" height="3"/></g>`,w),
-};
-
-
-
 // ── Master shape registry ──────────────────────────────────────────────────────
-// Shape 0 stays as unicode (Standard). Shapes 1-11 are SVG sets.
-// _CDASH_SHAPES entries for SVG sets store { name, svgSet } instead of glyph keys.
-// _cdashIsSvgShape(idx) → true for idx >= 1.
-
+// Only the Standard (unicode) shape is supported.
 const _CDASH_SHAPES = [
   { name: 'Standard',        svgSet: null                   }, // index 0 — unicode fallback
-  { name: 'Classic',         svgSet: _SVG_CLASSIC           },
-  { name: 'Modern',          svgSet: _SVG_MODERN_STAUNTON   },
-  { name: 'Minimal',         svgSet: _SVG_FLAT_MINIMAL      },
-  { name: 'Wooden',          svgSet: _SVG_WOODEN            },
-  { name: 'Marble',          svgSet: _SVG_MARBLE            },
-  { name: 'Outline',         svgSet: _SVG_OUTLINE           },
-  { name: 'Metal',           svgSet: _SVG_METAL             },
-  { name: 'Glass',           svgSet: _SVG_GLASS             },
-  { name: 'Medieval',        svgSet: _SVG_MEDIEVAL          },
-  { name: 'Gothic',          svgSet: _SVG_GOTHIC            },
-  { name: 'Pixel',           svgSet: _SVG_PIXEL             },
 ];
 
 // Unicode fallback glyphs for shape 0 (Standard)
@@ -7177,7 +6996,6 @@ let _cdashPiece = { brightness: 100, hue: 0 };
 })();
 
 function _cdashOpen() {
-  _cdashBuildShapeGrid();
   _cdashSyncSliders();
   document.getElementById('cdash-overlay').classList.add('show');
 }
@@ -7191,7 +7009,7 @@ function _cdashReset() {
   // ── Reset board colour to game default (palette 0: Classic) ───────────────
   applyPalette(0);
 
-  // ── Reset piece style to game default (index 6: Onyx) ─────────────────────
+  // ── Reset piece style to game default (index 6: Charcoal) ─────────────────
   applyPieceStyle(6);
 
   // ── Reset piece shape to Standard (index 0) ───────────────────────────────
@@ -7267,7 +7085,7 @@ function _cdashApplyPiece() {
   const r = document.documentElement;
   r.style.setProperty('--piece-brightness', (_cdashPiece.brightness / 100).toFixed(2));
 
-  // CSS hue-rotate has zero effect on neutral greys (Classic S=0%, Onyx S=0%, Silver S~16%).
+  // CSS hue-rotate has zero effect on neutral greys (Classic S=0%, Charcoal S=0%, Silver S~16%).
   // Instead, compute the tinted colour directly: take the base colour's lightness,
   // build a new HSL at the chosen hue with 75% saturation, set as --piece-color.
   const baseHex = PIECE_STYLES[activePieceStyle].color || '#E8E8E8';
@@ -7304,49 +7122,7 @@ function _cdashApplyPiece() {
   r.style.setProperty('--piece-hue', '0deg');
 }
 
-// ── Shape grid ─────────────────────────────────────────────────────────────────
-function _cdashBuildShapeGrid() {
-  const grid = document.getElementById('cdash-shape-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-  _CDASH_SHAPES.forEach((s, i) => {
-    const sw = document.createElement('div');
-    sw.className = 'cdash-shape-swatch' + (i === _cdashActiveShape ? ' active' : '');
-    sw.onclick = () => _cdashApplyShape(i, true);
-
-    const pieces = document.createElement('div');
-    pieces.className = 'cdash-shape-pieces';
-    if (i === 0) {
-      // Standard — unicode preview
-      pieces.textContent = '♔♛';
-    } else {
-      // SVG preview — show king (white) + queen (black) side by side
-      const set = s.svgSet;
-      const kSvg = set.K(true);
-      const qSvg = set.Q(false);
-      pieces.style.display = 'flex';
-      pieces.style.justifyContent = 'center';
-      pieces.style.gap = '2px';
-      const kWrap = document.createElement('span');
-      kWrap.style.cssText = 'display:inline-flex;width:1.2em;height:1.2em;flex-shrink:0;';
-      kWrap.innerHTML = kSvg;
-      const qWrap = document.createElement('span');
-      qWrap.style.cssText = 'display:inline-flex;width:1.2em;height:1.2em;flex-shrink:0;';
-      qWrap.innerHTML = qSvg;
-      pieces.appendChild(kWrap);
-      pieces.appendChild(qWrap);
-    }
-
-    const name = document.createElement('div');
-    name.className = 'cdash-shape-name';
-    name.textContent = s.name;
-
-    sw.appendChild(pieces);
-    sw.appendChild(name);
-    grid.appendChild(sw);
-  });
-}
-
+// ── Shape ──────────────────────────────────────────────────────────────────────
 function _cdashApplyShape(idx, updateBoard) {
   _cdashActiveShape = idx;
   if (_cdashIsSvgShape(idx)) {
@@ -7377,7 +7153,7 @@ function _cdashSave() {
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
-// Apply default Onyx piece style and Classic board palette before first render
+// Apply default Charcoal piece style and Classic board palette before first render
 applyPieceStyle(6);
 applyPalette(0);
 updatePlayerBars();
@@ -7579,7 +7355,6 @@ function showShareCard() {
   grid.style.setProperty('--sq-light', d.sqLight);
   grid.style.setProperty('--sq-dark',  d.sqDark);
   const pieceFilterBase = `brightness(${d.pieceBrightness / 100})`;
-  const pieceFilterShadow = `drop-shadow(0 1px 2px rgba(0,0,0,0.5)) ${pieceFilterBase}`;
   const resolvedPieceColor = d.pieceColorResolved || d.pieceColor;
   const isSvgShape = _cdashIsSvgShape(d.pieceShape);
   if (d.startBoard) {
@@ -7596,9 +7371,7 @@ function showShareCard() {
           const span = document.createElement('span');
           span.className = 'sp piece-' + piece.color;
           span.style.color = resolvedPieceColor;
-          // Black pieces are solid — a drop-shadow just smudges their edges,
-          // so only hollow white pieces get the lift-off-the-board shadow.
-          span.style.filter = piece.color === 'w' ? pieceFilterShadow : pieceFilterBase;
+          span.style.filter = pieceFilterBase;
           if (isSvgShape) {
             const svgHtml = _cdashPieceSvg(piece.color, piece.type, d.pieceShape);
             if (svgHtml) {
