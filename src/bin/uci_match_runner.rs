@@ -25,15 +25,30 @@
 //      move, and parses its `bestmove` reply.
 //
 // Usage (triggered via GitHub Actions workflow_dispatch, see
-// .github/workflows/uci_match_runner.yml):
+// .github/workflows/uci_match_runner.yml — or automatically per-PR, see
+// .github/workflows/build.yml's `regression-gate` job, D48):
 //   cargo run --release --bin uci_match_runner -- \
 //       <engine_a_path> <engine_b_path> [num_games] [movetime_ms] \
 //       [seed_start] [label_a] [label_b] [output_path] \
-//       [engine_a_uci_options] [engine_b_uci_options]
+//       [engine_a_uci_options] [engine_b_uci_options] [min_score_pct]
 //
 // Defaults: 20 games, 100ms/move, seed_start=0, labels "Engine A"/"Engine B",
 // output_path="uci_match_results.txt", both UCI-options args empty (no
-// setoption commands sent — engines run at their compiled-in defaults).
+// setoption commands sent — engines run at their compiled-in defaults),
+// min_score_pct unset (no pass/fail gate — informational run only, matching
+// every use of this harness before D48).
+//
+// Phase 23.1 (D48) — regression gate mode: when the 11th arg `min_score_pct`
+// is supplied, the harness becomes a pass/fail CI gate instead of a purely
+// informational report. After the match, if Engine A's score (as a
+// percentage, e.g. "35" for 35%) falls below `min_score_pct`, the process
+// exits with status 1 (failing the CI job) instead of the usual 0. The
+// match summary is still written to `output_path` either way. Engine A is
+// always the candidate/PR build and Engine B the baseline in gate mode (see
+// `regression-gate` job in build.yml) so "A's score too low" reads naturally
+// as "the candidate regressed against the baseline". Leaving this arg unset
+// preserves the exact prior behavior (always exits 0) for the existing
+// manual pre/post-tuning and Skill Level workflows in uci_match_runner.yml.
 //
 // Phase 20 (Session 66 follow-up): `engine_a_uci_options`/
 // `engine_b_uci_options` let the same two binaries be configured
@@ -262,6 +277,7 @@ fn main() {
         .unwrap_or_else(|| "uci_match_results.txt".to_string());
     let engine_a_uci_options = args.get(9).cloned().unwrap_or_default();
     let engine_b_uci_options = args.get(10).cloned().unwrap_or_default();
+    let min_score_pct: Option<f64> = args.get(11).and_then(|s| s.parse().ok());
 
     let mut engine_a = EngineProcess::spawn(engine_a_path);
     let mut engine_b = EngineProcess::spawn(engine_b_path);
@@ -310,6 +326,39 @@ fn main() {
     let mut file = File::create(&output_path).expect("failed to create output file");
     file.write_all(summary.as_bytes())
         .expect("failed to write summary file");
+
+    // Phase 23.1 (D48): if a threshold was supplied, this run is a pass/fail
+    // CI gate, not just an informational report — enforce it via exit code
+    // so the calling GitHub Actions job fails (and, once branch protection
+    // requires this job, blocks the merge) on a real regression.
+    let score_a_pct = (wins_a as f64 + 0.5 * draws as f64) / num_games as f64 * 100.0;
+    if let Some(threshold) = min_score_pct {
+        if !regression_gate_passes(score_a_pct, Some(threshold)) {
+            eprintln!(
+                "REGRESSION GATE FAILED: {label_a} scored {score_a_pct:.1}% against \
+                 {label_b} (required: >= {threshold:.1}%). See {output_path} for full \
+                 match details."
+            );
+            std::process::exit(1);
+        }
+        eprintln!(
+            "Regression gate passed: {label_a} scored {score_a_pct:.1}% against \
+             {label_b} (required: >= {threshold:.1}%)."
+        );
+    }
+}
+
+/// Returns `true` if the regression gate passes — Engine A's score
+/// (`score_a_pct`, 0.0-100.0) is at or above `min_score_pct` — or if no
+/// threshold was supplied at all (`None`, meaning this is an informational
+/// run with no gate, always passes). Pulled out as a pure function so the
+/// pass/fail logic is unit-testable without spawning engine processes or
+/// touching `std::process::exit`.
+fn regression_gate_passes(score_a_pct: f64, min_score_pct: Option<f64>) -> bool {
+    match min_score_pct {
+        Some(threshold) => score_a_pct >= threshold,
+        None => true,
+    }
 }
 
 /// Play one game between the two engine processes from a seeded Pet Dragon
@@ -518,6 +567,24 @@ mod tests {
         let pos = Position::generate_with_seed(0);
         // a1a1 is never a legal move (zero-length move).
         assert_eq!(parse_uci_move(&pos, "a1a1"), None);
+    }
+
+    #[test]
+    fn test_regression_gate_passes_no_threshold_always_passes() {
+        assert!(regression_gate_passes(0.0, None));
+        assert!(regression_gate_passes(100.0, None));
+    }
+
+    #[test]
+    fn test_regression_gate_passes_at_or_above_threshold() {
+        assert!(regression_gate_passes(35.0, Some(35.0)));
+        assert!(regression_gate_passes(50.0, Some(35.0)));
+    }
+
+    #[test]
+    fn test_regression_gate_fails_below_threshold() {
+        assert!(!regression_gate_passes(34.9, Some(35.0)));
+        assert!(!regression_gate_passes(0.0, Some(35.0)));
     }
 
     #[test]
