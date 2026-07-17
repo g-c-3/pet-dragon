@@ -4163,6 +4163,8 @@ function _checkGameOverInner() {
     if (customInCheck) {
       const isPlayerWin = customTurn !== playerColor;
       const msg = isPlayerWin ? '🎉 You win by checkmate!' : '😔 Checkmate — AI Engine wins';
+      gameOverWinner = customTurn === 'w' ? 'b' : 'w'; // customTurn = side with no moves = the side checkmated
+      gameOverReasonText = 'Checkmate';
       el.textContent = msg;
       el.classList.add('show', isPlayerWin ? 'win' : 'lose');
       playSound('gameOver');
@@ -4171,6 +4173,8 @@ function _checkGameOverInner() {
       launchConfetti();
     } else {
       const msg = '🤝 Stalemate — Draw';
+      gameOverWinner = null;
+      gameOverReasonText = 'Stalemate';
       el.textContent = msg;
       el.classList.add('show', 'draw');
       playSound('gameOver');
@@ -4196,6 +4200,8 @@ function _checkGameOverInner() {
     const loser = !kings.w ? 'w' : 'b';
     const isPlayerWin = loser !== playerColor;
     const msg = isPlayerWin ? '🎉 You win — King captured!' : '😔 Your king was captured!';
+    gameOverWinner = loser === 'w' ? 'b' : 'w';
+    gameOverReasonText = 'King captured';
     el.textContent = msg;
     el.classList.add('show', isPlayerWin ? 'win' : 'lose');
     playSound('gameOver');
@@ -4245,6 +4251,8 @@ function _checkGameOverInner() {
     stopClock();
     _releaseWakeLock();
     const msg = '🤝 Draw — Insufficient material';
+    gameOverWinner = null;
+    gameOverReasonText = 'Insufficient material';
     el.textContent = msg;
     el.classList.add('show', 'draw');
     playSound('gameOver');
@@ -4260,6 +4268,8 @@ function _checkGameOverInner() {
     stopClock();
     _releaseWakeLock();
     const msg = '🤝 Draw — Threefold repetition';
+    gameOverWinner = null;
+    gameOverReasonText = 'Threefold repetition';
     el.textContent = msg;
     el.classList.add('show', 'draw');
     playSound('gameOver');
@@ -4275,6 +4285,8 @@ function _checkGameOverInner() {
     stopClock();
     _releaseWakeLock();
     const msg = '🤝 Draw — 50-move rule';
+    gameOverWinner = null;
+    gameOverReasonText = '50-move rule';
     el.textContent = msg;
     el.classList.add('show', 'draw');
     playSound('gameOver');
@@ -4975,6 +4987,9 @@ function handleAbort() {
   stopClock();
   _releaseWakeLock();
 
+  gameOverWinner = null;
+  gameOverReasonText = 'Aborted';
+
   if (window.petDragonAbortSearch) window.petDragonAbortSearch();
   engineThinking = false;
   setEngineStatus('ready');
@@ -5020,6 +5035,9 @@ function confirmResign() {
 
   recordStat('engine_win');
   gameStartFired = false;
+
+  gameOverWinner = playerColor === 'w' ? 'b' : 'w';
+  gameOverReasonText = 'Resignation';
 
   const el = document.getElementById('game-msg');
   el.textContent = '🏳 You resigned — AI Engine wins';
@@ -5471,6 +5489,14 @@ let customBoard = null;   // array of 64
 let customTurn = 'w';
 let customGameOver = false;
 let customInCheck = false;
+// Authoritative end-of-game result, set at the exact moment customGameOver
+// becomes true (one of: checkmate, stalemate, king captured, insufficient
+// material, threefold repetition, 50-move rule, resignation, time forfeit,
+// abort — see _checkGameOverInner/handleAbort/confirmResign/handleClockTimeout).
+// Read by the diagnostic FEN export's "Result:" line so it doesn't have to
+// be reverse-engineered from board state after the fact (D51).
+let gameOverWinner = null;     // 'w', 'b', or null (draw / aborted / not over)
+let gameOverReasonText = '';   // short human reason, e.g. 'Checkmate', 'Threefold repetition', '50-move rule', 'Aborted'
 let movedPawns = new Set(); // tracks pawn _id values of pawns that have already moved
 let enPassantSq = -1;      // index of the square a pawn skipped over (ep capture target), or -1
 let movedKings  = new Set(); // color strings 'w'/'b' whose king has moved
@@ -5524,6 +5550,8 @@ function startGame() {
   customTurn = 'w';
   customGameOver = false;
   customInCheck = false;
+  gameOverWinner = null;
+  gameOverReasonText = '';
   movedPawns = new Set();
   enPassantSq = -1;
   movedKings  = new Set();
@@ -6920,13 +6948,16 @@ function handleClockTimeout(who) {
   const el = document.getElementById('game-msg');
   el.className = 'game-msg';
   let msg;
+  gameOverReasonText = 'Time forfeit';
   if (who === 'player') {
     msg = '⏰ Time\'s up — AI Engine wins!';
+    gameOverWinner = playerColor === 'w' ? 'b' : 'w';
     el.textContent = msg;
     el.classList.add('show', 'lose');
     recordStat('engine_win');
   } else {
     msg = '⏰ Engine ran out of time — You win!';
+    gameOverWinner = playerColor;
     el.textContent = msg;
     el.classList.add('show', 'win');
     recordStat('user_win');
@@ -7871,6 +7902,19 @@ function _consoleDownloadFen() {
 
     lines.push('── Game ──');
     lines.push('Status: ' + (customGameOver ? 'Game over' : 'In progress') + (customInCheck ? ' (in check)' : ''));
+    if (customGameOver) {
+      let resultLine;
+      if (gameOverReasonText === 'Aborted') {
+        resultLine = 'Result: Aborted — no result';
+      } else if (gameOverWinner === null) {
+        resultLine = 'Result: Draw — ' + (gameOverReasonText || 'unknown reason');
+      } else {
+        const winnerLabel = gameOverWinner === 'w' ? 'White' : 'Black';
+        const winnerIsPlayer = gameOverWinner === playerColor;
+        resultLine = 'Result: ' + winnerLabel + ' wins (' + (winnerIsPlayer ? 'you' : 'AI') + ') — ' + (gameOverReasonText || 'unknown reason');
+      }
+      lines.push(resultLine);
+    }
     lines.push('Turn to move: ' + (customTurn === 'w' ? 'White' : 'Black'));
     lines.push('Player is playing: ' + (playerColor === 'w' ? 'White' : 'Black'));
     lines.push('Autoplay (AI plays for player): ' + (autoPlayEnabled ? 'ON' : 'OFF'));
