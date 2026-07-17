@@ -712,7 +712,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         // Helpers run the same search with infinite time, sharing the TT.
         // They stop when stop_flag is set (either by main thread or `stop`).
         let mut helper_handles = Vec::new();
-        for _ in 1..threads {
+        for tid in 1..threads {
             let mut h_pos  = pos.clone();
             let h_tt       = Arc::clone(&tt);
             let h_stop     = Arc::clone(&stop_flag);
@@ -731,6 +731,13 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                 // into a low-skill main search's move ordering/scores.
                 h_info.skill_level = skill_level;
                 h_info.contempt = contempt;
+                // Phase 23.2/D49: thread identity, consumed by
+                // lmr_thread_base() and thread_tie_break() to vary this
+                // helper's LMR aggressiveness and quiet-move tie-breaking
+                // so it explores different tree regions than the main
+                // thread and other helpers, instead of largely duplicating
+                // them.
+                h_info.thread_id = tid;
                 iterative_deepening(&mut h_pos, &h_tc, &mut h_info, &*h_tt)
             }));
         }
