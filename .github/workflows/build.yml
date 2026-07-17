@@ -102,6 +102,88 @@ jobs:
           path: dist/${{ matrix.asset_name }}
           retention-days: 7
 
+  # ── Regression gate (D48/23.1): candidate vs main over real UCI ──────
+  # Lightweight SPRT-style pass/fail check, run automatically on every PR
+  # (not manual-dispatch like uci_match_runner.yml). Builds the PR's own
+  # pet_dragon binary ("candidate") and a second pet_dragon built from the
+  # current tip of `main` ("baseline"), plays them against each other over
+  # real UCI via uci_match_runner (D36), and fails this job — blocking
+  # merge once branch protection marks it required — if the candidate's
+  # score against the baseline falls below the threshold. Deliberately
+  # small game count / fast movetime to keep this affordable on every PR;
+  # it is a coarse smoke check for clear regressions, not a precise Elo
+  # measurement (use uci_match_runner.yml manually for that).
+  regression-gate:
+    name: Regression Gate (D48)
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout candidate (PR head)
+        uses: actions/checkout@v6
+        with:
+          path: candidate
+
+      - name: Checkout baseline (current main)
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: baseline
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies (candidate)
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: regression-gate-candidate
+          workspaces: candidate
+
+      - name: Cache Rust dependencies (baseline)
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: regression-gate-baseline
+          workspaces: baseline
+
+      - name: Build harness (candidate)
+        run: cargo build --release --bin uci_match_runner --manifest-path candidate/Cargo.toml
+
+      - name: Build candidate engine
+        run: cargo build --release --bin pet_dragon --manifest-path candidate/Cargo.toml
+
+      - name: Build baseline engine
+        run: cargo build --release --bin pet_dragon --manifest-path baseline/Cargo.toml
+
+      - name: Run regression gate match (candidate vs main, D48)
+        run: >
+          ./candidate/target/release/uci_match_runner
+          ./candidate/target/release/pet_dragon
+          ./baseline/target/release/pet_dragon
+          20
+          50
+          0
+          "Candidate (PR ${{ github.event.pull_request.number }})"
+          "Baseline (main)"
+          regression_gate_results.txt
+          ""
+          ""
+          35
+
+      - name: Print result summary
+        if: always()
+        run: cat regression_gate_results.txt || true
+
+      - name: Upload regression gate results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: regression-gate-results-pr${{ github.event.pull_request.number }}
+          path: regression_gate_results.txt
+          retention-days: 14
+
   # ── Build WASM package: .wasm, JS bindings, standalone bundle ────────
   build-wasm:
     name: Build — WASM
