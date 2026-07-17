@@ -61,6 +61,47 @@ fn mvv_lva_score(attacker: PieceKind, victim: PieceKind) -> i32 {
     PIECE_VALUES[victim as usize] * 10 - PIECE_VALUES[attacker as usize]
 }
 
+/// Small thread-id-dependent perturbation for quiet-move ordering ties
+/// (Phase 23.2 / D49 — thread-differentiated Lazy SMP). Before this,
+/// helper threads' `history`/`countermoves`/`cont_hist` tables started
+/// from the same snapshot as the main thread and updated identically
+/// along a shared best line, so on ties they walked the same move order
+/// as the main thread — one more way helpers ended up largely duplicating
+/// work instead of covering different tree regions.
+///
+/// This is a deterministic mix, not actual randomness: the same
+/// `(thread_id, from, to)` always produces the same offset, so
+/// `Position::generate_with_seed`-based reproducibility in
+/// `selfplay.rs`/`match_runner.rs`/`uci_match_runner.rs` is unaffected —
+/// only which thread explores which tied line changes, not whether a
+/// given seed's game is reproducible.
+///
+/// `thread_id == 0` (the main thread — the only thread whose result is
+/// ever reported, see the Phase 19 MultiPV note in `main.rs::cmd_go`)
+/// always returns `0`: this must never change the main thread's move
+/// ordering, since that would change engine strength/behavior for every
+/// user, not just Lazy SMP tree diversity for helper threads.
+///
+/// Magnitude is capped small (`0..=3`) relative to `QUIET_BASE_SCORE`'s
+/// neighboring buckets so it can only affect ordering among moves already
+/// tied or near-tied on real history score — it can never override a
+/// meaningful score difference (e.g. jump a move ahead of a killer or a
+/// capture).
+#[inline]
+fn thread_tie_break(thread_id: usize, from: usize, to: usize) -> i32 {
+    if thread_id == 0 {
+        return 0;
+    }
+    // Cheap fixed-point multiplicative mix (not a cryptographic hash) —
+    // just enough avalanche that adjacent (from, to) pairs don't get
+    // correlated offsets within the same thread.
+    let mixed = (thread_id as u64)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ (from as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+        ^ (to as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+    ((mixed >> 60) & 0x3) as i32
+}
+
 // ── Scored move ───────────────────────────────────────────────────────────────
 
 /// A move paired with its ordering score
@@ -223,7 +264,7 @@ fn score_move(
         }
     }
 
-    QUIET_BASE_SCORE + history_score
+    QUIET_BASE_SCORE + history_score + thread_tie_break(info.thread_id, from, to)
 }
 
 // ── Incremental move selection ────────────────────────────────────────────────
@@ -388,6 +429,52 @@ mod tests {
         init_masks();
         init_magic();
         init_zobrist();
+    }
+
+    #[test]
+    fn test_thread_tie_break_main_thread_always_zero() {
+        // Thread 0 (main thread) must never be perturbed — this is the
+        // safety property the whole feature depends on.
+        assert_eq!(thread_tie_break(0, 12, 28), 0);
+        assert_eq!(thread_tie_break(0, 0, 63), 0);
+    }
+
+    #[test]
+    fn test_thread_tie_break_deterministic() {
+        // Same inputs must always produce the same output — this is a
+        // fixed mix, not real randomness, so reproducibility of seeded
+        // games elsewhere in the engine is unaffected.
+        let a = thread_tie_break(1, 12, 28);
+        let b = thread_tie_break(1, 12, 28);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_thread_tie_break_bounded_magnitude() {
+        // Must stay small enough to only affect ties, never override a
+        // real history-score difference or jump into a different
+        // ordering bucket (killer/capture/etc).
+        for thread_id in 1..8usize {
+            for from in [0usize, 12, 35, 63] {
+                for to in [0usize, 12, 35, 63] {
+                    let v = thread_tie_break(thread_id, from, to);
+                    assert!((0..=3).contains(&v),
+                        "tie-break offset out of expected 0..=3 range: {v}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_thread_tie_break_varies_across_threads() {
+        // Not every helper thread should collapse to the same offset for
+        // the same move — otherwise thread differentiation wouldn't
+        // actually decorrelate anything.
+        let offsets: std::collections::HashSet<i32> = (1..8usize)
+            .map(|tid| thread_tie_break(tid, 12, 28))
+            .collect();
+        assert!(offsets.len() > 1,
+            "expected tie-break offsets to vary across helper threads, got {offsets:?}");
     }
 
     #[test]

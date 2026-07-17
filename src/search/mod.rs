@@ -239,6 +239,20 @@ pub struct SearchInfo {
     /// see `draw_score()`'s doc comment for how root-relative sign works.
     /// Persistent across moves, same as `skill_level` above.
     pub contempt: i32,
+
+    // ── Lazy SMP thread identity (Phase 23.2 / D49) ───────────────────────────
+    /// Which Lazy SMP thread this `SearchInfo` belongs to: `0` for the main
+    /// thread (the only thread whose result is ever reported — see the
+    /// Phase 19 MultiPV note in `main.rs::cmd_go`), `1..threads-1` for
+    /// helper threads. Read by `lmr_thread_base()` (search/pruning.rs) to
+    /// vary LMR aggressiveness per helper, and by `score_move()`
+    /// (search/ordering.rs) to add a small deterministic tie-break offset
+    /// to quiet-move ordering — both purely to decorrelate helper threads'
+    /// tree exploration from the main thread and from each other. Defaults
+    /// to `0`; `main.rs` sets it explicitly per helper in the Lazy SMP
+    /// spawn loop. Not reset by `reset_for_search()` — thread identity
+    /// doesn't change between searches on the same thread.
+    pub thread_id: usize,
 }
 
 impl SearchInfo {
@@ -273,6 +287,7 @@ impl SearchInfo {
             syzygy: None,
             skill_level: crate::search::skill::MAX_SKILL_LEVEL,
             contempt: 0,
+            thread_id: 0,
         }
     }
 

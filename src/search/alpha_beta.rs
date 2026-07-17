@@ -38,7 +38,7 @@ use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
-    pruning::{pawn_hash, should_try_probcut, try_probcut},
+    pruning::{lmr_thread_base, pawn_hash, should_try_probcut, try_probcut},
     see::see,
     SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
@@ -599,8 +599,12 @@ fn alpha_beta_with_excluded(
                 && !in_check
                 && !gives_check
             {
-                // LMR formula (similar to Stockfish)
-                reduction = (0.75 + (depth as f64).ln()
+                // LMR formula (similar to Stockfish). Base constant is
+                // per-thread (Phase 23.2/D49): thread 0 (main thread)
+                // always gets 0.75, unchanged from before — only helper
+                // threads' aggressiveness varies, to decorrelate their
+                // tree exploration from the main thread and each other.
+                reduction = (lmr_thread_base(info.thread_id) + (depth as f64).ln()
                     * (moves_tried as f64).ln() / 2.25) as i32;
                 reduction = reduction.max(1).min(depth - 1);
             }

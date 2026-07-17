@@ -154,6 +154,35 @@ pub fn lmr_reduction(depth: i32, moves_tried: usize) -> i32 {
     (r as i32).max(1)
 }
 
+/// Per-thread base offset for the LMR formula's constant term (Phase 23.2
+/// / D49 — thread-differentiated Lazy SMP). Before this, every Lazy SMP
+/// helper thread (`main.rs`) ran the exact same LMR aggressiveness as the
+/// main thread, differing only in start timing — so, combined with a
+/// shared TT and near-identical move ordering, helpers spent most of
+/// their time re-deriving lines the main thread was already finding
+/// rather than covering genuinely different tree regions.
+///
+/// `thread_id == 0` (the main thread — the only thread whose result is
+/// ever reported to the GUI, see the Phase 19 MultiPV note above
+/// `iterative_deepening()`'s call site in `main.rs::cmd_go`) always
+/// returns exactly the original Stockfish-derived constant, `0.75` — this
+/// function cannot alter single-threaded search behavior, or the main
+/// thread's own line in a multi-threaded search, at all. Only helper
+/// threads' internal exploration changes.
+///
+/// Offsets cycle through a small fixed table rather than scaling linearly
+/// with `thread_id`: Lazy SMP gets diminishing (and eventually negative)
+/// returns from monotonically increasing reduction aggressiveness across
+/// many threads, so a handful of distinct "personalities" repeating is
+/// enough to decorrelate helpers from each other and from the main
+/// thread, without any of them reducing so aggressively they stop
+/// contributing useful transposition-table entries.
+const LMR_THREAD_BASE_OFFSETS: [f64; 4] = [0.75, 0.45, 1.05, 0.60];
+
+pub fn lmr_thread_base(thread_id: usize) -> f64 {
+    LMR_THREAD_BASE_OFFSETS[thread_id % LMR_THREAD_BASE_OFFSETS.len()]
+}
+
 // ── Probcut ───────────────────────────────────────────────────────────────────
 
 /// Probcut threshold above beta
@@ -385,6 +414,38 @@ mod tests {
         let r2 = lmr_reduction(6, 10);
         assert!(r2 >= r1,
             "LMR reduction should increase with moves tried");
+    }
+
+    #[test]
+    fn test_lmr_thread_base_main_thread_unchanged() {
+        // Thread 0 (main thread) must always get the original constant —
+        // this is the safety property the whole feature depends on: it
+        // must be impossible for this change to alter main-thread (i.e.
+        // single-threaded, or the reported line of a multi-threaded)
+        // search behavior.
+        assert_eq!(lmr_thread_base(0), 0.75);
+    }
+
+    #[test]
+    fn test_lmr_thread_base_varies_by_thread() {
+        // Helper threads (id >= 1) should not all collapse to the same
+        // base as each other or as the main thread — that would defeat
+        // the point of thread differentiation.
+        let b1 = lmr_thread_base(1);
+        let b2 = lmr_thread_base(2);
+        assert_ne!(b1, 0.75, "thread 1 should differ from main thread's base");
+        assert_ne!(b2, 0.75, "thread 2 should differ from main thread's base");
+        assert_ne!(b1, b2, "distinct helper threads should get distinct bases");
+    }
+
+    #[test]
+    fn test_lmr_thread_base_wraps_around() {
+        // With 4 offsets in the table, thread_id 4 should repeat thread 0's
+        // slot, thread 5 repeat thread 1's, etc. — this documents the
+        // wraparound as intentional behavior, not an accident, for any
+        // future reader (or session) tempted to "fix" the modulo.
+        assert_eq!(lmr_thread_base(4), lmr_thread_base(0));
+        assert_eq!(lmr_thread_base(5), lmr_thread_base(1));
     }
 
     #[test]
