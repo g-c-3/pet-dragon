@@ -19,6 +19,16 @@
 // exists. Blend ratio is a CLI flag, not hardcoded, so this decision can be
 // tuned from a single Colab cell without touching source.
 //
+// D53 (DECISIONS.md): the `1-lambda` game-result component is a hard 0/1
+// (or 0.5 draw) label. Plain BCE-on-logits has no finite minimizer against
+// a hard 0/1 target — the loss keeps decreasing as the pre-sigmoid logit is
+// pushed toward +/-infinity, which is the actual mechanism behind D52's
+// saturation finding (weight_decay/grad_clip_norm are a passive/reactive
+// safety net on the resulting large gradients, not a fix for the underlying
+// unbounded objective). `label_smoothing` maps the blended target from
+// [0,1] into [label_smoothing, 1-label_smoothing] before computing loss, so
+// the BCE minimizer corresponds to a finite logit again.
+//
 // NnueConfig uses NUM_FEATURES (896, D10) from nnue::features — this trainer
 // never redefines the feature count, so it can't silently drift out of sync
 // with extract_stm_nstm_features().
@@ -88,12 +98,22 @@ fn parse_line(line: &str) -> Option<Row> {
 /// D14 target blend: `lambda` weight on the eval-derived target, `1-lambda`
 /// on the game-result target. Falls back to eval-only when the row has no
 /// result (Lichess rows), so `lambda` only matters for self-play rows.
-fn target_from_row(row: &Row, lambda: f32) -> f32 {
+///
+/// D53: the blended target is then label-smoothed — mapped from `[0,1]`
+/// into `[label_smoothing, 1-label_smoothing]` — before being handed to
+/// BCE. This is applied uniformly (not only to hard-result rows) so
+/// eval-only rows and blended rows share one target distribution; for
+/// eval-only rows the effect is negligible since `eval_target` is already
+/// rarely near the exact 0/1 boundary, but it's the `result` component that
+/// actually reaches it (a decisive self-play game scores exactly 1.0/0.0),
+/// which is what D52 traced the saturation to.
+fn target_from_row(row: &Row, lambda: f32, label_smoothing: f32) -> f32 {
     let eval_target = 1.0 / (1.0 + (-(row.eval_cp as f32) / CP_TO_WINPROB_SCALE).exp());
-    match row.result {
+    let blended = match row.result {
         Some(r) => lambda * eval_target + (1.0 - lambda) * r,
         None => eval_target,
-    }
+    };
+    blended * (1.0 - 2.0 * label_smoothing) + label_smoothing
 }
 
 /// Load and parse every row from every comma-separated input file, printing
@@ -147,7 +167,7 @@ fn main() {
             "usage: train_nnue <output_prefix> <input_file1[,input_file2,...]> \
              [epochs=10] [lr=0.001] [batch_size=256] [hidden_size=32] \
              [accumulator_size=256] [lambda=0.7] [seed=42] [weight_decay=0.01] \
-             [grad_clip_norm=1.0]"
+             [grad_clip_norm=1.0] [label_smoothing=0.03]"
         );
         std::process::exit(1);
     }
@@ -178,11 +198,18 @@ fn main() {
     // clipping directly caps the update that caused the blowup in the
     // first place.
     let grad_clip_norm: f32 = args.get(11).and_then(|s| s.parse().ok()).unwrap_or(1.0);
+    // D53: label smoothing on the blended target. 0.03 maps the hard 0/1
+    // game-result endpoints to [0.03, 0.97] — chosen as a conventional
+    // starting value (Stockfish/Ethereal-style trainers commonly use
+    // 0.01-0.05); not yet empirically tuned past this first value. Set to
+    // 0.0 to fully disable (reproduces pre-D53 behavior exactly).
+    let label_smoothing: f32 = args.get(12).and_then(|s| s.parse().ok()).unwrap_or(0.03);
 
     eprintln!(
         "config: epochs={epochs} lr={lr} batch_size={batch_size} hidden_size={hidden_size} \
          accumulator_size={accumulator_size} lambda={lambda} seed={seed} \
-         weight_decay={weight_decay} grad_clip_norm={grad_clip_norm}"
+         weight_decay={weight_decay} grad_clip_norm={grad_clip_norm} \
+         label_smoothing={label_smoothing}"
     );
 
     let rows = load_rows(input_files);
@@ -195,7 +222,7 @@ fn main() {
         .map(|row| TrainingSample {
             stm_features: row.stm_features.clone(),
             nstm_features: row.nstm_features.clone(),
-            target: target_from_row(row, lambda),
+            target: target_from_row(row, lambda, label_smoothing),
             dense_input: Vec::new(),
         })
         .collect();
