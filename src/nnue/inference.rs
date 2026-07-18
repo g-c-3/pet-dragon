@@ -7,9 +7,10 @@
 // nnue/inference.rs — NORU NNUE inference (Phase 16.6)
 //
 // Loads the trained i16-quantized Pet Dragon network (Phase 16.5,
-// nnue-pet-dragon-h32-a256-e10, val_loss=0.538) and exposes evaluate_nnue(),
-// a centipawn score from the side-to-move's perspective — same convention
-// as eval::evaluate().
+// nnue-pet-dragon-h32-a256-e10, val_loss=0.501, trained on the Phase 23.3
+// sharded self-play dataset — see DECISIONS.md D50) and exposes
+// evaluate_nnue(), a centipawn score from the side-to-move's perspective —
+// same convention as eval::evaluate().
 //
 // Weights are embedded at compile time via include_bytes! (not loaded from
 // a runtime path) so both the native binary and the WASM/browser bundle
@@ -18,12 +19,14 @@
 // UCI option.
 //
 // ⚠️ REQUIRES nnue/weights/nnue_pet_dragon_quantized.bin TO EXIST IN THE
-// REPO BEFORE THIS FILE COMPILES. Gokul: download the artifact from the
-// Session 32 training run and upload it to that exact path (small 481K
-// binary, well under the 25MB repo-upload limit — no need for D22's
-// GitHub Releases workaround here) in the SAME commit as this file, or the
-// very next commit before this one lands — GitHub Actions will fail to
-// even compile otherwise (missing include_bytes! path is a hard error).
+// REPO BEFORE THIS FILE COMPILES. To swap in a newly-trained network:
+// download the quantized .bin from the train_nnue.yml run's artifact and
+// replace this exact file at this exact path, in the same commit as (or
+// the commit immediately before) any change to this file — GitHub Actions
+// will fail to even compile otherwise (missing include_bytes! path is a
+// hard error). NNUEWeight (default 0 = pure HCE) still gates how much this
+// embedded network actually affects play — swapping the file alone changes
+// nothing at runtime until NNUEWeight is raised above 0.
 //
 // cp-scale derivation (UNVERIFIED against a real network — flagged below):
 //   train_nnue.rs trains against target = sigmoid(eval_cp / 400) (D14,
@@ -72,8 +75,11 @@ use crate::position::Position;
 const CP_TO_WINPROB_SCALE: f32 = 400.0;
 
 /// Embedded quantized network weights (Phase 16.5 training run,
-/// nnue-pet-dragon-h32-a256-e10, 483,080 training rows, best epoch 8/10,
-/// val_loss=0.53776). Compiled directly into the binary/WASM bundle.
+/// nnue-pet-dragon-h32-a256-e10, 2,478,608 training rows — 2,428,608
+/// self-play + 50,000 Lichess, Phase 23.3's sharded self-play dataset —
+/// best epoch 6/10, val_loss=0.50108, superseding the earlier
+/// data-starved run at val_loss=0.53776/483,080 rows; see DECISIONS.md
+/// D50). Compiled directly into the binary/WASM bundle.
 static NNUE_WEIGHTS_BYTES: &[u8] =
     include_bytes!("weights/nnue_pet_dragon_quantized.bin");
 
