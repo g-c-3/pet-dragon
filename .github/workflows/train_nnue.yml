@@ -74,6 +74,11 @@ on:
         required: false
         default: "1.0"
         type: string
+      label_smoothing:
+        description: "D53: maps the blended [0,1] target into [label_smoothing, 1-label_smoothing] before BCE. Fixes the actual root cause of D52's logit saturation — hard 0/1 game-result labels have no finite BCE minimizer, which weight_decay/grad_clip_norm can only react to, not prevent. 0 disables (reproduces pre-D53 behavior)."
+        required: false
+        default: "0.03"
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -198,6 +203,7 @@ jobs:
           ${{ inputs.seed }}
           ${{ inputs.weight_decay }}
           ${{ inputs.grad_clip_norm }}
+          ${{ inputs.label_smoothing }}
 
       - name: Report output sizes
         run: ls -lh nnue_pet_dragon_fp32.bin nnue_pet_dragon_quantized.bin
