@@ -54,7 +54,7 @@ use std::time::Instant;
 use noru::config::{Activation, NnueConfig};
 use noru::trainer::{AdamState, Gradients, SimpleRng, TrainableWeights, TrainingSample};
 
-use pet_dragon_lib::nnue::features::NUM_FEATURES;
+use pet_dragon_lib::nnue::features::{NUM_FEATURES, NUM_PIECE_SQUARE_FEATURES};
 
 /// cp -> win-probability sigmoid slope. 400cp is the standard NNUE/Stockfish
 /// convention for "one pawn of advantage ~= this much win probability slope";
@@ -167,7 +167,7 @@ fn main() {
             "usage: train_nnue <output_prefix> <input_file1[,input_file2,...]> \
              [epochs=10] [lr=0.001] [batch_size=256] [hidden_size=32] \
              [accumulator_size=256] [lambda=0.7] [seed=42] [weight_decay=0.01] \
-             [grad_clip_norm=1.0] [label_smoothing=0.03]"
+             [grad_clip_norm=1.0] [label_smoothing=0.03] [phase_balance_cap=4]"
         );
         std::process::exit(1);
     }
@@ -204,12 +204,17 @@ fn main() {
     // 0.01-0.05); not yet empirically tuned past this first value. Set to
     // 0.0 to fully disable (reproduces pre-D53 behavior exactly).
     let label_smoothing: f32 = args.get(12).and_then(|s| s.parse().ok()).unwrap_or(0.03);
+    // D57: max oversampling multiplier for phase-balanced training order.
+    // 1 disables entirely (every row appears exactly once, original
+    // behavior) — default 4 caps duplication so a single very-rare
+    // activation-count bucket can't blow up epoch time unpredictably.
+    let phase_balance_cap: usize = args.get(13).and_then(|s| s.parse().ok()).unwrap_or(4);
 
     eprintln!(
         "config: epochs={epochs} lr={lr} batch_size={batch_size} hidden_size={hidden_size} \
          accumulator_size={accumulator_size} lambda={lambda} seed={seed} \
          weight_decay={weight_decay} grad_clip_norm={grad_clip_norm} \
-         label_smoothing={label_smoothing}"
+         label_smoothing={label_smoothing} phase_balance_cap={phase_balance_cap}"
     );
 
     let rows = load_rows(input_files);
@@ -240,6 +245,66 @@ fn main() {
     let val_count = (samples.len() / 20).max(1).min(samples.len() - 1);
     let (train_idx, val_idx) = indices.split_at(samples.len() - val_count);
     eprintln!("train rows: {}, validation rows: {}", train_idx.len(), val_idx.len());
+
+    // D57: phase-balanced oversampling. Self-play rows are recorded every
+    // ply, but D11's pawn-start features stay active only for the first
+    // few plies of a game before permanently decaying, so rows resembling
+    // "near the start of a game" are proportionally rare relative to rows
+    // where most pawns have already moved — even though every game has
+    // exactly one such row. This was found while diagnosing the D53-D55
+    // calibration sweep (the near-symmetric random-start eval_diag cases
+    // were the most persistently miscalibrated across every checkpoint).
+    // Fixes the imbalance by oversampling rare-activation-count rows in
+    // the training order — features.rs is untouched, no schema change, the
+    // currently-committed network stays loadable throughout. Inverse-sqrt-
+    // frequency weight, expressed as integer duplication of a row's index,
+    // normalized so the average row still appears ~once (keeps epoch cost
+    // predictable). `phase_balance_cap=1` fully disables (original
+    // unweighted behavior, every row exactly once).
+    fn phase_balanced_train_order(
+        samples: &[TrainingSample],
+        train_idx: &[usize],
+        cap: usize,
+    ) -> Vec<usize> {
+        if cap <= 1 {
+            return train_idx.to_vec();
+        }
+        let activation_count = |i: usize| -> usize {
+            samples[i]
+                .stm_features
+                .iter()
+                .filter(|&&idx| idx >= NUM_PIECE_SQUARE_FEATURES)
+                .count()
+        };
+        // D11 range is 0..=16 active pawn-start features per row.
+        let mut histogram = [0usize; 17];
+        for &i in train_idx {
+            histogram[activation_count(i)] += 1;
+        }
+        let raw_weights: Vec<f32> = train_idx
+            .iter()
+            .map(|&i| 1.0 / (histogram[activation_count(i)] as f32).sqrt())
+            .collect();
+        let mean_weight = raw_weights.iter().sum::<f32>() / raw_weights.len() as f32;
+
+        let mut balanced = Vec::with_capacity(train_idx.len());
+        for (pos, &i) in train_idx.iter().enumerate() {
+            let normalized = raw_weights[pos] / mean_weight;
+            let replicate = (normalized.round() as usize).clamp(1, cap);
+            for _ in 0..replicate {
+                balanced.push(i);
+            }
+        }
+        eprintln!(
+            "phase_balance: activation-count histogram (train split) = {histogram:?}"
+        );
+        eprintln!(
+            "phase_balance: balanced train rows = {} (from {}, cap={cap})",
+            balanced.len(),
+            train_idx.len()
+        );
+        balanced
+    }
 
     let config = NnueConfig::new_owned(
         NUM_FEATURES,
@@ -380,9 +445,11 @@ fn main() {
     let mut best_epoch = 0usize;
     let mut best_weights: Option<TrainableWeights> = None;
 
+    let balanced_train_idx = phase_balanced_train_order(&samples, train_idx, phase_balance_cap);
+
     let start = Instant::now();
     for epoch in 0..epochs {
-        let mut order = train_idx.to_vec();
+        let mut order = balanced_train_idx.clone();
         for i in (1..order.len()).rev() {
             let j = rng.next_usize(i + 1);
             order.swap(i, j);
