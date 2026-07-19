@@ -79,6 +79,11 @@ on:
         required: false
         default: "0.03"
         type: string
+      phase_balance_cap:
+        description: "D57: max oversampling multiplier for phase-balanced training order. Self-play rows near the start of a game (high pawn-start-feature activation count, D11) are proportionally rare vs. later-game rows, even though every game has exactly one. Oversamples rare-activation-count rows in the per-epoch training order — no feature/schema change, currently-committed network stays loadable. 1 disables (every row exactly once, original behavior)."
+        required: false
+        default: "4"
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -204,6 +209,7 @@ jobs:
           ${{ inputs.weight_decay }}
           ${{ inputs.grad_clip_norm }}
           ${{ inputs.label_smoothing }}
+          ${{ inputs.phase_balance_cap }}
 
       - name: Report output sizes
         run: ls -lh nnue_pet_dragon_fp32.bin nnue_pet_dragon_quantized.bin
