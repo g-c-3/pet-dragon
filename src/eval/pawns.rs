@@ -27,7 +27,7 @@
 // ============================================================================
 
 use crate::bitboard::Bitboard;
-use crate::eval::material::{s, taper};
+use crate::eval::material::{eg, s, taper};
 use crate::position::Position;
 use crate::types::{Color, PieceKind, Square};
 
@@ -65,6 +65,20 @@ const PASSED_PAWN_BONUS: [i64; 8] = [
     s(  0,   0),  // rank 8 / rank 1 (promotion rank — handled separately)
 ];
 
+// ── Passed-pawn king-distance weights (D63 item 1, ROADMAP Phase 24) ──────────
+// "Square of the pawn" idea: once material has thinned, whichever king is
+// closer to a passer's promotion square matters as much as the pawn's own
+// rank. Plain (unpacked) endgame-only centipawn weights, applied per
+// Chebyshev square of distance and scaled by how advanced the passer
+// already is — see `passed_pawn_king_distance_bonus()` below.
+//
+// Hand-picked starting values, NOT yet Texel-tuned — same status Phase 8's
+// original Ethereal-derived HCE terms had before Phase 14's tuning pass.
+// Wiring this into src/texel/{features,predict,predict_f64,weights,
+// weights_f64}.rs is optional future work, not done this session.
+const ENEMY_KING_DIST_EG: i32 = 6; // per square: farther enemy king = safer passer
+const OWN_KING_DIST_EG:   i32 = 5; // per square: closer own king = safer passer
+
 // ── Main evaluation function ──────────────────────────────────────────────────
 
 /// Evaluate pawn structure for both sides and return score from side-to-move perspective.
@@ -82,6 +96,8 @@ pub fn evaluate_pawns(pos: &Position, phase: i32) -> i32 {
 fn pawn_structure_for_color(pos: &Position, color: Color) -> i64 {
     let our_pawns   = pos.piece_bb(color, PieceKind::Pawn);
     let enemy_pawns = pos.piece_bb(color.flip(), PieceKind::Pawn);
+    let our_king    = pos.king_sq(color);
+    let enemy_king  = pos.king_sq(color.flip());
     let mut score   = 0i64;
 
     let mut pawns_bb = our_pawns;
@@ -151,6 +167,7 @@ fn pawn_structure_for_color(pos: &Position, color: Color) -> i64 {
         if is_passed_pawn(sq, color, enemy_pawns) {
             let rank_idx = passed_pawn_rank_index(sq, color);
             score += PASSED_PAWN_BONUS[rank_idx];
+            score += passed_pawn_king_distance_bonus(sq, color, rank_idx, our_king, enemy_king);
         }
     }
 
@@ -299,6 +316,53 @@ fn passed_pawn_rank_index(sq: Square, color: Color) -> usize {
     .min(7)
 }
 
+/// Chebyshev (king-move) distance between two squares — the number of king
+/// moves needed to travel from one to the other, ignoring occupancy.
+#[inline]
+fn chebyshev_distance(a: Square, b: Square) -> i32 {
+    let df = (a.file() as i32 - b.file() as i32).abs();
+    let dr = (a.rank() as i32 - b.rank() as i32).abs();
+    df.max(dr)
+}
+
+/// The square a pawn on `sq` would promote on: same file, opponent's back rank.
+#[inline]
+fn promotion_square(sq: Square, color: Color) -> Square {
+    let promo_rank = match color {
+        Color::White => 7,
+        Color::Black => 0,
+    };
+    Square::from_file_rank(sq.file(), promo_rank)
+        .expect("file is always in 0..8, promo_rank is always 0 or 7")
+}
+
+/// Passed-pawn king-distance bonus (D63 item 1 — "square of the pawn").
+/// EG-only: king proximity to a passer's promotion square barely matters
+/// until material has thinned enough for kings to actively race for it.
+/// Scaled by `rank_idx` (0..=7, same index `PASSED_PAWN_BONUS` uses) so a
+/// freshly-started passer gets almost no weight here, while a rank-6/7
+/// passer — exactly where a king race actually decides the game — gets
+/// close to the full per-square weight.
+#[inline]
+fn passed_pawn_king_distance_bonus(
+    sq: Square,
+    color: Color,
+    rank_idx: usize,
+    our_king: Square,
+    enemy_king: Square,
+) -> i64 {
+    let promo_sq   = promotion_square(sq, color);
+    let own_dist   = chebyshev_distance(our_king, promo_sq);
+    let enemy_dist = chebyshev_distance(enemy_king, promo_sq);
+
+    let advancement = rank_idx as i32; // 0..=7
+    let eg_bonus = (ENEMY_KING_DIST_EG * enemy_dist - OWN_KING_DIST_EG * own_dist)
+        * advancement
+        / 7;
+
+    s(0, eg_bonus)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -439,5 +503,114 @@ mod tests {
         let mut enemy3 = Bitboard::EMPTY;
         enemy3.set(Square::from_file_rank(3, 6).unwrap()); // d7
         assert!(!is_passed_pawn(sq, Color::White, enemy3), "Enemy on d7 → not passed");
+    }
+
+    #[test]
+    fn test_chebyshev_distance() {
+        // a1 to h8 — 7 files and 7 ranks apart, king distance = 7
+        assert_eq!(chebyshev_distance(Square::A1, Square::H8), 7);
+        // e1 to e1 — same square
+        assert_eq!(chebyshev_distance(Square::E1, Square::E1), 0);
+        // e1 to e2 — one rank apart
+        assert_eq!(chebyshev_distance(Square::E1, Square::E2), 1);
+        // a1 to b2 — diagonal, still 1 king move
+        let b2 = Square::from_file_rank(1, 1).unwrap();
+        assert_eq!(chebyshev_distance(Square::A1, b2), 1);
+    }
+
+    #[test]
+    fn test_promotion_square() {
+        let e4 = Square::from_file_rank(4, 3).unwrap();
+        assert_eq!(promotion_square(e4, Color::White), Square::from_file_rank(4, 7).unwrap());
+        assert_eq!(promotion_square(e4, Color::Black), Square::from_file_rank(4, 0).unwrap());
+    }
+
+    #[test]
+    fn test_own_king_closer_to_promo_scores_higher() {
+        setup();
+        // White e6 passer, promotes on e8. King A: Ke5 (closer to promo
+        // square). King B: Ka1 (far away). Black king fixed on a8 in both.
+        // Closer own king should score higher for an advanced passer where
+        // the term carries real weight.
+        let fen_close_king = "k7/8/4P3/4K3/8/8/8/8 w - - 0 1";
+        let fen_far_king   = "k7/8/4P3/8/8/8/8/K7 w - - 0 1";
+
+        let pos_close = Position::from_fen(fen_close_king).unwrap();
+        let pos_far   = Position::from_fen(fen_far_king).unwrap();
+
+        let score_close = evaluate_pawns(&pos_close, game_phase(&pos_close));
+        let score_far   = evaluate_pawns(&pos_far, game_phase(&pos_far));
+
+        assert!(
+            score_close > score_far,
+            "Own king near promo square should score higher than own king far away: close={} far={}",
+            score_close, score_far
+        );
+    }
+
+    #[test]
+    fn test_enemy_king_closer_to_promo_scores_lower() {
+        setup();
+        // White e6 passer, promotes on e8. Enemy king A: Kd8 (right next to
+        // the promotion square, can help stop it). Enemy king B: Ka8 (far).
+        // White's own king is fixed far away (a1) in both cases so only the
+        // enemy-king term differs.
+        let fen_enemy_close = "3k4/8/4P3/8/8/8/8/K7 w - - 0 1";
+        let fen_enemy_far   = "k7/8/4P3/8/8/8/8/K7 w - - 0 1";
+
+        let pos_enemy_close = Position::from_fen(fen_enemy_close).unwrap();
+        let pos_enemy_far   = Position::from_fen(fen_enemy_far).unwrap();
+
+        let score_enemy_close = evaluate_pawns(&pos_enemy_close, game_phase(&pos_enemy_close));
+        let score_enemy_far   = evaluate_pawns(&pos_enemy_far, game_phase(&pos_enemy_far));
+
+        assert!(
+            score_enemy_far > score_enemy_close,
+            "Enemy king far from promo square should score higher for us than enemy king near it: far={} close={}",
+            score_enemy_far, score_enemy_close
+        );
+    }
+
+    #[test]
+    fn test_king_distance_bonus_scales_with_advancement() {
+        setup();
+        // Same king geometry, but the passer is barely advanced (rank 2 vs
+        // rank 1 start) instead of near-promotion. The king-distance term's
+        // contribution should shrink accordingly (rank_idx used to scale it).
+        let far_king   = Square::A1;
+        let close_king = Square::from_file_rank(4, 6).unwrap(); // e7
+
+        // rank_idx = 6 (advanced, e6 for White → index 6)
+        let advanced = passed_pawn_king_distance_bonus(
+            Square::from_file_rank(4, 5).unwrap(), // e6
+            Color::White,
+            6,
+            close_king,
+            far_king,
+        );
+        // rank_idx = 1 (barely advanced, e2 for White → index 1)
+        let barely_advanced = passed_pawn_king_distance_bonus(
+            Square::from_file_rank(4, 1).unwrap(), // e2
+            Color::White,
+            1,
+            close_king,
+            far_king,
+        );
+
+        assert!(
+            eg(advanced).abs() > eg(barely_advanced).abs(),
+            "King-distance bonus should carry more weight for a more advanced passer: advanced={} barely_advanced={}",
+            eg(advanced), eg(barely_advanced)
+        );
+    }
+
+    #[test]
+    fn test_king_distance_bonus_1000_positions_no_panic() {
+        setup();
+        for seed in 0..1000u64 {
+            let pos = Position::generate_with_seed(seed);
+            let phase = game_phase(&pos);
+            let _ = evaluate_pawns(&pos, phase);
+        }
     }
 }
