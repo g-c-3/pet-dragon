@@ -80,6 +80,12 @@ pub const MIN_DEPTH_IIR:         i32 = 4;
 pub const MIN_DEPTH_RAZORING:    i32 = 1;
 pub const MIN_DEPTH_SINGULAR:    i32 = 6;
 
+/// Maximum depth at which Late Move Pruning (LMP) applies (D60). Beyond
+/// this depth the quiet-move-count threshold would need to be so large
+/// to stay safe that it never fires in practice anyway — Stockfish and
+/// Ethereal both cap their LMP tables at a similar single-digit depth.
+pub const MAX_DEPTH_LMP: i32 = 8;
+
 /// Maximum search depth
 pub const MAX_DEPTH: i32 = 128;
 

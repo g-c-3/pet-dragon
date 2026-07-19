@@ -183,6 +183,58 @@ pub fn lmr_thread_base(thread_id: usize) -> f64 {
     LMR_THREAD_BASE_OFFSETS[thread_id % LMR_THREAD_BASE_OFFSETS.len()]
 }
 
+// ── Late Move Pruning (LMP) ────────────────────────────────────────────────────
+// D60 — distinct from LMR: LMR still searches a late quiet move, just at
+// reduced depth, so a buried tactic can still be found via re-search.
+// LMP instead skips the move outright once enough quiet moves have
+// already been tried at this node without raising alpha — accepting
+// that moves ordered this late this deep essentially never turn out to
+// matter. Stockfish/Ethereal-family technique.
+//
+// Ethereal and Stockfish both differentiate the threshold by an
+// "improving" flag (is static eval better than it was two plies ago for
+// this side). Pet Dragon's alpha_beta doesn't currently track that flag
+// at all — adding it is a real, separate change with its own risk
+// surface — so this uses the single, more conservative ("non-improving")
+// threshold uniformly at every node. Safe default: it only ever prunes
+// *fewer* moves than an improving-aware version would, never more.
+const LMP_THRESHOLDS: [usize; (crate::search::MAX_DEPTH_LMP + 1) as usize] = [
+    0, 3, 4, 6, 9, 12, 16, 20, 25,
+];
+
+/// Quiet-move-count threshold for this depth, beyond which LMP prunes.
+/// Depth is clamped into the table's range — callers should already be
+/// gating on `depth <= MAX_DEPTH_LMP` via `should_apply_lmp`, this is
+/// just a defensive clamp so an out-of-range depth can't panic.
+pub fn lmp_threshold(depth: i32) -> usize {
+    LMP_THRESHOLDS[depth.clamp(0, crate::search::MAX_DEPTH_LMP) as usize]
+}
+
+/// Should this quiet move be skipped outright (not just reduced) by LMP?
+/// Mirrors the existing futility-pruning guard style in `alpha_beta.rs`:
+/// non-PV only, never in check or on a checking move, never near a mate
+/// score (mate lines need full accuracy, not late-move pruning).
+#[allow(clippy::too_many_arguments)]
+pub fn should_apply_lmp(
+    depth:       i32,
+    moves_tried: usize,
+    is_quiet:    bool,
+    in_check:    bool,
+    gives_check: bool,
+    pv_node:     bool,
+    alpha:       i32,
+    beta:        i32,
+) -> bool {
+    if pv_node                                  { return false; }
+    if in_check || gives_check                  { return false; }
+    if !is_quiet                                { return false; }
+    if depth < 1 || depth > crate::search::MAX_DEPTH_LMP { return false; }
+    if alpha.abs() >= MATE_THRESHOLD || beta.abs() >= MATE_THRESHOLD {
+        return false;
+    }
+    moves_tried >= lmp_threshold(depth)
+}
+
 // ── Probcut ───────────────────────────────────────────────────────────────────
 
 /// Probcut threshold above beta
@@ -517,6 +569,70 @@ mod tests {
         // Not guaranteed but very likely
         assert!(h1 != 0, "Pawn hash should be non-zero");
         assert!(h2 != 0, "Pawn hash should be non-zero");
+    }
+
+    #[test]
+    fn test_lmp_threshold_increases_with_depth() {
+        // Deeper nodes must tolerate at least as many quiet moves before
+        // pruning — a shrinking threshold would prune more aggressively
+        // the deeper we go, which is backwards.
+        for d in 1..crate::search::MAX_DEPTH_LMP {
+            assert!(lmp_threshold(d + 1) >= lmp_threshold(d),
+                "LMP threshold should not shrink with depth (depth {})", d);
+        }
+    }
+
+    #[test]
+    fn test_lmp_threshold_clamped_out_of_range() {
+        // Depth 0 and depths beyond the table must not panic — they
+        // clamp to the nearest in-range entry.
+        let _ = lmp_threshold(0);
+        let _ = lmp_threshold(crate::search::MAX_DEPTH_LMP + 5);
+    }
+
+    #[test]
+    fn test_lmp_not_applied_in_pv_node() {
+        assert!(!should_apply_lmp(4, 20, true, false, false, true, 0, 0),
+            "LMP must never fire in a PV node");
+    }
+
+    #[test]
+    fn test_lmp_not_applied_in_check_or_giving_check() {
+        assert!(!should_apply_lmp(4, 20, true, true, false, false, 0, 0),
+            "LMP must not fire when in check");
+        assert!(!should_apply_lmp(4, 20, true, false, true, false, 0, 0),
+            "LMP must not fire on a move that gives check");
+    }
+
+    #[test]
+    fn test_lmp_not_applied_to_non_quiet_moves() {
+        assert!(!should_apply_lmp(4, 20, false, false, false, false, 0, 0),
+            "LMP must not fire on captures/promotions");
+    }
+
+    #[test]
+    fn test_lmp_not_applied_beyond_max_depth() {
+        let too_deep = crate::search::MAX_DEPTH_LMP + 1;
+        assert!(!should_apply_lmp(too_deep, 100, true, false, false, false, 0, 0),
+            "LMP must not fire beyond MAX_DEPTH_LMP");
+    }
+
+    #[test]
+    fn test_lmp_not_applied_near_mate_scores() {
+        assert!(!should_apply_lmp(4, 20, true, false, false, false, MATE_THRESHOLD, 0),
+            "LMP must not fire when alpha is a mate-range score");
+        assert!(!should_apply_lmp(4, 20, true, false, false, false, 0, MATE_THRESHOLD),
+            "LMP must not fire when beta is a mate-range score");
+    }
+
+    #[test]
+    fn test_lmp_fires_past_threshold() {
+        let d = 4;
+        let threshold = lmp_threshold(d);
+        assert!(!should_apply_lmp(d, threshold - 1, true, false, false, false, 0, 0),
+            "LMP must not fire just below the threshold");
+        assert!(should_apply_lmp(d, threshold, true, false, false, false, 0, 0),
+            "LMP must fire once the quiet-move count reaches the threshold");
     }
 
     #[test]

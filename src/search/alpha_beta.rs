@@ -23,7 +23,8 @@
 //   - Internal Iterative Reduction (IIR)
 //   - Futility pruning
 //   - Late Move Reductions (LMR)
-//   - Singular extensions
+//   - Late Move Pruning (LMP) — D60, skip late quiets outright, distinct from LMR
+//   - Singular extensions, with multi-cut pruning and negative extensions (D59)
 //   - Check extensions
 //   - Razoring
 //   - Delta pruning (global + per-capture in quiescence)
@@ -38,7 +39,7 @@ use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
-    pruning::{lmr_thread_base, pawn_hash, should_try_probcut, try_probcut},
+    pruning::{lmr_thread_base, pawn_hash, should_apply_lmp, should_try_probcut, try_probcut},
     see::see,
     SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
@@ -461,12 +462,31 @@ fn alpha_beta_with_excluded(
         }
     }
 
-    // ── Singular extension verification (Phase 13.3) ──────────────────────────
+    // ── Singular extension verification (Phase 13.3, extended D59) ────────────
     // If the TT move beats every alternative by a wide margin, it's
     // "singular" — extend it by one ply so tactics hidden behind a forced
     // sequence aren't missed. Verified via a reduced-depth search of the
     // position with the TT move excluded.
-    let mut singular_extension = false;
+    //
+    // D59 adds two Stockfish-family siblings of the base technique, both
+    // reading the same verification search result rather than doing any
+    // extra search:
+    //   - Multi-cut pruning: if the verification search — which excludes
+    //     the TT move entirely — still reaches singular_beta, that means
+    //     at least one OTHER move also refutes at this margin. The
+    //     position is being cut multiple different ways, so the whole
+    //     node can be pruned right here instead of searching further.
+    //     Same "early return, no TT store" shape as probcut/razoring
+    //     above — consistent with existing style, not a new pattern.
+    //   - Negative extension: if verification did NOT confirm
+    //     singularity, but the TT move's own recorded score already
+    //     meets beta, the TT entry is telling us this is very likely a
+    //     cutoff regardless of the reduced-search result — so reduce
+    //     (don't extend) the TT move's own search rather than spending
+    //     extra depth re-confirming what the TT already suggests.
+    //     Reduces by 1 more ply in non-PV nodes than PV nodes, same
+    //     shape as Stockfish's `-2 - !PvNode`.
+    let mut tt_move_extension = 0i32;
     if !root_node
         && depth >= MIN_DEPTH_SINGULAR
         && tt_move != Move::NULL
@@ -487,7 +507,13 @@ fn alpha_beta_with_excluded(
             );
 
             if score < singular_beta {
-                singular_extension = true;
+                tt_move_extension = 1;
+            } else if singular_beta >= beta {
+                // Multi-cut: skip move generation/TT store entirely,
+                // mirroring probcut's early-return shape above.
+                return singular_beta;
+            } else if tt_score >= beta {
+                tt_move_extension = if pv_node { -1 } else { -2 };
             }
         }
     }
@@ -540,8 +566,9 @@ fn alpha_beta_with_excluded(
             continue;
         }
 
-        // Singular extension bonus — only the TT move itself gets it
-        let singular_ext = if singular_extension && mv == tt_move { 1 } else { 0 };
+        // Singular/multi-cut/negative extension (D59) — only the TT move
+        // itself gets it, and it can now be negative (negative extension).
+        let move_ext = if mv == tt_move { tt_move_extension } else { 0 };
 
         let is_capture   = mv.kind.is_capture();
         let is_promotion = mv.kind.is_promotion();
@@ -558,6 +585,19 @@ fn alpha_beta_with_excluded(
             && moves_tried > 0
             && static_eval + 100 * depth + 200 <= alpha
         {
+            continue;
+        }
+
+        // ── Late Move Pruning (LMP) ─────────────────────────────────────────────
+        // D60 — distinct from LMR: skip late quiet moves outright at
+        // shallow depth once enough quiets have already been tried
+        // without raising alpha, instead of just reducing them. See
+        // `pruning::should_apply_lmp` for the full rationale and the
+        // depth→threshold table.
+        if should_apply_lmp(
+            depth, moves_tried, is_quiet, in_check, gives_check, pv_node,
+            alpha, beta,
+        ) {
             continue;
         }
 
@@ -586,7 +626,7 @@ fn alpha_beta_with_excluded(
         if moves_tried == 1 {
             // First move: full window search
             score = -alpha_beta_with_excluded(
-                pos, depth - 1 + singular_ext, -beta, -alpha,
+                pos, depth - 1 + move_ext, -beta, -alpha,
                 ply + 1, pv_node, info, tt, mv, Move::NULL,
             );
         } else {
@@ -611,14 +651,14 @@ fn alpha_beta_with_excluded(
 
             // Null window search with reduction
             let mut s = -alpha_beta_with_excluded(
-                pos, depth - 1 + singular_ext - reduction, -alpha - 1, -alpha,
+                pos, depth - 1 + move_ext - reduction, -alpha - 1, -alpha,
                 ply + 1, false, info, tt, mv, Move::NULL,
             );
 
             // If reduced search beats alpha, re-search at full depth
             if s > alpha && reduction > 0 {
                 s = -alpha_beta_with_excluded(
-                    pos, depth - 1 + singular_ext, -alpha - 1, -alpha,
+                    pos, depth - 1 + move_ext, -alpha - 1, -alpha,
                     ply + 1, false, info, tt, mv, Move::NULL,
                 );
             }
@@ -626,7 +666,7 @@ fn alpha_beta_with_excluded(
             // If still beats alpha in PV node, full window re-search
             if s > alpha && pv_node {
                 s = -alpha_beta_with_excluded(
-                    pos, depth - 1 + singular_ext, -beta, -alpha,
+                    pos, depth - 1 + move_ext, -beta, -alpha,
                     ply + 1, true, info, tt, mv, Move::NULL,
                 );
             }
@@ -909,6 +949,41 @@ mod tests {
 
             assert!(score.abs() <= INFINITY,
                 "Score should be bounded (seed {})", seed);
+        }
+    }
+
+    #[test]
+    fn test_search_at_singular_extension_depth_no_panic() {
+        // Depth 7 is comfortably >= MIN_DEPTH_SINGULAR (6), so this
+        // exercises the full singular-extension verification path added
+        // in D59 — including its multi-cut early-return and
+        // negative-extension branches, whichever a given position/TT
+        // state happens to hit — without asserting which branch fires
+        // (that's position- and TT-state-dependent, not deterministic
+        // across seeds). The contract under test is just: search stays
+        // bounded and produces a legal move, same as any other depth.
+        setup();
+        for seed in 0..5u64 {
+            let mut pos  = Position::generate_with_seed(seed);
+            let mut info = SearchInfo::new();
+            let tt       = TranspositionTable::new(8);
+            info.time_allocated_ms = 5000;
+
+            let score = alpha_beta(
+                &mut pos, 7, -INFINITY, INFINITY,
+                0, true, &mut info, &tt, Move::NULL,
+            );
+
+            assert!(score.abs() <= INFINITY,
+                "Score should be bounded at singular-extension depth (seed {})", seed);
+            assert_ne!(info.best_move, Move::NULL,
+                "Search should find a best move at depth 7 (seed {})", seed);
+
+            let legal_moves = crate::movegen::generate_moves(&pos);
+            assert!(
+                legal_moves.iter().any(|&m| m == info.best_move),
+                "Best move should be legal (seed {})", seed
+            );
         }
     }
 
