@@ -425,6 +425,9 @@ fn write_tuned_weights(
 
     out.push_str(&format!("pawn_storm_bonus: {:?},\n\n", w.pawn_storm_bonus));
 
+    out.push_str(&format!("knight_near_own_king: {},\n", w.knight_near_own_king));
+    out.push_str(&format!("bishop_near_own_king: {},\n\n", w.bishop_near_own_king));
+
     out.push_str(&format!("rook_open_file: {},\n", fmt_packed(w.rook_open_file)));
     out.push_str(&format!("rook_semi_open_file: {},\n", fmt_packed(w.rook_semi_open_file)));
     out.push_str(&format!("rook_on_seventh: {},\n", fmt_packed(w.rook_on_seventh)));
