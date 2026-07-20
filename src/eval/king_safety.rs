@@ -52,6 +52,24 @@ const SEMI_OPEN_FILE_NEAR_KING: i32 = -19;
 /// Pawn shield bonus per pawn within 2 ranks of king on king's or adjacent file (MG only)
 const PAWN_SHIELD_BONUS: i32 = 16;
 
+/// Pawn-storm bonus (D63 item 2, ROADMAP Phase 24) — the mirror image of
+/// the pawn shield: scores ENEMY pawns advanced on files near this king
+/// as an attacking resource for the opponent, rather than scoring the
+/// defender's own shield pawns. MG only, same phase-scaling scope as
+/// every other term here (`evaluate_king_safety`'s `* phase / 24`).
+///
+/// Indexed by the rank distance from the most-advanced enemy pawn on a
+/// king-adjacent file to the king's own rank — a pawn already 0-2 ranks
+/// away is a live attacking resource, one still on its own half of the
+/// board isn't a storm yet. Hand-picked starting values, NOT yet
+/// Texel-tuned — same status Phase 8's original Ethereal-derived HCE
+/// terms had before Phase 14's tuning pass. Like every other constant in
+/// this file, wired into `texel::predict()`'s `king_safety_side()` via a
+/// matching `TunableWeights::pawn_storm_bonus` field — see
+/// `src/texel/{features,predict,weights,weights_f64,predict_f64}.rs`
+/// (learned the hard way on D63 item 1 not to skip this).
+const PAWN_STORM_BONUS: [i32; 8] = [40, 32, 24, 16, 8, 0, 0, 0];
+
 /// Max king danger score before scaling (prevents integer overflow)
 const MAX_KING_DANGER: i32 = 2400;
 
@@ -140,13 +158,16 @@ fn king_safety_score(pos: &Position, king_color: Color, attacker_color: Color) -
     let enemy_pawns = pos.piece_bb(attacker_color, PieceKind::Pawn);
     let open_file_penalty = open_files_near_king(king_sq, our_pawns, enemy_pawns);
 
+    // ── Pawn storm (D63 item 2) ─────────────────────────────────────────────
+    let storm_danger = pawn_storm_danger(king_sq, enemy_pawns);
+
     // ── Combine ───────────────────────────────────────────────────────────────
     // King danger = attacker units scaled by attacker count weight
     let weight_idx = attacker_count.min(7);
     let danger = (attack_units * ATTACKER_WEIGHT[weight_idx] / 100)
                .min(MAX_KING_DANGER);
 
-    shield_score + open_file_penalty - danger
+    shield_score + open_file_penalty - danger - storm_danger
 }
 
 /// Count friendly pawns in the king's pawn shield zone.
@@ -216,6 +237,44 @@ fn open_files_near_king(king_sq: Square, our_pawns: Bitboard, enemy_pawns: Bitbo
     }
 
     penalty
+}
+
+/// Compute the pawn-storm danger contributed by enemy pawns advanced on
+/// files near this king (D63 item 2). For each of the king's own file and
+/// the two adjacent files, finds the most-advanced enemy pawn (smallest
+/// rank distance to the king) and looks up its threat by that distance —
+/// mirrors `pawn_shield()`'s file-selection logic exactly, just measuring
+/// the opponent's pawns instead of the defender's own.
+fn pawn_storm_danger(king_sq: Square, enemy_pawns: Bitboard) -> i32 {
+    let king_file = king_sq.file();
+    let king_rank = king_sq.rank() as i32;
+    let mut danger = 0i32;
+
+    let files_to_check = [
+        king_file.checked_sub(1),
+        Some(king_file),
+        if king_file < 7 { Some(king_file + 1) } else { None },
+    ];
+
+    for file_opt in &files_to_check {
+        if let Some(file) = file_opt {
+            let file_mask = Bitboard::file_mask(*file);
+            let mut pawns_on_file = enemy_pawns & file_mask;
+
+            let mut best_dist = 8i32;
+            while let Some(sq) = pawns_on_file.pop_lsb() {
+                let dist = (sq.rank() as i32 - king_rank).abs();
+                if dist < best_dist {
+                    best_dist = dist;
+                }
+            }
+            if best_dist <= 7 {
+                danger += PAWN_STORM_BONUS[best_dist as usize];
+            }
+        }
+    }
+
+    danger
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -326,5 +385,86 @@ mod tests {
             assert!(score.abs() < 3000,
                 "King safety score should be bounded: {} for {}", score, fen);
         }
+    }
+
+    #[test]
+    fn test_pawn_storm_advanced_pawn_more_dangerous() {
+        setup();
+        let king_sq = Square::G1;
+
+        let mut advanced = Bitboard::EMPTY;
+        advanced.set(Square::G4); // rank distance 3 from g1
+
+        let mut home = Bitboard::EMPTY;
+        home.set(Square::G7); // rank distance 6 from g1
+
+        let danger_advanced = pawn_storm_danger(king_sq, advanced);
+        let danger_home = pawn_storm_danger(king_sq, home);
+
+        assert!(
+            danger_advanced > danger_home,
+            "An advanced enemy pawn should be a bigger storm threat than one still at home: advanced={} home={}",
+            danger_advanced, danger_home
+        );
+    }
+
+    #[test]
+    fn test_pawn_storm_far_file_ignored() {
+        setup();
+        let king_sq = Square::G1;
+        let mut far_file_pawn = Bitboard::EMPTY;
+        far_file_pawn.set(Square::A4); // not on f/g/h file — irrelevant to a g1 king
+        assert_eq!(
+            pawn_storm_danger(king_sq, far_file_pawn),
+            0,
+            "Pawn on a file not adjacent to the king should contribute no storm danger"
+        );
+    }
+
+    #[test]
+    fn test_pawn_storm_sums_across_files() {
+        setup();
+        let king_sq = Square::G1;
+
+        let mut one_pawn = Bitboard::EMPTY;
+        one_pawn.set(Square::G4);
+
+        let mut two_pawns = Bitboard::EMPTY;
+        two_pawns.set(Square::F4);
+        two_pawns.set(Square::H4);
+
+        let danger_one = pawn_storm_danger(king_sq, one_pawn);
+        let danger_two = pawn_storm_danger(king_sq, two_pawns);
+
+        assert_eq!(
+            danger_two, danger_one * 2,
+            "Two equally-advanced storm pawns on different adjacent files should sum: one={} two={}",
+            danger_one, danger_two
+        );
+    }
+
+    #[test]
+    fn test_king_safety_penalizes_enemy_pawn_storm() {
+        setup();
+        // White Kg1, Black king far away on b8 (no bearing on White's
+        // safety). Position A: Black's lone pawn is storming on g4.
+        // Position B: same pawn, still at home on g7. White has no pawns
+        // in either FEN, so shield/open-file terms are identical between
+        // A and B — only the storm term differs.
+        let fen_storming = "1k6/8/8/8/6p1/8/8/6K1 w - - 0 1";
+        let fen_home      = "1k6/6p1/8/8/8/8/8/6K1 w - - 0 1";
+
+        let pos_storming = Position::from_fen(fen_storming).unwrap();
+        let pos_home      = Position::from_fen(fen_home).unwrap();
+        let phase = 20; // near middlegame
+
+        let score_storming = evaluate_king_safety(&pos_storming, phase);
+        let score_home      = evaluate_king_safety(&pos_home, phase);
+
+        assert!(
+            score_storming < score_home,
+            "White should be less safe with Black's pawn storming on g4 than sitting at home on g7: storming={} home={}",
+            score_storming, score_home
+        );
     }
 }
