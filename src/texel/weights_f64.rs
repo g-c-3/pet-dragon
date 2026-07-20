@@ -109,6 +109,8 @@ pub struct TunableWeightsF64 {
     pub open_file_near_king: f64,
     pub semi_open_file_near_king: f64,
     pub pawn_shield_bonus: f64,
+    /// D63 item 2 — f64 mirror of `TunableWeights::pawn_storm_bonus`.
+    pub pawn_storm_bonus: [f64; 8],
 
     pub rook_open_file: S,
     pub rook_semi_open_file: S,
@@ -146,6 +148,7 @@ impl TunableWeightsF64 {
             open_file_near_king: 0.0,
             semi_open_file_near_king: 0.0,
             pawn_shield_bonus: 0.0,
+            pawn_storm_bonus: [0.0; 8],
             rook_open_file: S::zero(),
             rook_semi_open_file: S::zero(),
             rook_on_seventh: S::zero(),
@@ -181,6 +184,7 @@ impl TunableWeightsF64 {
             open_file_near_king: self.open_file_near_king.round() as i32,
             semi_open_file_near_king: self.semi_open_file_near_king.round() as i32,
             pawn_shield_bonus: self.pawn_shield_bonus.round() as i32,
+            pawn_storm_bonus: self.pawn_storm_bonus.map(|v| v.round() as i32),
             rook_open_file: self.rook_open_file.to_packed(),
             rook_semi_open_file: self.rook_semi_open_file.to_packed(),
             rook_on_seventh: self.rook_on_seventh.to_packed(),
@@ -204,6 +208,7 @@ impl TunableWeightsF64 {
         + 3 * 2 + 8 * 2 // isolated/doubled/backward + passed_pawn_bonus
         + 2             // D63 item 1: enemy_king_dist_eg + own_king_dist_eg
         + 8 + 1 + 1 + 1 // king safety flat terms
+        + 8             // D63 item 2: pawn_storm_bonus
         + 9 * 2         // open lines
         + 1; // tempo
 
@@ -257,6 +262,9 @@ impl TunableWeightsF64 {
         v.push(self.open_file_near_king);
         v.push(self.semi_open_file_near_king);
         v.push(self.pawn_shield_bonus);
+        for w in &self.pawn_storm_bonus {
+            v.push(*w);
+        }
         v.push(self.rook_open_file.mg);
         v.push(self.rook_open_file.eg);
         v.push(self.rook_semi_open_file.mg);
@@ -339,6 +347,11 @@ impl TunableWeightsF64 {
         let semi_open_file_near_king = next();
         let pawn_shield_bonus = next();
 
+        let mut pawn_storm_bonus = [0.0f64; 8];
+        for slot in pawn_storm_bonus.iter_mut() {
+            *slot = next();
+        }
+
         let rook_open_file = S::new(next(), next());
         let rook_semi_open_file = S::new(next(), next());
         let rook_on_seventh = S::new(next(), next());
@@ -371,6 +384,7 @@ impl TunableWeightsF64 {
             open_file_near_king,
             semi_open_file_near_king,
             pawn_shield_bonus,
+            pawn_storm_bonus,
             rook_open_file,
             rook_semi_open_file,
             rook_on_seventh,
@@ -405,6 +419,7 @@ impl From<&TunableWeights> for TunableWeightsF64 {
             open_file_near_king: w.open_file_near_king as f64,
             semi_open_file_near_king: w.semi_open_file_near_king as f64,
             pawn_shield_bonus: w.pawn_shield_bonus as f64,
+            pawn_storm_bonus: w.pawn_storm_bonus.map(|x| x as f64),
             rook_open_file: S::from(w.rook_open_file),
             rook_semi_open_file: S::from(w.rook_semi_open_file),
             rook_on_seventh: S::from(w.rook_on_seventh),
@@ -459,6 +474,7 @@ mod tests {
             default_weights.semi_open_file_near_king
         );
         assert_eq!(back_to_int.pawn_shield_bonus, default_weights.pawn_shield_bonus);
+        assert_eq!(back_to_int.pawn_storm_bonus, default_weights.pawn_storm_bonus);
         assert_eq!(back_to_int.rook_open_file, default_weights.rook_open_file);
         assert_eq!(back_to_int.rook_semi_open_file, default_weights.rook_semi_open_file);
         assert_eq!(back_to_int.rook_on_seventh, default_weights.rook_on_seventh);

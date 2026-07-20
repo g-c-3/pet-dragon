@@ -97,6 +97,7 @@ pub fn predict(f: &TexelFeatures, w: &TunableWeights) -> i32 {
             f.king_us_shield_pawns,
             f.king_us_open_files,
             f.king_us_semi_open_files,
+            &f.king_us_storm_buckets,
             w,
         );
         let their_safety = king_safety_side(
@@ -105,6 +106,7 @@ pub fn predict(f: &TexelFeatures, w: &TunableWeights) -> i32 {
             f.king_them_shield_pawns,
             f.king_them_open_files,
             f.king_them_semi_open_files,
+            &f.king_them_storm_buckets,
             w,
         );
         (our_safety - their_safety) * phase / 24
@@ -136,6 +138,7 @@ fn king_safety_side(
     shield_pawns: i32,
     open_files: i32,
     semi_open_files: i32,
+    storm_buckets: &[i32; 8],
     w: &TunableWeights,
 ) -> i32 {
     let shield_score = shield_pawns * w.pawn_shield_bonus;
@@ -143,7 +146,8 @@ fn king_safety_side(
         open_files * w.open_file_near_king + semi_open_files * w.semi_open_file_near_king;
     let weight_idx = attacker_count.min(7);
     let danger = (attack_units * w.attacker_weight[weight_idx] / 100).min(MAX_KING_DANGER);
-    shield_score + open_penalty - danger
+    let storm_danger: i32 = (0..8).map(|i| storm_buckets[i] * w.pawn_storm_bonus[i]).sum();
+    shield_score + open_penalty - danger - storm_danger
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

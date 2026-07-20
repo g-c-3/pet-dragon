@@ -79,11 +79,16 @@ pub struct TexelFeatures {
     pub king_us_shield_pawns: i32,
     pub king_us_open_files: i32,
     pub king_us_semi_open_files: i32,
+    /// D63 item 2 — count of king-adjacent files whose most-advanced enemy
+    /// pawn falls in each rank-distance bucket (0..=7). Paired with
+    /// `TunableWeights::pawn_storm_bonus`.
+    pub king_us_storm_buckets: [i32; 8],
     pub king_them_attacker_count: usize,
     pub king_them_attack_units: i32,
     pub king_them_shield_pawns: i32,
     pub king_them_open_files: i32,
     pub king_them_semi_open_files: i32,
+    pub king_them_storm_buckets: [i32; 8],
 
     // ── Open lines ────────────────────────────────────────────────────────
     pub rook_open_diff: i32,
@@ -135,11 +140,13 @@ pub fn extract_features(pos: &Position) -> TexelFeatures {
         king_us_shield_pawns: king.2,
         king_us_open_files: king.3,
         king_us_semi_open_files: king.4,
-        king_them_attacker_count: king.5,
-        king_them_attack_units: king.6,
-        king_them_shield_pawns: king.7,
-        king_them_open_files: king.8,
-        king_them_semi_open_files: king.9,
+        king_us_storm_buckets: king.5,
+        king_them_attacker_count: king.6,
+        king_them_attack_units: king.7,
+        king_them_shield_pawns: king.8,
+        king_them_open_files: king.9,
+        king_them_semi_open_files: king.10,
+        king_them_storm_buckets: king.11,
         rook_open_diff: ol.0,
         rook_semi_diff: ol.1,
         rook_seventh_diff: ol.2,
@@ -458,22 +465,22 @@ fn promotion_square(sq: Square, color: Color) -> Square {
 
 // ── King safety (mirrors eval::king_safety::king_safety_score) ─────────────
 
-type KingSafetyRaw = (usize, i32, i32, i32, i32, usize, i32, i32, i32, i32);
+type KingSafetyRaw = (usize, i32, i32, i32, i32, [i32; 8], usize, i32, i32, i32, i32, [i32; 8]);
 
 fn extract_king_safety(pos: &Position, us: Color, them: Color) -> KingSafetyRaw {
-    let (us_ac, us_au, us_sp, us_of, us_sof) = king_safety_side_raw(pos, us, them);
-    let (them_ac, them_au, them_sp, them_of, them_sof) = king_safety_side_raw(pos, them, us);
-    (us_ac, us_au, us_sp, us_of, us_sof, them_ac, them_au, them_sp, them_of, them_sof)
+    let (us_ac, us_au, us_sp, us_of, us_sof, us_storm) = king_safety_side_raw(pos, us, them);
+    let (them_ac, them_au, them_sp, them_of, them_sof, them_storm) = king_safety_side_raw(pos, them, us);
+    (us_ac, us_au, us_sp, us_of, us_sof, us_storm, them_ac, them_au, them_sp, them_of, them_sof, them_storm)
 }
 
-/// Returns (attacker_count, attack_units, shield_pawns, open_files, semi_open_files)
-/// for one king — exactly the raw components `king_safety_score` combines,
-/// before any weight is applied.
+/// Returns (attacker_count, attack_units, shield_pawns, open_files,
+/// semi_open_files, storm_buckets) for one king — exactly the raw
+/// components `king_safety_score` combines, before any weight is applied.
 fn king_safety_side_raw(
     pos: &Position,
     king_color: Color,
     attacker_color: Color,
-) -> (usize, i32, i32, i32, i32) {
+) -> (usize, i32, i32, i32, i32, [i32; 8]) {
     let king_sq = pos.king_sq(king_color);
     let all_occ = pos.all_pieces();
 
@@ -522,8 +529,9 @@ fn king_safety_side_raw(
 
     let enemy_pawns = pos.piece_bb(attacker_color, PieceKind::Pawn);
     let (open_files, semi_open_files) = open_files_near_king_raw(king_sq, our_pawns, enemy_pawns);
+    let storm_buckets = pawn_storm_buckets(king_sq, enemy_pawns);
 
-    (attacker_count, attack_units, shield_pawns, open_files, semi_open_files)
+    (attacker_count, attack_units, shield_pawns, open_files, semi_open_files, storm_buckets)
 }
 
 fn pawn_shield_raw(king_sq: Square, color: Color, our_pawns: Bitboard) -> u32 {
@@ -585,6 +593,42 @@ fn open_files_near_king_raw(king_sq: Square, our_pawns: Bitboard, enemy_pawns: B
     }
 
     (open, semi_open)
+}
+
+/// Mirrors `eval::king_safety::pawn_storm_danger` exactly, except it
+/// returns per-distance-bucket file counts instead of a pre-weighted sum
+/// — the weight (`TunableWeights::pawn_storm_bonus[bucket]`) is applied
+/// later in `predict.rs`, same pattern as `passed_pawn_bonus`.
+fn pawn_storm_buckets(king_sq: Square, enemy_pawns: Bitboard) -> [i32; 8] {
+    let king_file = king_sq.file();
+    let king_rank = king_sq.rank() as i32;
+    let mut buckets = [0i32; 8];
+
+    let files_to_check = [
+        king_file.checked_sub(1),
+        Some(king_file),
+        if king_file < 7 { Some(king_file + 1) } else { None },
+    ];
+
+    for file_opt in &files_to_check {
+        if let Some(file) = file_opt {
+            let file_mask = Bitboard::file_mask(*file);
+            let mut pawns_on_file = enemy_pawns & file_mask;
+
+            let mut best_dist = 8i32;
+            while let Some(sq) = pawns_on_file.pop_lsb() {
+                let dist = (sq.rank() as i32 - king_rank).abs();
+                if dist < best_dist {
+                    best_dist = dist;
+                }
+            }
+            if best_dist <= 7 {
+                buckets[best_dist as usize] += 1;
+            }
+        }
+    }
+
+    buckets
 }
 
 // ── Open lines (mirrors eval::open_lines::open_line_score) ─────────────────

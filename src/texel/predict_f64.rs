@@ -90,6 +90,7 @@ pub fn predict_f64(f: &TexelFeatures, w: &TunableWeightsF64) -> f64 {
             f.king_us_shield_pawns,
             f.king_us_open_files,
             f.king_us_semi_open_files,
+            &f.king_us_storm_buckets,
             w,
         );
         let their_safety = king_safety_side_f64(
@@ -98,6 +99,7 @@ pub fn predict_f64(f: &TexelFeatures, w: &TunableWeightsF64) -> f64 {
             f.king_them_shield_pawns,
             f.king_them_open_files,
             f.king_them_semi_open_files,
+            &f.king_them_storm_buckets,
             w,
         );
         (our_safety - their_safety) * phase as f64 / 24.0
@@ -136,6 +138,7 @@ fn king_safety_side_f64(
     shield_pawns: i32,
     open_files: i32,
     semi_open_files: i32,
+    storm_buckets: &[i32; 8],
     w: &TunableWeightsF64,
 ) -> f64 {
     let shield_score = shield_pawns as f64 * w.pawn_shield_bonus;
@@ -144,7 +147,10 @@ fn king_safety_side_f64(
     let weight_idx = attacker_count.min(7);
     let danger = (attack_units as f64 * w.attacker_weight[weight_idx] / 100.0)
         .min(MAX_KING_DANGER as f64);
-    shield_score + open_penalty - danger
+    let storm_danger: f64 = (0..8)
+        .map(|i| storm_buckets[i] as f64 * w.pawn_storm_bonus[i])
+        .sum();
+    shield_score + open_penalty - danger - storm_danger
 }
 
 /// Forward pass + gradient accumulation in one call, mirroring
@@ -320,6 +326,7 @@ pub fn predict_and_accumulate_grad(
             f.king_us_shield_pawns,
             f.king_us_open_files,
             f.king_us_semi_open_files,
+            &f.king_us_storm_buckets,
             w,
             scaled_error,
             grad,
@@ -330,6 +337,7 @@ pub fn predict_and_accumulate_grad(
             f.king_them_shield_pawns,
             f.king_them_open_files,
             f.king_them_semi_open_files,
+            &f.king_them_storm_buckets,
             w,
             -scaled_error,
             grad,
@@ -464,6 +472,7 @@ fn king_safety_side_grad(
     shield_pawns: i32,
     open_files: i32,
     semi_open_files: i32,
+    storm_buckets: &[i32; 8],
     w: &TunableWeightsF64,
     scaled_error: f64,
     grad: &mut TunableWeightsF64,
@@ -480,14 +489,21 @@ fn king_safety_side_grad(
     let clamped = raw_danger >= MAX_KING_DANGER as f64;
     let danger = raw_danger.min(MAX_KING_DANGER as f64);
 
+    let storm_danger: f64 = (0..8)
+        .map(|i| storm_buckets[i] as f64 * w.pawn_storm_bonus[i])
+        .sum();
+
     grad.pawn_shield_bonus += scaled_error * sp;
     grad.open_file_near_king += scaled_error * of;
     grad.semi_open_file_near_king += scaled_error * sof;
     if !clamped {
         grad.attacker_weight[weight_idx] += scaled_error * (-(attack_units as f64) / 100.0);
     }
+    for i in 0..8 {
+        grad.pawn_storm_bonus[i] += scaled_error * (-(storm_buckets[i] as f64));
+    }
 
-    shield_score + open_penalty - danger
+    shield_score + open_penalty - danger - storm_danger
 }
 
 #[cfg(test)]
