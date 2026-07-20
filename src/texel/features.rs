@@ -65,6 +65,13 @@ pub struct TexelFeatures {
     pub pawn_doubled_diff: i32,
     pub pawn_backward_diff: i32,
     pub pawn_passed_diff: [i32; 8],
+    /// Sum over passed pawns of (enemy_king_dist_to_promo_sq * advancement),
+    /// us minus them. Paired with `TunableWeights::enemy_king_dist_eg`.
+    /// D63 item 1 — see `eval::pawns::passed_pawn_king_distance_bonus`.
+    pub passed_king_enemy_dist_diff: i32,
+    /// Sum over passed pawns of (own_king_dist_to_promo_sq * advancement),
+    /// us minus them. Paired with `TunableWeights::own_king_dist_eg`.
+    pub passed_king_own_dist_diff: i32,
 
     // ── King safety (raw per-side components — see module doc) ─────────
     pub king_us_attacker_count: usize,
@@ -102,7 +109,8 @@ pub fn extract_features(pos: &Position) -> TexelFeatures {
     let pst_diff = extract_pst(pos, us, them);
     let (knight_mobility_diff, bishop_mobility_diff, rook_mobility_diff, queen_mobility_diff) =
         extract_mobility(pos, us, them);
-    let (pawn_isolated_diff, pawn_doubled_diff, pawn_backward_diff, pawn_passed_diff) =
+    let (pawn_isolated_diff, pawn_doubled_diff, pawn_backward_diff, pawn_passed_diff,
+         passed_king_enemy_dist_diff, passed_king_own_dist_diff) =
         extract_pawns(pos, us, them);
     let king = extract_king_safety(pos, us, them);
     let ol = extract_open_lines(pos, us, them);
@@ -120,6 +128,8 @@ pub fn extract_features(pos: &Position) -> TexelFeatures {
         pawn_doubled_diff,
         pawn_backward_diff,
         pawn_passed_diff,
+        passed_king_enemy_dist_diff,
+        passed_king_own_dist_diff,
         king_us_attacker_count: king.0,
         king_us_attack_units: king.1,
         king_us_shield_pawns: king.2,
@@ -233,15 +243,19 @@ fn extract_mobility(
 
 // ── Pawn structure (mirrors eval::pawns::pawn_structure_for_color) ─────────
 
-fn extract_pawns(pos: &Position, us: Color, them: Color) -> (i32, i32, i32, [i32; 8]) {
+fn extract_pawns(pos: &Position, us: Color, them: Color) -> (i32, i32, i32, [i32; 8], i32, i32) {
     let mut isolated_diff = 0i32;
     let mut doubled_diff = 0i32;
     let mut backward_diff = 0i32;
     let mut passed_diff = [0i32; 8];
+    let mut king_enemy_dist_diff = 0i32;
+    let mut king_own_dist_diff = 0i32;
 
     for (color, sign) in [(us, 1i32), (them, -1i32)] {
         let our_pawns = pos.piece_bb(color, PieceKind::Pawn);
         let enemy_pawns = pos.piece_bb(color.flip(), PieceKind::Pawn);
+        let our_king = pos.king_sq(color);
+        let enemy_king = pos.king_sq(color.flip());
 
         let mut pawns_bb = our_pawns;
         while let Some(sq) = pawns_bb.pop_lsb() {
@@ -289,11 +303,21 @@ fn extract_pawns(pos: &Position, us: Color, them: Color) -> (i32, i32, i32, [i32
             if is_passed_pawn(sq, color, enemy_pawns) {
                 let idx = passed_pawn_rank_index(sq, color);
                 passed_diff[idx] += sign;
+
+                // D63 item 1: king-distance-to-promo-square features,
+                // mirroring eval::pawns::passed_pawn_king_distance_bonus.
+                let promo_sq = promotion_square(sq, color);
+                let advancement = idx as i32;
+                king_enemy_dist_diff +=
+                    sign * chebyshev_distance(enemy_king, promo_sq) * advancement;
+                king_own_dist_diff +=
+                    sign * chebyshev_distance(our_king, promo_sq) * advancement;
             }
         }
     }
 
-    (isolated_diff, doubled_diff, backward_diff, passed_diff)
+    (isolated_diff, doubled_diff, backward_diff, passed_diff,
+     king_enemy_dist_diff, king_own_dist_diff)
 }
 
 #[inline]
@@ -410,6 +434,26 @@ fn passed_pawn_rank_index(sq: Square, color: Color) -> usize {
         Color::Black => 7 - rank,
     }
     .min(7)
+}
+
+/// Mirrors `eval::pawns::chebyshev_distance` exactly (duplicated here per
+/// this file's existing convention — see module doc).
+#[inline]
+fn chebyshev_distance(a: Square, b: Square) -> i32 {
+    let df = (a.file() as i32 - b.file() as i32).abs();
+    let dr = (a.rank() as i32 - b.rank() as i32).abs();
+    df.max(dr)
+}
+
+/// Mirrors `eval::pawns::promotion_square` exactly.
+#[inline]
+fn promotion_square(sq: Square, color: Color) -> Square {
+    let promo_rank = match color {
+        Color::White => 7,
+        Color::Black => 0,
+    };
+    Square::from_file_rank(sq.file(), promo_rank)
+        .expect("file is always in 0..8, promo_rank is always 0 or 7")
 }
 
 // ── King safety (mirrors eval::king_safety::king_safety_score) ─────────────

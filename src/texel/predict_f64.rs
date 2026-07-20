@@ -75,6 +75,10 @@ pub fn predict_f64(f: &TexelFeatures, w: &TunableWeightsF64) -> f64 {
     for i in 0..8 {
         pawns = accum_only(pawns, w.passed_pawn_bonus[i], f.pawn_passed_diff[i]);
     }
+    // D63 item 1 — EG-only (mg contribution always 0), mirrors
+    // predict.rs's `s(0, king_dist_eg)` term exactly.
+    pawns.eg += w.enemy_king_dist_eg * f.passed_king_enemy_dist_diff as f64
+        - w.own_king_dist_eg * f.passed_king_own_dist_diff as f64;
     let pawns_score = pawns.taper(phase);
 
     let king_safety_score = if phase == 0 {
@@ -292,6 +296,15 @@ pub fn predict_and_accumulate_grad(
             eg_factor,
         );
     }
+    // D63 item 1 — EG-only, no mg component, so only `eg_factor` (not
+    // `mg_factor`) applies to either weight's gradient. Mirrors the
+    // forward term added in `predict_f64` above exactly.
+    let enemy_king_dist_diff = f.passed_king_enemy_dist_diff as f64;
+    let own_king_dist_diff = f.passed_king_own_dist_diff as f64;
+    pawns.eg += w.enemy_king_dist_eg * enemy_king_dist_diff
+        - w.own_king_dist_eg * own_king_dist_diff;
+    grad.enemy_king_dist_eg += error_signal * eg_factor * enemy_king_dist_diff;
+    grad.own_king_dist_eg += error_signal * eg_factor * (-own_king_dist_diff);
     let pawns_score = pawns.taper(phase);
 
     // King safety — phase/24 scaling applied directly to the per-side

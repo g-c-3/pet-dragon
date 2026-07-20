@@ -99,6 +99,11 @@ pub struct TunableWeightsF64 {
     pub doubled_penalty: S,
     pub backward_penalty: S,
     pub passed_pawn_bonus: [S; 8],
+    /// D63 item 1 — f64 mirror of `TunableWeights::enemy_king_dist_eg` /
+    /// `own_king_dist_eg`. Plain f64 (not `S`) since these are EG-only,
+    /// matching the king-safety flat terms' representation just below.
+    pub enemy_king_dist_eg: f64,
+    pub own_king_dist_eg: f64,
 
     pub attacker_weight: [f64; 8],
     pub open_file_near_king: f64,
@@ -135,6 +140,8 @@ impl TunableWeightsF64 {
             doubled_penalty: S::zero(),
             backward_penalty: S::zero(),
             passed_pawn_bonus: [S::zero(); 8],
+            enemy_king_dist_eg: 0.0,
+            own_king_dist_eg: 0.0,
             attacker_weight: [0.0; 8],
             open_file_near_king: 0.0,
             semi_open_file_near_king: 0.0,
@@ -168,6 +175,8 @@ impl TunableWeightsF64 {
             doubled_penalty: self.doubled_penalty.to_packed(),
             backward_penalty: self.backward_penalty.to_packed(),
             passed_pawn_bonus: self.passed_pawn_bonus.map(S::to_packed),
+            enemy_king_dist_eg: self.enemy_king_dist_eg.round() as i32,
+            own_king_dist_eg: self.own_king_dist_eg.round() as i32,
             attacker_weight: self.attacker_weight.map(|v| v.round() as i32),
             open_file_near_king: self.open_file_near_king.round() as i32,
             semi_open_file_near_king: self.semi_open_file_near_king.round() as i32,
@@ -193,6 +202,7 @@ impl TunableWeightsF64 {
         + 6 * 64 * 2    // pst
         + (9 + 14 + 15 + 28) * 2 // mobility
         + 3 * 2 + 8 * 2 // isolated/doubled/backward + passed_pawn_bonus
+        + 2             // D63 item 1: enemy_king_dist_eg + own_king_dist_eg
         + 8 + 1 + 1 + 1 // king safety flat terms
         + 9 * 2         // open lines
         + 1; // tempo
@@ -239,6 +249,8 @@ impl TunableWeightsF64 {
             v.push(s.mg);
             v.push(s.eg);
         }
+        v.push(self.enemy_king_dist_eg);
+        v.push(self.own_king_dist_eg);
         for w in &self.attacker_weight {
             v.push(*w);
         }
@@ -316,6 +328,8 @@ impl TunableWeightsF64 {
         for slot in passed_pawn_bonus.iter_mut() {
             *slot = S::new(next(), next());
         }
+        let enemy_king_dist_eg = next();
+        let own_king_dist_eg = next();
 
         let mut attacker_weight = [0.0f64; 8];
         for slot in attacker_weight.iter_mut() {
@@ -351,6 +365,8 @@ impl TunableWeightsF64 {
             doubled_penalty,
             backward_penalty,
             passed_pawn_bonus,
+            enemy_king_dist_eg,
+            own_king_dist_eg,
             attacker_weight,
             open_file_near_king,
             semi_open_file_near_king,
@@ -383,6 +399,8 @@ impl From<&TunableWeights> for TunableWeightsF64 {
             doubled_penalty: S::from(w.doubled_penalty),
             backward_penalty: S::from(w.backward_penalty),
             passed_pawn_bonus: w.passed_pawn_bonus.map(S::from),
+            enemy_king_dist_eg: w.enemy_king_dist_eg as f64,
+            own_king_dist_eg: w.own_king_dist_eg as f64,
             attacker_weight: w.attacker_weight.map(|x| x as f64),
             open_file_near_king: w.open_file_near_king as f64,
             semi_open_file_near_king: w.semi_open_file_near_king as f64,
@@ -432,6 +450,8 @@ mod tests {
         assert_eq!(back_to_int.doubled_penalty, default_weights.doubled_penalty);
         assert_eq!(back_to_int.backward_penalty, default_weights.backward_penalty);
         assert_eq!(back_to_int.passed_pawn_bonus, default_weights.passed_pawn_bonus);
+        assert_eq!(back_to_int.enemy_king_dist_eg, default_weights.enemy_king_dist_eg);
+        assert_eq!(back_to_int.own_king_dist_eg, default_weights.own_king_dist_eg);
         assert_eq!(back_to_int.attacker_weight, default_weights.attacker_weight);
         assert_eq!(back_to_int.open_file_near_king, default_weights.open_file_near_king);
         assert_eq!(

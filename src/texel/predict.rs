@@ -21,7 +21,7 @@
 // extraction at ~970-parameter scale.
 // ============================================================================
 
-use crate::eval::material::taper;
+use crate::eval::material::{s, taper};
 use crate::texel::features::TexelFeatures;
 use crate::texel::weights::{TunableWeights, MAX_KING_DANGER};
 
@@ -75,6 +75,13 @@ pub fn predict(f: &TexelFeatures, w: &TunableWeights) -> i32 {
     for i in 0..8 {
         pawn_score += w.passed_pawn_bonus[i] * f.pawn_passed_diff[i] as i64;
     }
+    // D63 item 1 — mirrors eval::pawns::passed_pawn_king_distance_bonus's
+    // per-pawn s(0, eg_bonus) sum exactly: both are pure multiply-add, so
+    // summing per-pawn then packing once (here) equals packing per-pawn
+    // then summing (there).
+    let king_dist_eg = w.enemy_king_dist_eg * f.passed_king_enemy_dist_diff
+        - w.own_king_dist_eg * f.passed_king_own_dist_diff;
+    pawn_score += s(0, king_dist_eg);
     let pawns = taper(pawn_score, phase);
 
     // ── King safety ───────────────────────────────────────────────────────

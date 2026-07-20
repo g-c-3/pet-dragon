@@ -52,6 +52,12 @@ pub struct TunableWeights {
     pub doubled_penalty: i64,
     pub backward_penalty: i64,
     pub passed_pawn_bonus: [i64; 8],
+    /// D63 item 1 — plain (unpacked) EG-only per-(square×advancement)
+    /// weights, matching `eval::pawns::ENEMY_KING_DIST_EG`/
+    /// `OWN_KING_DIST_EG`. Not packed via `s()` since the mg component is
+    /// always exactly 0 for this term (see `predict.rs`'s use site).
+    pub enemy_king_dist_eg: i32,
+    pub own_king_dist_eg: i32,
 
     // ── King safety (flat, non-tapered) ─────────────────────────────────
     pub attacker_weight: [i32; 8],
@@ -141,6 +147,10 @@ impl Default for TunableWeights {
                 s(102, 165),
                 s(0, 0),
             ],
+            // D63 item 1 — copied verbatim from eval/pawns.rs's
+            // ENEMY_KING_DIST_EG / OWN_KING_DIST_EG.
+            enemy_king_dist_eg: 2,
+            own_king_dist_eg: 2,
 
             // eval/king_safety.rs
             attacker_weight: [0, -5, 43, 79, 89, 94, 97, 99],
