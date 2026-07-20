@@ -81,8 +81,8 @@ const PASSED_PAWN_BONUS: [i64; 8] = [
 // defaults just copy these verbatim, same as every other pawns.rs
 // constant) — same status Phase 8's original Ethereal-derived HCE terms
 // had before Phase 14's tuning pass.
-const ENEMY_KING_DIST_EG: i32 = 2; // per (square × advancement): farther enemy king = safer passer
-const OWN_KING_DIST_EG:   i32 = 2; // per (square × advancement): closer own king = safer passer
+const ENEMY_KING_DIST_EG: i32 = 1; // per (square × advancement): farther enemy king = safer passer
+const OWN_KING_DIST_EG:   i32 = 1; // per (square × advancement): closer own king = safer passer
 
 // ── Main evaluation function ──────────────────────────────────────────────────
 
