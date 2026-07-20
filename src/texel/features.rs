@@ -83,12 +83,19 @@ pub struct TexelFeatures {
     /// pawn falls in each rank-distance bucket (0..=7). Paired with
     /// `TunableWeights::pawn_storm_bonus`.
     pub king_us_storm_buckets: [i32; 8],
+    /// D63 item 3 (design option A) — count of OUR knights/bishops in
+    /// the same king-file-third zone as OUR OWN king. Paired with
+    /// `TunableWeights::knight_near_own_king`/`bishop_near_own_king`.
+    pub king_us_knights_near_king: i32,
+    pub king_us_bishops_near_king: i32,
     pub king_them_attacker_count: usize,
     pub king_them_attack_units: i32,
     pub king_them_shield_pawns: i32,
     pub king_them_open_files: i32,
     pub king_them_semi_open_files: i32,
     pub king_them_storm_buckets: [i32; 8],
+    pub king_them_knights_near_king: i32,
+    pub king_them_bishops_near_king: i32,
 
     // ── Open lines ────────────────────────────────────────────────────────
     pub rook_open_diff: i32,
@@ -141,12 +148,16 @@ pub fn extract_features(pos: &Position) -> TexelFeatures {
         king_us_open_files: king.3,
         king_us_semi_open_files: king.4,
         king_us_storm_buckets: king.5,
-        king_them_attacker_count: king.6,
-        king_them_attack_units: king.7,
-        king_them_shield_pawns: king.8,
-        king_them_open_files: king.9,
-        king_them_semi_open_files: king.10,
-        king_them_storm_buckets: king.11,
+        king_us_knights_near_king: king.6,
+        king_us_bishops_near_king: king.7,
+        king_them_attacker_count: king.8,
+        king_them_attack_units: king.9,
+        king_them_shield_pawns: king.10,
+        king_them_open_files: king.11,
+        king_them_semi_open_files: king.12,
+        king_them_storm_buckets: king.13,
+        king_them_knights_near_king: king.14,
+        king_them_bishops_near_king: king.15,
         rook_open_diff: ol.0,
         rook_semi_diff: ol.1,
         rook_seventh_diff: ol.2,
@@ -465,22 +476,29 @@ fn promotion_square(sq: Square, color: Color) -> Square {
 
 // ── King safety (mirrors eval::king_safety::king_safety_score) ─────────────
 
-type KingSafetyRaw = (usize, i32, i32, i32, i32, [i32; 8], usize, i32, i32, i32, i32, [i32; 8]);
+type KingSafetyRaw = (
+    usize, i32, i32, i32, i32, [i32; 8], i32, i32,
+    usize, i32, i32, i32, i32, [i32; 8], i32, i32,
+);
 
 fn extract_king_safety(pos: &Position, us: Color, them: Color) -> KingSafetyRaw {
-    let (us_ac, us_au, us_sp, us_of, us_sof, us_storm) = king_safety_side_raw(pos, us, them);
-    let (them_ac, them_au, them_sp, them_of, them_sof, them_storm) = king_safety_side_raw(pos, them, us);
-    (us_ac, us_au, us_sp, us_of, us_sof, us_storm, them_ac, them_au, them_sp, them_of, them_sof, them_storm)
+    let (us_ac, us_au, us_sp, us_of, us_sof, us_storm, us_kn, us_bp) = king_safety_side_raw(pos, us, them);
+    let (them_ac, them_au, them_sp, them_of, them_sof, them_storm, them_kn, them_bp) = king_safety_side_raw(pos, them, us);
+    (
+        us_ac, us_au, us_sp, us_of, us_sof, us_storm, us_kn, us_bp,
+        them_ac, them_au, them_sp, them_of, them_sof, them_storm, them_kn, them_bp,
+    )
 }
 
 /// Returns (attacker_count, attack_units, shield_pawns, open_files,
-/// semi_open_files, storm_buckets) for one king — exactly the raw
-/// components `king_safety_score` combines, before any weight is applied.
+/// semi_open_files, storm_buckets, knights_near_own_king,
+/// bishops_near_own_king) for one king — exactly the raw components
+/// `king_safety_score` combines, before any weight is applied.
 fn king_safety_side_raw(
     pos: &Position,
     king_color: Color,
     attacker_color: Color,
-) -> (usize, i32, i32, i32, i32, [i32; 8]) {
+) -> (usize, i32, i32, i32, i32, [i32; 8], i32, i32) {
     let king_sq = pos.king_sq(king_color);
     let all_occ = pos.all_pieces();
 
@@ -530,8 +548,10 @@ fn king_safety_side_raw(
     let enemy_pawns = pos.piece_bb(attacker_color, PieceKind::Pawn);
     let (open_files, semi_open_files) = open_files_near_king_raw(king_sq, our_pawns, enemy_pawns);
     let storm_buckets = pawn_storm_buckets(king_sq, enemy_pawns);
+    let (knights_near_king, bishops_near_king) = minor_piece_shelter_counts(pos, king_sq, king_color);
 
-    (attacker_count, attack_units, shield_pawns, open_files, semi_open_files, storm_buckets)
+    (attacker_count, attack_units, shield_pawns, open_files, semi_open_files, storm_buckets,
+     knights_near_king, bishops_near_king)
 }
 
 fn pawn_shield_raw(king_sq: Square, color: Color, our_pawns: Bitboard) -> u32 {
@@ -629,6 +649,43 @@ fn pawn_storm_buckets(king_sq: Square, enemy_pawns: Bitboard) -> [i32; 8] {
     }
 
     buckets
+}
+
+/// Mirrors `eval::king_safety::king_file_zone` exactly.
+#[inline]
+fn king_file_zone(file: u8) -> u8 {
+    match file {
+        0..=2 => 0,
+        3..=4 => 1,
+        _ => 2,
+    }
+}
+
+/// Mirrors `eval::king_safety::minor_piece_shelter_bonus` exactly, except
+/// it returns the raw (knights_near_king, bishops_near_king) counts
+/// instead of a pre-weighted sum — the weights
+/// (`TunableWeights::knight_near_own_king`/`bishop_near_own_king`) are
+/// applied later in `predict.rs`.
+fn minor_piece_shelter_counts(pos: &Position, king_sq: Square, king_color: Color) -> (i32, i32) {
+    let king_zone = king_file_zone(king_sq.file());
+
+    let mut knights_near = 0i32;
+    let mut knights = pos.piece_bb(king_color, PieceKind::Knight);
+    while let Some(sq) = knights.pop_lsb() {
+        if king_file_zone(sq.file()) == king_zone {
+            knights_near += 1;
+        }
+    }
+
+    let mut bishops_near = 0i32;
+    let mut bishops = pos.piece_bb(king_color, PieceKind::Bishop);
+    while let Some(sq) = bishops.pop_lsb() {
+        if king_file_zone(sq.file()) == king_zone {
+            bishops_near += 1;
+        }
+    }
+
+    (knights_near, bishops_near)
 }
 
 // ── Open lines (mirrors eval::open_lines::open_line_score) ─────────────────

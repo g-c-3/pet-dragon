@@ -91,6 +91,8 @@ pub fn predict_f64(f: &TexelFeatures, w: &TunableWeightsF64) -> f64 {
             f.king_us_open_files,
             f.king_us_semi_open_files,
             &f.king_us_storm_buckets,
+            f.king_us_knights_near_king,
+            f.king_us_bishops_near_king,
             w,
         );
         let their_safety = king_safety_side_f64(
@@ -100,6 +102,8 @@ pub fn predict_f64(f: &TexelFeatures, w: &TunableWeightsF64) -> f64 {
             f.king_them_open_files,
             f.king_them_semi_open_files,
             &f.king_them_storm_buckets,
+            f.king_them_knights_near_king,
+            f.king_them_bishops_near_king,
             w,
         );
         (our_safety - their_safety) * phase as f64 / 24.0
@@ -139,6 +143,8 @@ fn king_safety_side_f64(
     open_files: i32,
     semi_open_files: i32,
     storm_buckets: &[i32; 8],
+    knights_near_king: i32,
+    bishops_near_king: i32,
     w: &TunableWeightsF64,
 ) -> f64 {
     let shield_score = shield_pawns as f64 * w.pawn_shield_bonus;
@@ -150,7 +156,9 @@ fn king_safety_side_f64(
     let storm_danger: f64 = (0..8)
         .map(|i| storm_buckets[i] as f64 * w.pawn_storm_bonus[i])
         .sum();
-    shield_score + open_penalty - danger - storm_danger
+    let shelter_bonus = knights_near_king as f64 * w.knight_near_own_king
+        + bishops_near_king as f64 * w.bishop_near_own_king;
+    shield_score + open_penalty - danger - storm_danger + shelter_bonus
 }
 
 /// Forward pass + gradient accumulation in one call, mirroring
@@ -327,6 +335,8 @@ pub fn predict_and_accumulate_grad(
             f.king_us_open_files,
             f.king_us_semi_open_files,
             &f.king_us_storm_buckets,
+            f.king_us_knights_near_king,
+            f.king_us_bishops_near_king,
             w,
             scaled_error,
             grad,
@@ -338,6 +348,8 @@ pub fn predict_and_accumulate_grad(
             f.king_them_open_files,
             f.king_them_semi_open_files,
             &f.king_them_storm_buckets,
+            f.king_them_knights_near_king,
+            f.king_them_bishops_near_king,
             w,
             -scaled_error,
             grad,
@@ -473,6 +485,8 @@ fn king_safety_side_grad(
     open_files: i32,
     semi_open_files: i32,
     storm_buckets: &[i32; 8],
+    knights_near_king: i32,
+    bishops_near_king: i32,
     w: &TunableWeightsF64,
     scaled_error: f64,
     grad: &mut TunableWeightsF64,
@@ -480,6 +494,8 @@ fn king_safety_side_grad(
     let sp = shield_pawns as f64;
     let of = open_files as f64;
     let sof = semi_open_files as f64;
+    let kn = knights_near_king as f64;
+    let bp = bishops_near_king as f64;
 
     let shield_score = sp * w.pawn_shield_bonus;
     let open_penalty = of * w.open_file_near_king + sof * w.semi_open_file_near_king;
@@ -493,6 +509,8 @@ fn king_safety_side_grad(
         .map(|i| storm_buckets[i] as f64 * w.pawn_storm_bonus[i])
         .sum();
 
+    let shelter_bonus = kn * w.knight_near_own_king + bp * w.bishop_near_own_king;
+
     grad.pawn_shield_bonus += scaled_error * sp;
     grad.open_file_near_king += scaled_error * of;
     grad.semi_open_file_near_king += scaled_error * sof;
@@ -502,8 +520,10 @@ fn king_safety_side_grad(
     for i in 0..8 {
         grad.pawn_storm_bonus[i] += scaled_error * (-(storm_buckets[i] as f64));
     }
+    grad.knight_near_own_king += scaled_error * kn;
+    grad.bishop_near_own_king += scaled_error * bp;
 
-    shield_score + open_penalty - danger - storm_danger
+    shield_score + open_penalty - danger - storm_danger + shelter_bonus
 }
 
 #[cfg(test)]

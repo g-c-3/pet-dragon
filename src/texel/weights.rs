@@ -66,6 +66,11 @@ pub struct TunableWeights {
     pub pawn_shield_bonus: i32,
     /// D63 item 2 — matches `eval::king_safety::PAWN_STORM_BONUS` exactly.
     pub pawn_storm_bonus: [i32; 8],
+    /// D63 item 3 (design option A) — matches
+    /// `eval::king_safety::KNIGHT_NEAR_OWN_KING_BONUS`/
+    /// `BISHOP_NEAR_OWN_KING_BONUS`.
+    pub knight_near_own_king: i32,
+    pub bishop_near_own_king: i32,
 
     // ── Open lines ────────────────────────────────────────────────────────
     pub rook_open_file: i64,
@@ -162,6 +167,11 @@ impl Default for TunableWeights {
             // D63 item 2 — copied verbatim from eval/king_safety.rs's
             // PAWN_STORM_BONUS.
             pawn_storm_bonus: [40, 32, 24, 16, 8, 0, 0, 0],
+            // D63 item 3 (design option A) — copied verbatim from
+            // eval/king_safety.rs's KNIGHT_NEAR_OWN_KING_BONUS /
+            // BISHOP_NEAR_OWN_KING_BONUS.
+            knight_near_own_king: 8,
+            bishop_near_own_king: 6,
 
             // eval/open_lines.rs
             rook_open_file: s(44, 14),
