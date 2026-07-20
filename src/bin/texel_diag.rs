@@ -314,6 +314,8 @@ fn parse_tuned_weights(text: &str) -> TunableWeights {
     let semi_open_file_near_king = extract_scalar(text, "semi_open_file_near_king");
     let pawn_shield_bonus = extract_scalar(text, "pawn_shield_bonus");
     let tempo = extract_scalar(text, "tempo");
+    let enemy_king_dist_eg = extract_scalar(text, "enemy_king_dist_eg");
+    let own_king_dist_eg = extract_scalar(text, "own_king_dist_eg");
 
     TunableWeights {
         material_values,
@@ -327,6 +329,8 @@ fn parse_tuned_weights(text: &str) -> TunableWeights {
         doubled_penalty,
         backward_penalty,
         passed_pawn_bonus,
+        enemy_king_dist_eg,
+        own_king_dist_eg,
         attacker_weight,
         open_file_near_king,
         semi_open_file_near_king,

@@ -415,6 +415,9 @@ fn write_tuned_weights(
     out.push_str(&format!("backward_penalty: {},\n", fmt_packed(w.backward_penalty)));
     write_table(&mut out, "passed_pawn_bonus", &w.passed_pawn_bonus);
 
+    out.push_str(&format!("enemy_king_dist_eg: {},\n", w.enemy_king_dist_eg));
+    out.push_str(&format!("own_king_dist_eg: {},\n\n", w.own_king_dist_eg));
+
     out.push_str(&format!("attacker_weight: {:?},\n", w.attacker_weight));
     out.push_str(&format!("open_file_near_king: {},\n", w.open_file_near_king));
     out.push_str(&format!("semi_open_file_near_king: {},\n", w.semi_open_file_near_king));
