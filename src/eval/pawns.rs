@@ -69,15 +69,20 @@ const PASSED_PAWN_BONUS: [i64; 8] = [
 // "Square of the pawn" idea: once material has thinned, whichever king is
 // closer to a passer's promotion square matters as much as the pawn's own
 // rank. Plain (unpacked) endgame-only centipawn weights, applied per
-// Chebyshev square of distance and scaled by how advanced the passer
-// already is — see `passed_pawn_king_distance_bonus()` below.
+// Chebyshev square of distance and per unit of advancement (rank_idx,
+// 0..=7) — see `passed_pawn_king_distance_bonus()` below. Deliberately no
+// division anywhere in the formula (pure multiply-add) so this term stays
+// linear in its two weights and can be mirrored exactly, bit-for-bit, by
+// `texel::predict()` via two summed diff features
+// (`passed_king_enemy_dist_diff` / `passed_king_own_dist_diff`) — see
+// `src/texel/{features,predict,weights}.rs`.
 //
-// Hand-picked starting values, NOT yet Texel-tuned — same status Phase 8's
-// original Ethereal-derived HCE terms had before Phase 14's tuning pass.
-// Wiring this into src/texel/{features,predict,predict_f64,weights,
-// weights_f64}.rs is optional future work, not done this session.
-const ENEMY_KING_DIST_EG: i32 = 6; // per square: farther enemy king = safer passer
-const OWN_KING_DIST_EG:   i32 = 5; // per square: closer own king = safer passer
+// Hand-picked starting values, NOT yet Texel-tuned (`TunableWeights`'s
+// defaults just copy these verbatim, same as every other pawns.rs
+// constant) — same status Phase 8's original Ethereal-derived HCE terms
+// had before Phase 14's tuning pass.
+const ENEMY_KING_DIST_EG: i32 = 2; // per (square × advancement): farther enemy king = safer passer
+const OWN_KING_DIST_EG:   i32 = 2; // per (square × advancement): closer own king = safer passer
 
 // ── Main evaluation function ──────────────────────────────────────────────────
 
@@ -342,7 +347,10 @@ fn promotion_square(sq: Square, color: Color) -> Square {
 /// Scaled by `rank_idx` (0..=7, same index `PASSED_PAWN_BONUS` uses) so a
 /// freshly-started passer gets almost no weight here, while a rank-6/7
 /// passer — exactly where a king race actually decides the game — gets
-/// close to the full per-square weight.
+/// close to the full per-square weight. Pure multiply-add, no division —
+/// keeps this linear in `ENEMY_KING_DIST_EG`/`OWN_KING_DIST_EG` so
+/// `texel::predict()` can reproduce it exactly via two summed diff
+/// features instead of re-deriving per-pawn geometry.
 #[inline]
 fn passed_pawn_king_distance_bonus(
     sq: Square,
@@ -356,9 +364,8 @@ fn passed_pawn_king_distance_bonus(
     let enemy_dist = chebyshev_distance(enemy_king, promo_sq);
 
     let advancement = rank_idx as i32; // 0..=7
-    let eg_bonus = (ENEMY_KING_DIST_EG * enemy_dist - OWN_KING_DIST_EG * own_dist)
-        * advancement
-        / 7;
+    let eg_bonus = ENEMY_KING_DIST_EG * enemy_dist * advancement
+                 - OWN_KING_DIST_EG   * own_dist   * advancement;
 
     s(0, eg_bonus)
 }
