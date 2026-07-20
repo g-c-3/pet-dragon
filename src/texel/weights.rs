@@ -149,8 +149,8 @@ impl Default for TunableWeights {
             ],
             // D63 item 1 — copied verbatim from eval/pawns.rs's
             // ENEMY_KING_DIST_EG / OWN_KING_DIST_EG.
-            enemy_king_dist_eg: 2,
-            own_king_dist_eg: 2,
+            enemy_king_dist_eg: 1,
+            own_king_dist_eg: 1,
 
             // eval/king_safety.rs
             attacker_weight: [0, -5, 43, 79, 89, 94, 97, 99],
