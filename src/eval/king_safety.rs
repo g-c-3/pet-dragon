@@ -70,6 +70,23 @@ const PAWN_SHIELD_BONUS: i32 = 16;
 /// (learned the hard way on D63 item 1 not to skip this).
 const PAWN_STORM_BONUS: [i32; 8] = [40, 32, 24, 16, 8, 0, 0, 0];
 
+/// Minor-piece defensive clustering bonus (D63 item 3, ROADMAP Phase 24,
+/// design option A — see SESSION_LOG/DECISIONS discussion before
+/// implementing). Flat MG-only bonus per OUR knight/bishop sitting in
+/// the same king-file-third zone as OUR OWN king. Deliberately coarse —
+/// zone-level, not per-square — so this stays a handful of parameters
+/// rather than a full king-relative PST bucket set (which would hit the
+/// same parameter-count-vs-training-data wall NNUE already has; see
+/// D63 in DECISIONS.md for the full reasoning).
+///
+/// This is the mirror image of `ATTACKER_WEIGHT` above: that scores
+/// ENEMY pieces attacking near THIS king (tropism, attacking side);
+/// this scores OUR OWN minor pieces sitting near OUR OWN king
+/// (clustering, defensive side) — a genuinely different effect, not
+/// double-counting the same proximity from two angles.
+const KNIGHT_NEAR_OWN_KING_BONUS: i32 = 8;
+const BISHOP_NEAR_OWN_KING_BONUS: i32 = 6;
+
 /// Max king danger score before scaling (prevents integer overflow)
 const MAX_KING_DANGER: i32 = 2400;
 
@@ -161,13 +178,16 @@ fn king_safety_score(pos: &Position, king_color: Color, attacker_color: Color) -
     // ── Pawn storm (D63 item 2) ─────────────────────────────────────────────
     let storm_danger = pawn_storm_danger(king_sq, enemy_pawns);
 
+    // ── Minor-piece defensive clustering (D63 item 3) ───────────────────────
+    let shelter_bonus = minor_piece_shelter_bonus(pos, king_sq, king_color);
+
     // ── Combine ───────────────────────────────────────────────────────────────
     // King danger = attacker units scaled by attacker count weight
     let weight_idx = attacker_count.min(7);
     let danger = (attack_units * ATTACKER_WEIGHT[weight_idx] / 100)
                .min(MAX_KING_DANGER);
 
-    shield_score + open_file_penalty - danger - storm_danger
+    shield_score + open_file_penalty - danger - storm_danger + shelter_bonus
 }
 
 /// Count friendly pawns in the king's pawn shield zone.
@@ -275,6 +295,44 @@ fn pawn_storm_danger(king_sq: Square, enemy_pawns: Bitboard) -> i32 {
     }
 
     danger
+}
+
+/// Zone index for a file: 0 = queenside (a-c), 1 = center (d-e),
+/// 2 = kingside (f-h). Deliberately coarse (3 buckets, not 8 per-file)
+/// per D63's "stay coarse" constraint.
+#[inline]
+fn king_file_zone(file: u8) -> u8 {
+    match file {
+        0..=2 => 0,
+        3..=4 => 1,
+        _ => 2,
+    }
+}
+
+/// Minor-piece defensive clustering bonus (D63 item 3): counts OUR
+/// knights and bishops sitting in the same file-third zone as OUR OWN
+/// king and returns a flat per-piece bonus. See `KNIGHT_NEAR_OWN_KING_
+/// BONUS`/`BISHOP_NEAR_OWN_KING_BONUS` above for the rationale and why
+/// this doesn't double-count `ATTACKER_WEIGHT`'s tropism term.
+fn minor_piece_shelter_bonus(pos: &Position, king_sq: Square, king_color: Color) -> i32 {
+    let king_zone = king_file_zone(king_sq.file());
+    let mut bonus = 0i32;
+
+    let mut knights = pos.piece_bb(king_color, PieceKind::Knight);
+    while let Some(sq) = knights.pop_lsb() {
+        if king_file_zone(sq.file()) == king_zone {
+            bonus += KNIGHT_NEAR_OWN_KING_BONUS;
+        }
+    }
+
+    let mut bishops = pos.piece_bb(king_color, PieceKind::Bishop);
+    while let Some(sq) = bishops.pop_lsb() {
+        if king_file_zone(sq.file()) == king_zone {
+            bonus += BISHOP_NEAR_OWN_KING_BONUS;
+        }
+    }
+
+    bonus
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -465,6 +523,96 @@ mod tests {
             score_storming < score_home,
             "White should be less safe with Black's pawn storming on g4 than sitting at home on g7: storming={} home={}",
             score_storming, score_home
+        );
+    }
+
+    #[test]
+    fn test_king_file_zone_buckets() {
+        assert_eq!(king_file_zone(0), 0); // a
+        assert_eq!(king_file_zone(2), 0); // c
+        assert_eq!(king_file_zone(3), 1); // d
+        assert_eq!(king_file_zone(4), 1); // e
+        assert_eq!(king_file_zone(5), 2); // f
+        assert_eq!(king_file_zone(7), 2); // h
+    }
+
+    #[test]
+    fn test_minor_piece_shelter_knight_same_zone_vs_different() {
+        setup();
+        assert!(
+            KNIGHT_NEAR_OWN_KING_BONUS > 0,
+            "sanity: bonus constant should be positive"
+        );
+
+        // White Kg1 (kingside zone), knight on h3 (kingside, same zone)
+        // vs knight on a1 (queenside, different zone). Black king a8 is
+        // irrelevant to White's own shelter term.
+        let fen_same = "k7/8/8/8/8/7N/8/6K1 w - - 0 1";
+        let fen_far  = "k7/8/8/8/8/8/8/N5K1 w - - 0 1";
+
+        let pos_same = Position::from_fen(fen_same).unwrap();
+        let pos_far  = Position::from_fen(fen_far).unwrap();
+
+        let bonus_same = minor_piece_shelter_bonus(&pos_same, pos_same.king_sq(Color::White), Color::White);
+        let bonus_far  = minor_piece_shelter_bonus(&pos_far, pos_far.king_sq(Color::White), Color::White);
+
+        assert_eq!(bonus_same, KNIGHT_NEAR_OWN_KING_BONUS);
+        assert_eq!(bonus_far, 0);
+    }
+
+    #[test]
+    fn test_minor_piece_shelter_bishop_same_zone() {
+        setup();
+        // White Kg1 (kingside zone), bishop on f2 (kingside, same zone)
+        // vs bishop on b2 (queenside, different zone).
+        let fen_same = "k7/8/8/8/8/8/5B2/6K1 w - - 0 1";
+        let fen_far  = "k7/8/8/8/8/8/1B6/6K1 w - - 0 1";
+
+        let pos_same = Position::from_fen(fen_same).unwrap();
+        let pos_far  = Position::from_fen(fen_far).unwrap();
+
+        let bonus_same = minor_piece_shelter_bonus(&pos_same, pos_same.king_sq(Color::White), Color::White);
+        let bonus_far  = minor_piece_shelter_bonus(&pos_far, pos_far.king_sq(Color::White), Color::White);
+
+        assert_eq!(bonus_same, BISHOP_NEAR_OWN_KING_BONUS);
+        assert_eq!(bonus_far, 0);
+    }
+
+    #[test]
+    fn test_minor_piece_shelter_sums_multiple_pieces() {
+        setup();
+        // White Kg1, knight h3 (kingside) and bishop f2 (kingside) — both
+        // should count.
+        let fen = "k7/8/8/8/8/7N/5B2/6K1 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+
+        let bonus = minor_piece_shelter_bonus(&pos, pos.king_sq(Color::White), Color::White);
+        assert_eq!(bonus, KNIGHT_NEAR_OWN_KING_BONUS + BISHOP_NEAR_OWN_KING_BONUS);
+    }
+
+    #[test]
+    fn test_king_safety_rewards_minor_piece_shelter() {
+        setup();
+        // White Kg1, Black king far away on b8 (no bearing on White's
+        // safety). Position A: White's knight and bishop both sit in the
+        // kingside zone near the king. Position B: same pieces, both on
+        // the queenside instead. White has no pawns in either FEN, so
+        // shield/open-file/storm terms are identical between A and B —
+        // only the shelter term differs.
+        let fen_sheltered = "1k6/8/8/8/8/7N/5B2/6K1 w - - 0 1";
+        let fen_scattered  = "1k6/8/8/8/8/N7/1B6/6K1 w - - 0 1";
+
+        let pos_sheltered = Position::from_fen(fen_sheltered).unwrap();
+        let pos_scattered  = Position::from_fen(fen_scattered).unwrap();
+        let phase = 20; // near middlegame
+
+        let score_sheltered = evaluate_king_safety(&pos_sheltered, phase);
+        let score_scattered  = evaluate_king_safety(&pos_scattered, phase);
+
+        assert!(
+            score_sheltered > score_scattered,
+            "White should be safer with minors sheltering near the king than scattered on the far side: sheltered={} scattered={}",
+            score_sheltered, score_scattered
         );
     }
 }
