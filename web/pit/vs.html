@@ -1,1 +1,1235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0d1117">
+<title>Engine Bench — Stockfish vs Pet Dragon</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --ink:#0d1117;
+    --panel:#151b23;
+    --panel2:#1b2330;
+    --line:#262f3b;
+    --paper:#eef1f0;
+    --muted:#8793a3;
+    --amber:#e8a33d;
+    --amber-dim:#8a6224;
+    --teal:#7ee0c3;
+    --teal-dim:#3f7566;
+    --alert:#e0636a;
+    --board-light:#28313d;
+    --board-dark:#12161c;
+    --piece-white:#f3efe6;
+    --piece-black:var(--piece-white);
+    --font-display: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; background:var(--ink); color:var(--paper);
+    font-family:var(--font-ui);
+    min-height:100%;
+  }
+  body{
+    background-image:
+      repeating-linear-gradient(180deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 3px);
+  }
+  a{ color:var(--teal); }
+  .app{ max-width:1180px; margin:0 auto; padding:22px 18px 60px; }
 
+  header.bench-header{
+    display:flex; align-items:baseline; justify-content:space-between; gap:16px;
+    border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:18px;
+    flex-wrap:wrap;
+  }
+  .wordmark{
+    font-family:var(--font-display); font-variant:small-caps; letter-spacing:0.14em;
+    font-size:26px; color:var(--paper); display:flex; align-items:center; gap:10px;
+  }
+  .wordmark .led{
+    width:9px; height:9px; border-radius:50%; background:var(--muted);
+    box-shadow:0 0 0 rgba(0,0,0,0);
+    display:inline-block; flex:none;
+  }
+  .wordmark .led.on{ background:var(--teal); box-shadow:0 0 8px var(--teal); }
+  .subtitle{ font-family:var(--font-mono); font-size:11.5px; color:var(--muted); letter-spacing:0.03em; margin-top:3px; }
+  .status-chip{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    padding:4px 10px; border:1px solid var(--line); border-radius:3px; color:var(--muted);
+    white-space:nowrap;
+  }
+  .status-chip.running{ color:var(--teal); border-color:var(--teal-dim); }
+  .status-chip.paused{ color:var(--amber); border-color:var(--amber-dim); }
+  .status-chip.finished{ color:var(--alert); border-color:#7a3a3e; }
+
+  main.layout{
+    display:grid; grid-template-columns: minmax(320px, 560px) 320px; gap:22px; align-items:start;
+  }
+  @media (max-width: 900px){
+    main.layout{ grid-template-columns: 1fr; }
+  }
+
+  .board-col{ display:flex; flex-direction:column; gap:12px; }
+  .board-frame{
+    background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:14px;
+  }
+  .board-wrap{ display:flex; flex-direction:column; gap:10px; }
+
+  .evalbar-shell{
+    display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11px; color:var(--muted);
+  }
+  .evalbar{
+    position:relative; flex:1; height:14px; background:var(--board-dark); border:1px solid var(--line);
+    border-radius:2px; overflow:hidden;
+  }
+  .evalbar-fill{
+    position:absolute; top:0; left:0; bottom:0; width:50%; background:var(--piece-white);
+    transition:width .35s ease;
+  }
+  .evalbar-mid{
+    position:absolute; top:0; bottom:0; left:50%; width:1px; background:var(--alert); opacity:0.6;
+  }
+  .evalbar-label{ font-family:var(--font-mono); font-size:12px; width:52px; text-align:right; color:var(--paper); }
+
+  .board{
+    display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(8,1fr);
+    width:100%; aspect-ratio:1; border:1px solid var(--line); border-radius:3px; overflow:hidden;
+    transition:transform .25s ease;
+  }
+  .board.flipped{ transform:rotate(180deg); }
+  .sq{ position:relative; display:flex; align-items:center; justify-content:center; }
+  .sq.light{ background:var(--board-light); }
+  .sq.dark{ background:var(--board-dark); }
+  .sq.last-from::before, .sq.last-to::before{
+    content:''; position:absolute; inset:0; background:var(--amber); opacity:0.16;
+  }
+  .sq.king-check::before{
+    content:''; position:absolute; inset:0; background:var(--alert); opacity:0.35;
+  }
+  .piece{ font-size:min(6.2vmin,42px); line-height:1; user-select:none; }
+  .board.flipped .piece{ display:inline-block; transform:rotate(180deg); }
+  .piece.w{
+    color:var(--piece-white);
+    text-shadow:0 0 2px rgba(0,0,0,.9), 0 1px 1px rgba(0,0,0,.7);
+    -webkit-text-stroke:0.6px rgba(0,0,0,.55);
+  }
+  .piece.b{
+    color:var(--piece-black);
+    -webkit-text-stroke:0.6px rgba(0,0,0,.55);
+  }
+  .coord{ position:absolute; font-family:var(--font-mono); font-size:9px; color:var(--muted); opacity:0.7; pointer-events:none; }
+  .coord.file{ bottom:2px; right:3px; }
+  .coord.rank{ top:2px; left:3px; }
+  .board.flipped .coord{ transform:rotate(180deg); }
+
+  .status-row{ display:flex; align-items:center; justify-content:space-between; font-family:var(--font-mono); font-size:12px; color:var(--muted); }
+  .turn-indicator{ color:var(--paper); }
+
+  .controls-row{ display:flex; gap:8px; flex-wrap:wrap; }
+  button{
+    font-family:var(--font-ui); font-size:12.5px; letter-spacing:0.02em; cursor:pointer;
+    background:var(--panel2); color:var(--paper); border:1px solid var(--line); border-radius:4px;
+    padding:8px 14px; transition:border-color .15s, color .15s;
+  }
+  button:hover:not(:disabled){ border-color:var(--teal-dim); color:var(--teal); }
+  button:disabled{ opacity:0.4; cursor:not-allowed; }
+  button.primary{ border-color:var(--amber-dim); color:var(--amber); }
+  button.primary:hover:not(:disabled){ border-color:var(--amber); }
+  button.small{ padding:4px 9px; font-size:11px; }
+
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:13px 14px;
+  }
+  .side-col{ display:flex; flex-direction:column; gap:14px; }
+  .player-card .card-head{
+    display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;
+  }
+  .player-card .card-title{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted);
+    display:flex; align-items:center; gap:7px;
+  }
+  .player-card[data-side="w"] .card-title::before{ content:'○'; color:var(--paper); }
+  .player-card[data-side="b"] .card-title::before{ content:'●'; color:var(--piece-black); text-shadow:0 0 2px var(--paper); }
+  .think-led{ width:7px; height:7px; border-radius:50%; background:var(--line); }
+  .think-led.on{ background:var(--amber); box-shadow:0 0 6px var(--amber); }
+
+  .field-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px; }
+  .field-row label{ font-size:12px; color:var(--muted); }
+  select, input[type="number"], input[type="text"]{
+    background:var(--panel2); color:var(--paper); border:1px solid var(--line); border-radius:4px;
+    font-family:var(--font-ui); font-size:12.5px; padding:5px 7px;
+  }
+  input[type="number"]{ width:78px; font-family:var(--font-mono); }
+  input[type="range"]{ flex:1; accent-color: var(--teal); }
+  .skill-value{ font-family:var(--font-mono); font-size:12px; width:26px; text-align:right; color:var(--paper); }
+  .engine-tag{ font-family:var(--font-mono); font-size:10px; color:var(--muted); margin-top:2px; }
+
+  .match-card .card-title, .log-card .card-title, .history-card .card-title{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted);
+    margin-bottom:10px; display:flex; align-items:center; justify-content:space-between;
+  }
+  .radio-group{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+  .radio-group label{ font-size:12.5px; display:flex; align-items:center; gap:7px; color:var(--paper); }
+  .checkbox-row{ display:flex; align-items:center; gap:7px; font-size:12.5px; margin-bottom:8px; }
+  .fen-input{ width:100%; margin-top:6px; }
+
+  table.scoretable{ width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:12px; margin-top:6px; }
+  table.scoretable th, table.scoretable td{ text-align:right; padding:3px 4px; border-bottom:1px solid var(--line); }
+  table.scoretable th:first-child, table.scoretable td:first-child{ text-align:left; }
+  .eng-amber{ color:var(--amber); }
+  .eng-teal{ color:var(--teal); }
+  .game-counter{ font-family:var(--font-mono); font-size:11px; color:var(--muted); margin-top:8px; }
+
+  .log-panel{
+    background:var(--board-dark); border:1px solid var(--line); border-radius:4px; padding:8px;
+    height:150px; overflow-y:auto; font-family:var(--font-mono); font-size:10.5px; color:var(--muted);
+    white-space:pre-wrap; word-break:break-all; margin:0;
+  }
+  .log-panel .l-sent{ color:var(--muted); }
+  .log-panel .l-alert{ color:var(--alert); }
+  .log-panel .l-dragon{ color:var(--teal); }
+  .log-panel .l-stockfish{ color:var(--amber); }
+
+  .history-list{
+    font-family:var(--font-mono); font-size:12px; max-height:220px; overflow-y:auto;
+    display:flex; flex-direction:column; gap:2px;
+  }
+  .history-row{ display:grid; grid-template-columns:28px 1fr 1fr; gap:6px; padding:2px 0; border-bottom:1px solid var(--line); }
+  .history-row .num{ color:var(--muted); }
+  .move-eng-stockfish{ color:var(--amber); }
+  .move-eng-pet_dragon{ color:var(--teal); }
+  .history-eval{ color:var(--muted); font-size:10.5px; margin-left:4px; }
+
+  footer.bench-footer{
+    margin-top:24px; font-family:var(--font-mono); font-size:10.5px; color:var(--muted);
+    border-top:1px solid var(--line); padding-top:10px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="bench-header">
+    <div>
+      <div class="wordmark"><span class="led" id="bootLed"></span>Engine Bench</div>
+      <div class="subtitle" id="subtitle">Stockfish vs Pet Dragon — loading engines…</div>
+    </div>
+    <div class="status-chip" id="statusChip">BOOTING</div>
+  </header>
+
+  <main class="layout">
+    <section class="board-col">
+      <div class="board-frame">
+        <div class="board-wrap">
+          <div class="evalbar-shell">
+            <span>EVAL</span>
+            <div class="evalbar"><div class="evalbar-fill" id="evalFill"></div><div class="evalbar-mid"></div></div>
+            <div class="evalbar-label" id="evalLabel">0.0</div>
+          </div>
+          <div class="board" id="board"></div>
+          <div class="status-row">
+            <div class="turn-indicator" id="turnIndicator">—</div>
+            <div id="resultText"></div>
+          </div>
+        </div>
+      </div>
+      <div class="controls-row">
+        <button class="primary" id="btnStart">Start</button>
+        <button id="btnPause" disabled>Pause</button>
+        <button id="btnStep">Step</button>
+        <button id="btnReset">New game</button>
+        <button class="small" id="btnFlip">Flip board</button>
+        <button class="small" id="btnToggleLog">Toggle log</button>
+        <button class="small" id="btnDownloadLog" disabled>Download log (0)</button>
+      </div>
+    </section>
+
+    <section class="side-col">
+      <div class="card player-card" data-side="w">
+        <div class="card-head">
+          <div class="card-title">White</div>
+          <div class="think-led" id="ledW"></div>
+        </div>
+        <div class="field-row">
+          <label>Engine</label>
+          <select id="engineW">
+            <option value="stockfish">Stockfish</option>
+            <option value="pet_dragon">Pet Dragon</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Skill (0–20)</label>
+          <input type="range" id="skillW" min="0" max="20" value="10">
+          <span class="skill-value" id="skillWVal">10</span>
+        </div>
+        <div class="field-row">
+          <label>Movetime (ms)</label>
+          <input type="number" id="movetimeW" min="50" max="60000" step="50" value="1000">
+        </div>
+        <div class="engine-tag" id="tagW">—</div>
+      </div>
+
+      <div class="card player-card" data-side="b">
+        <div class="card-head">
+          <div class="card-title">Black</div>
+          <div class="think-led" id="ledB"></div>
+        </div>
+        <div class="field-row">
+          <label>Engine</label>
+          <select id="engineB">
+            <option value="pet_dragon" selected>Pet Dragon</option>
+            <option value="stockfish">Stockfish</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Skill (0–20)</label>
+          <input type="range" id="skillB" min="0" max="20" value="10">
+          <span class="skill-value" id="skillBVal">10</span>
+        </div>
+        <div class="field-row">
+          <label>Movetime (ms)</label>
+          <input type="number" id="movetimeB" min="50" max="60000" step="50" value="1000">
+        </div>
+        <div class="engine-tag" id="tagB">—</div>
+      </div>
+
+      <div class="card match-card">
+        <div class="card-title">Match setup</div>
+        <div class="radio-group" id="positionGroup">
+          <label><input type="radio" name="posmode" value="standard" checked> Standard start</label>
+          <label><input type="radio" name="posmode" value="custom"> Custom FEN</label>
+        </div>
+        <div class="engine-tag" style="margin-bottom:8px;">Every new game loads the standard chess starting position and feeds the identical FEN to both engines, so neither side gets a rules advantage.</div>
+        <input type="text" id="customFen" class="fen-input" placeholder="paste a FEN…" disabled>
+        <div class="checkbox-row"><input type="checkbox" id="autoNext"> Auto-continue: start next game when one ends</div>
+        <div class="checkbox-row"><input type="checkbox" id="swapColors" checked> Swap colors each new game</div>
+        <div class="field-row">
+          <label>Pause between moves (ms)</label>
+          <input type="number" id="moveDelay" min="0" max="5000" step="50" value="150">
+        </div>
+        <button class="small" id="btnSwapNow">Swap colors now</button>
+        <div class="game-counter" id="gameCounter">Game 1</div>
+        <table class="scoretable" id="scoreTable">
+          <thead><tr><th>Engine</th><th>W</th><th>D</th><th>L</th></tr></thead>
+          <tbody id="scoreBody"></tbody>
+        </table>
+      </div>
+
+      <div class="card autoplay-card">
+        <div class="card-title">Autoplay dashboard</div>
+        <div class="field-row">
+          <label>Matches to play</label>
+          <input type="number" id="autoplayCount" min="1" max="500" step="1" value="10">
+        </div>
+        <div class="engine-tag" style="margin-bottom:8px;">Colors swap every match in a set, regardless of the toggle above. The log auto-downloads once the set finishes.</div>
+        <div class="controls-row" style="margin-bottom:8px;">
+          <button class="small primary" id="btnRunSet">Run set</button>
+          <button class="small" id="btnStopSet" disabled>Stop set</button>
+        </div>
+        <div class="engine-tag" id="autoplayProgress">No set running.</div>
+      </div>
+
+      <div class="card history-card">
+        <div class="card-title">Move list</div>
+        <div class="history-list" id="historyList"></div>
+      </div>
+
+      <div class="card log-card">
+        <div class="card-title">Engine log</div>
+        <pre class="log-panel" id="logPanel"></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer class="bench-footer" id="footerInfo">Loading engine identities…</footer>
+</div>
+
+<script type="module">
+import init, {
+  engine_author, engine_name, engine_version,
+  legal_moves_from_fen,
+  search_from_fen_with_eval, wasm_main
+} from './pet_dragon.js';
+
+/* ---------------------------------------------------------------------- */
+/* Embedded chess rules helper: FEN parsing, move application, check/mate  */
+/* detection. Legal-move existence itself is asked of Pet Dragon's         */
+/* legal_moves_from_fen(), which acts as the shared rules oracle for both  */
+/* engines regardless of which one is actually playing a given side.      */
+/* ---------------------------------------------------------------------- */
+
+const FILES = ['a','b','c','d','e','f','g','h'];
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+const PIECE_GLYPH = { P:'♟',N:'♞',B:'♝',R:'♜',Q:'♛',K:'♚', p:'♙',n:'♘',b:'♗',r:'♖',q:'♕',k:'♔' };
+
+function fenToState(fen) {
+  const parts = fen.trim().split(/\s+/);
+  const [placement, active, castling, ep, halfmove, fullmove] = parts;
+  const board = {};
+  const rows = placement.split('/');
+  for (let r = 0; r < 8; r++) {
+    const rank = 8 - r;
+    let file = 0;
+    for (const ch of rows[r]) {
+      if (/\d/.test(ch)) { file += parseInt(ch, 10); }
+      else { board[FILES[file] + rank] = ch; file++; }
+    }
+  }
+  return {
+    board,
+    active: active || 'w',
+    castling: castling || '-',
+    ep: ep || '-',
+    halfmove: parseInt(halfmove || '0', 10),
+    fullmove: parseInt(fullmove || '1', 10),
+  };
+}
+
+function stateToFen(state) {
+  const rows = [];
+  for (let rank = 8; rank >= 1; rank--) {
+    let row = '', empty = 0;
+    for (let f = 0; f < 8; f++) {
+      const p = state.board[FILES[f] + rank];
+      if (!p) { empty++; } else { if (empty) { row += empty; empty = 0; } row += p; }
+    }
+    if (empty) row += empty;
+    rows.push(row);
+  }
+  const castling = ['K','Q','k','q'].filter(c => (state.castling||'').includes(c)).join('') || '-';
+  return [rows.join('/'), state.active, castling, state.ep || '-', state.halfmove, state.fullmove].join(' ');
+}
+
+function applyUciMove(fen, uci) {
+  const state = fenToState(fen);
+  const from = uci.slice(0,2), to = uci.slice(2,4), promo = uci.length > 4 ? uci[4] : null;
+  const piece = state.board[from];
+  if (!piece) throw new Error(`No piece at ${from} for move ${uci}`);
+  const color = piece === piece.toUpperCase() ? 'w' : 'b';
+  const isPawn = piece.toLowerCase() === 'p';
+  const isKing = piece.toLowerCase() === 'k';
+  let captured = state.board[to] || null;
+
+  if (isPawn && to === state.ep && from[0] !== to[0] && !captured) {
+    const capSq = to[0] + from[1];
+    captured = state.board[capSq];
+    delete state.board[capSq];
+  }
+
+  delete state.board[from];
+  let placed = piece;
+  if (promo) placed = color === 'w' ? promo.toUpperCase() : promo.toLowerCase();
+  state.board[to] = placed;
+
+  if (isKing) {
+    if (from === 'e1' && to === 'g1') { state.board['f1'] = state.board['h1']; delete state.board['h1']; }
+    else if (from === 'e1' && to === 'c1') { state.board['d1'] = state.board['a1']; delete state.board['a1']; }
+    else if (from === 'e8' && to === 'g8') { state.board['f8'] = state.board['h8']; delete state.board['h8']; }
+    else if (from === 'e8' && to === 'c8') { state.board['d8'] = state.board['a8']; delete state.board['a8']; }
+  }
+
+  let castling = (state.castling && state.castling !== '-') ? state.castling.split('') : [];
+  const remove = c => { castling = castling.filter(x => x !== c); };
+  if (isKing) { if (color === 'w') { remove('K'); remove('Q'); } else { remove('k'); remove('q'); } }
+  if (from === 'a1' || to === 'a1') remove('Q');
+  if (from === 'h1' || to === 'h1') remove('K');
+  if (from === 'a8' || to === 'a8') remove('q');
+  if (from === 'h8' || to === 'h8') remove('k');
+  state.castling = castling.length ? castling.join('') : '-';
+
+  if (isPawn && Math.abs(parseInt(to[1],10) - parseInt(from[1],10)) === 2) {
+    state.ep = from[0] + ((parseInt(to[1],10) + parseInt(from[1],10)) / 2);
+  } else {
+    state.ep = '-';
+  }
+
+  if (isPawn || captured) state.halfmove = 0; else state.halfmove = (state.halfmove||0) + 1;
+  if (state.active === 'b') state.fullmove = (state.fullmove||1) + 1;
+  state.active = state.active === 'w' ? 'b' : 'w';
+
+  return stateToFen(state);
+}
+
+function isAttacked(board, square, byColor) {
+  const file = square.charCodeAt(0) - 97, rank = parseInt(square[1],10);
+  const wantWhite = byColor === 'w';
+  const isC = p => (p === p.toUpperCase()) === wantWhite;
+
+  const pawnFromRank = byColor === 'w' ? rank - 1 : rank + 1;
+  for (const df of [-1,1]) {
+    const f = file + df;
+    if (f>=0 && f<8 && pawnFromRank>=1 && pawnFromRank<=8) {
+      const p = board[FILES[f]+pawnFromRank];
+      if (p && p.toLowerCase()==='p' && isC(p)) return true;
+    }
+  }
+  for (const [df,dr] of [[1,2],[2,1],[2,-1],[1,-2],[-1,-2],[-2,-1],[-2,1],[-1,2]]) {
+    const f=file+df, r=rank+dr;
+    if (f>=0&&f<8&&r>=1&&r<=8) { const p=board[FILES[f]+r]; if (p && p.toLowerCase()==='n' && isC(p)) return true; }
+  }
+  for (let df=-1; df<=1; df++) for (let dr=-1; dr<=1; dr++) {
+    if (!df && !dr) continue;
+    const f=file+df, r=rank+dr;
+    if (f>=0&&f<8&&r>=1&&r<=8) { const p=board[FILES[f]+r]; if (p && p.toLowerCase()==='k' && isC(p)) return true; }
+  }
+  const scan = (dirs, types) => {
+    for (const [df,dr] of dirs) {
+      let f=file+df, r=rank+dr;
+      while (f>=0&&f<8&&r>=1&&r<=8) {
+        const p = board[FILES[f]+r];
+        if (p) { if (types.includes(p.toLowerCase()) && isC(p)) return true; break; }
+        f+=df; r+=dr;
+      }
+    }
+    return false;
+  };
+  if (scan([[1,0],[-1,0],[0,1],[0,-1]], ['r','q'])) return true;
+  if (scan([[1,1],[1,-1],[-1,1],[-1,-1]], ['b','q'])) return true;
+  return false;
+}
+
+function findKing(board, color) {
+  const target = color === 'w' ? 'K' : 'k';
+  for (const sq in board) if (board[sq] === target) return sq;
+  return null;
+}
+
+function isInCheck(fen) {
+  const state = fenToState(fen);
+  const kingSq = findKing(state.board, state.active);
+  if (!kingSq) return false;
+  return isAttacked(state.board, kingSq, state.active === 'w' ? 'b' : 'w');
+}
+
+function insufficientMaterial(board) {
+  const pieces = Object.values(board).filter(p => p.toLowerCase() !== 'k');
+  if (pieces.length === 0) return true;
+  if (pieces.length === 1 && ['b','n'].includes(pieces[0].toLowerCase())) return true;
+  if (pieces.length === 2) {
+    const kinds = pieces.map(p => p.toLowerCase()).sort();
+    if (kinds[0] === 'b' && kinds[1] === 'b') {
+      const squares = Object.entries(board).filter(([,p]) => p.toLowerCase()==='b').map(([sq])=>sq);
+      const sqColor = sq => (sq.charCodeAt(0)-97 + parseInt(sq[1],10)) % 2;
+      if (squares.length===2 && sqColor(squares[0])===sqColor(squares[1])) return true;
+    }
+  }
+  return false;
+}
+
+function evaluateGameStatus(fen, positionCounts) {
+  const state = fenToState(fen);
+  const legal = (legal_moves_from_fen(fen) || '').trim();
+  const chk = isInCheck(fen);
+  if (!legal) {
+    if (chk) return { over:true, result: state.active==='w' ? '0-1':'1-0', reason:'checkmate' };
+    return { over:true, result:'1/2-1/2', reason:'stalemate' };
+  }
+  if (state.halfmove >= 100) return { over:true, result:'1/2-1/2', reason:'fifty-move rule' };
+  const repKey = fen.split(' ').slice(0,4).join(' ');
+  if ((positionCounts[repKey]||0) >= 3) return { over:true, result:'1/2-1/2', reason:'threefold repetition' };
+  if (insufficientMaterial(state.board)) return { over:true, result:'1/2-1/2', reason:'insufficient material' };
+  return { over:false, inCheck: chk };
+}
+
+/* ---------------------------------------------------------------------- */
+/* DOM references                                                         */
+/* ---------------------------------------------------------------------- */
+
+const $ = id => document.getElementById(id);
+const boardEl = $('board');
+const evalFill = $('evalFill'), evalLabel = $('evalLabel');
+const turnIndicator = $('turnIndicator'), resultText = $('resultText');
+const statusChip = $('statusChip'), subtitle = $('subtitle'), bootLed = $('bootLed');
+const btnStart = $('btnStart'), btnPause = $('btnPause'), btnStep = $('btnStep'), btnReset = $('btnReset');
+const btnFlip = $('btnFlip'), btnToggleLog = $('btnToggleLog'), btnSwapNow = $('btnSwapNow');
+const btnDownloadLog = $('btnDownloadLog');
+const logPanel = $('logPanel');
+const historyList = $('historyList');
+const scoreBody = $('scoreBody');
+const gameCounter = $('gameCounter');
+const customFenInput = $('customFen');
+const autoNextCheckbox = $('autoNext');
+const swapColorsCheckbox = $('swapColors');
+const moveDelayInput = $('moveDelay');
+const footerInfo = $('footerInfo');
+const autoplayCountInput = $('autoplayCount');
+const btnRunSet = $('btnRunSet'), btnStopSet = $('btnStopSet');
+const autoplayProgress = $('autoplayProgress');
+
+const sideInputs = {
+  w: { engine: $('engineW'), skill: $('skillW'), skillVal: $('skillWVal'), movetime: $('movetimeW'), led: $('ledW'), tag: $('tagW') },
+  b: { engine: $('engineB'), skill: $('skillB'), skillVal: $('skillBVal'), movetime: $('movetimeB'), led: $('ledB'), tag: $('tagB') },
+};
+
+const ENGINE_LABEL = { stockfish: 'Stockfish', pet_dragon: 'Pet Dragon' };
+
+/* ---------------------------------------------------------------------- */
+/* Logging                                                                 */
+/* ---------------------------------------------------------------------- */
+
+function log(msg, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = 'l-' + cls;
+  line.textContent = msg;
+  logPanel.appendChild(line);
+  while (logPanel.childNodes.length > 400) logPanel.removeChild(logPanel.firstChild);
+  logPanel.scrollTop = logPanel.scrollHeight;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Stockfish adapter (runs in a Web Worker, spoken to via UCI text lines)  */
+/* ---------------------------------------------------------------------- */
+
+class StockfishEngine {
+  constructor() {
+    this.worker = new Worker('stockfish_min.js');
+    this.pending = null;
+    this.currentSkill = null;
+    this.idName = null;
+    this.idAuthor = null;
+    this.worker.onmessage = e => this._handle(e.data);
+    this.worker.onerror = e => log('Stockfish worker error: ' + e.message, 'alert');
+  }
+  _handle(line) {
+    if (typeof line !== 'string') return;
+    log(line, 'stockfish');
+    if (line.startsWith('id name ')) this.idName = line.slice(8).trim();
+    if (line.startsWith('id author ')) this.idAuthor = line.slice(11).trim();
+    if (this.pending) {
+      const m = line.match(/\bscore (cp|mate) (-?\d+)/);
+      if (m) this.pending.lastScore = { type: m[1], val: parseInt(m[2], 10) };
+      if (this.pending.matchFn(line)) {
+        const p = this.pending;
+        this.pending = null;
+        p.resolve({ line, score: p.lastScore });
+      }
+    }
+  }
+  send(cmd) { log('> ' + cmd, 'sent'); this.worker.postMessage(cmd); }
+  waitFor(matchFn) { return new Promise(resolve => { this.pending = { matchFn, resolve, lastScore: null }; }); }
+  async init() {
+    this.send('uci');
+    await this.waitFor(l => l.trim() === 'uciok');
+    this.send('isready');
+    await this.waitFor(l => l.trim() === 'readyok');
+  }
+  async setSkill(skill) {
+    if (this.currentSkill === skill) return;
+    this.send('setoption name Skill Level value ' + skill);
+    this.currentSkill = skill;
+  }
+  async bestMove(fen, movetimeMs, skill) {
+    await this.setSkill(skill);
+    this.send('position fen ' + fen);
+    this.send('go movetime ' + Math.max(1, movetimeMs|0));
+    const { line, score } = await this.waitFor(l => l.startsWith('bestmove'));
+    return { line, score };
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Move + eval helpers shared across engines                              */
+/* ---------------------------------------------------------------------- */
+
+function toWhiteRelativeEval(score, rootTurn) {
+  if (!score) return null;
+  let val = score.val;
+  if (rootTurn === 'b') val = -val;
+  return { type: score.type, val };
+}
+
+function parsePetDragonResult(resultStr) {
+  const parts = (resultStr || '').trim().split(/\s+/);
+  const move = parts[0] || '0000';
+  const evalTok = parts[1] || '0';
+  let score;
+  if (evalTok.startsWith('mate')) score = { type: 'mate', val: parseInt(evalTok.slice(4), 10) || 0 };
+  else score = { type: 'cp', val: parseInt(evalTok, 10) || 0 };
+  return { move, score };
+}
+
+async function getMove(sideCfg, fen) {
+  if (sideCfg.engine === 'stockfish') {
+    const rootTurn = fen.split(' ')[1];
+    const { line, score } = await sf.bestMove(fen, sideCfg.movetime, sideCfg.skill);
+    const tokens = line.split(/\s+/);
+    let move = tokens[1] || '0000';
+    if (move === '(none)') move = '0000';
+    return { move, score: toWhiteRelativeEval(score, rootTurn) };
+  } else {
+    await new Promise(r => setTimeout(r, 30)); // yield so the "thinking" UI can paint before the blocking wasm call
+    const resultStr = search_from_fen_with_eval(fen, sideCfg.movetime, sideCfg.skill);
+    return parsePetDragonResult(resultStr);
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Match state                                                             */
+/* ---------------------------------------------------------------------- */
+
+let sf = null;
+let dragonReady = false;
+
+const players = {
+  w: { engine: 'stockfish', skill: 10, movetime: 1000 },
+  b: { engine: 'pet_dragon', skill: 10, movetime: 1000 },
+};
+
+const match = {
+  fen: START_FEN,
+  history: [],
+  positionCounts: {},
+  running: false,
+  gameOver: false,
+  gameNum: 1,
+  scoreboard: {},
+  currentGameMeta: null,
+};
+
+const matchLog = []; // accumulates one record per finished match, kept until explicitly downloaded
+
+let baselineW = null; // { engine, skill, movetime } for whichever player currently occupies White
+let baselineB = null; // same, for Black — kept in lockstep whenever colors are swapped
+let setStarted = false;    // becomes true the moment any game has ever actually started
+let autoplaySet = null;    // { target, played } while a bounded autoplay run is in progress, else null
+
+function captureBaseline() {
+  readSideInputs();
+  baselineW = { engine: players.w.engine, skill: players.w.skill, movetime: players.w.movetime };
+  baselineB = { engine: players.b.engine, skill: players.b.skill, movetime: players.b.movetime };
+}
+
+function swapPlayersAndBaseline() {
+  const tmpP = players.w; players.w = players.b; players.b = tmpP;
+  const tmpB = baselineW; baselineW = baselineB; baselineB = tmpB;
+}
+
+function applyBaselineToPlayers() {
+  if (baselineW) { players.w.engine = baselineW.engine; players.w.skill = baselineW.skill; players.w.movetime = baselineW.movetime; }
+  if (baselineB) { players.b.engine = baselineB.engine; players.b.skill = baselineB.skill; players.b.movetime = baselineB.movetime; }
+}
+
+function readSideInputs() {
+  for (const side of ['w','b']) {
+    players[side].engine = sideInputs[side].engine.value;
+    players[side].skill = parseInt(sideInputs[side].skill.value, 10);
+    players[side].movetime = parseInt(sideInputs[side].movetime.value, 10) || 100;
+  }
+}
+
+function syncSideInputsFromState() {
+  for (const side of ['w','b']) {
+    sideInputs[side].engine.value = players[side].engine;
+    sideInputs[side].skill.value = players[side].skill;
+    sideInputs[side].skillVal.textContent = players[side].skill;
+    sideInputs[side].movetime.value = players[side].movetime;
+  }
+}
+
+for (const side of ['w','b']) {
+  sideInputs[side].engine.addEventListener('change', readSideInputs);
+  sideInputs[side].skill.addEventListener('input', () => {
+    sideInputs[side].skillVal.textContent = sideInputs[side].skill.value;
+    readSideInputs();
+  });
+  sideInputs[side].movetime.addEventListener('change', readSideInputs);
+}
+readSideInputs();
+
+/* ---------------------------------------------------------------------- */
+/* Board rendering                                                         */
+/* ---------------------------------------------------------------------- */
+
+function buildBoardDOM() {
+  boardEl.innerHTML = '';
+  for (let rank = 8; rank >= 1; rank--) {
+    for (let f = 0; f < 8; f++) {
+      const sq = FILES[f] + rank;
+      const div = document.createElement('div');
+      div.className = 'sq ' + (((f + rank) % 2 === 0) ? 'light' : 'dark');
+      div.dataset.sq = sq;
+      if (f === 0) { const r = document.createElement('span'); r.className = 'coord rank'; r.textContent = rank; div.appendChild(r); }
+      if (rank === 1) { const c = document.createElement('span'); c.className = 'coord file'; c.textContent = FILES[f]; div.appendChild(c); }
+      boardEl.appendChild(div);
+    }
+  }
+}
+buildBoardDOM();
+
+function renderBoard() {
+  const state = fenToState(match.fen);
+  const chk = isInCheck(match.fen);
+  const kingSq = chk ? findKing(state.board, state.active) : null;
+  const last = match.history[match.history.length - 1];
+  boardEl.querySelectorAll('.sq').forEach(sqEl => {
+    const sq = sqEl.dataset.sq;
+    const piece = state.board[sq];
+    const coords = sqEl.querySelectorAll('.coord');
+    sqEl.innerHTML = '';
+    coords.forEach(c => sqEl.appendChild(c));
+    if (piece) {
+      const span = document.createElement('span');
+      span.className = 'piece ' + (piece === piece.toUpperCase() ? 'w' : 'b');
+      span.textContent = PIECE_GLYPH[piece];
+      sqEl.appendChild(span);
+    }
+    sqEl.classList.toggle('last-from', !!(last && last.uci.slice(0,2) === sq));
+    sqEl.classList.toggle('last-to', !!(last && last.uci.slice(2,4) === sq));
+    sqEl.classList.toggle('king-check', sq === kingSq);
+  });
+  turnIndicator.textContent = (state.active === 'w' ? 'White' : 'Black') + ' to move' + (chk ? ' — in check' : '');
+}
+
+function renderEval(score) {
+  if (!score) { evalFill.style.width = '50%'; evalLabel.textContent = '0.0'; return; }
+  let frac;
+  if (score.type === 'mate') {
+    frac = score.val > 0 ? 1 : 0;
+    evalLabel.textContent = (score.val >= 0 ? 'M' : 'M-') + Math.abs(score.val);
+  } else {
+    const cp = Math.max(-1000, Math.min(1000, score.val));
+    frac = 0.5 + cp / 2000;
+    evalLabel.textContent = (score.val > 0 ? '+' : '') + (score.val / 100).toFixed(1);
+  }
+  evalFill.style.width = (frac * 100).toFixed(1) + '%';
+}
+
+function renderHistory() {
+  historyList.innerHTML = '';
+  const byMove = {};
+  for (const h of match.history) {
+    byMove[h.moveNumber] = byMove[h.moveNumber] || {};
+    byMove[h.moveNumber][h.side] = h;
+  }
+  Object.keys(byMove).sort((a,b) => a - b).forEach(num => {
+    const row = document.createElement('div');
+    row.className = 'history-row';
+    const w = byMove[num].w, b = byMove[num].b;
+    row.innerHTML = `<span class="num">${num}.</span>` +
+      `<span>${w ? `<span class="move-eng-${w.engine}">${w.uci}</span>` : ''}</span>` +
+      `<span>${b ? `<span class="move-eng-${b.engine}">${b.uci}</span>` : ''}</span>`;
+    historyList.appendChild(row);
+  });
+  historyList.scrollTop = historyList.scrollHeight;
+}
+
+function renderScoreboard() {
+  scoreBody.innerHTML = '';
+  Object.keys(match.scoreboard).forEach(key => {
+    const rec = match.scoreboard[key];
+    const tr = document.createElement('tr');
+    const cls = key === 'stockfish' ? 'eng-amber' : 'eng-teal';
+    tr.innerHTML = `<td class="${cls}">${ENGINE_LABEL[key] || key}</td><td>${rec.w}</td><td>${rec.d}</td><td>${rec.l}</td>`;
+    scoreBody.appendChild(tr);
+  });
+  gameCounter.textContent = `Game ${match.gameNum}`;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Match log export — accumulates every finished match (FEN, moves,       */
+/* per-side engine/skill/movetime, result) until the user downloads it.   */
+/* ---------------------------------------------------------------------- */
+
+function formatDateTime(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function sideSummary(cfg) {
+  return `${ENGINE_LABEL[cfg.engine] || cfg.engine} (skill ${cfg.skill}, movetime ${cfg.movetime}ms)`;
+}
+
+function buildLogText() {
+  const lines = [];
+  lines.push('Engine Bench — match log');
+  lines.push(`Exported: ${formatDateTime(new Date())}`);
+  lines.push(`Total matches recorded: ${matchLog.length}`);
+  lines.push('='.repeat(64));
+  matchLog.forEach(entry => {
+    const resultLabel = entry.result === '1-0' ? 'White wins' : entry.result === '0-1' ? 'Black wins' : 'Draw';
+    lines.push('');
+    lines.push(`Match ${entry.matchNumber} — started ${formatDateTime(entry.startedAt)}, finished ${formatDateTime(entry.finishedAt)}`);
+    lines.push(`Starting FEN: ${entry.startFen}`);
+    lines.push(`White: ${sideSummary(entry.white)}`);
+    lines.push(`Black: ${sideSummary(entry.black)}`);
+    lines.push(`Moves (${entry.moves.length} plies): ${entry.moves.join(' ') || '(none)'}`);
+    lines.push(`Result: ${entry.result} — ${resultLabel} (${entry.reason})`);
+    lines.push('-'.repeat(64));
+  });
+  return lines.join('\n');
+}
+
+function updateDownloadLogButton() {
+  btnDownloadLog.textContent = `Download log (${matchLog.length})`;
+  btnDownloadLog.disabled = matchLog.length === 0;
+}
+
+function downloadLog() {
+  if (!matchLog.length) return;
+  const text = buildLogText();
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const stamp = formatDateTime(new Date()).replace(/[: ]/g, '-');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `engine-bench-log-${stamp}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function setThinking(side, on) {
+  sideInputs[side].led.classList.toggle('on', on);
+}
+
+function setStatusChip(text, cls) {
+  statusChip.textContent = text;
+  statusChip.className = 'status-chip' + (cls ? ' ' + cls : '');
+}
+
+/* ---------------------------------------------------------------------- */
+/* Game / match control flow                                              */
+/* ---------------------------------------------------------------------- */
+
+function sanitizeFen(fen) {
+  // Pet Dragon's new_game() appends a non-standard trailing metadata suffix
+  // (pawn-start bookkeeping for its variant, where pawns may start on the
+  // back rank). It doesn't affect legal_moves_from_fen's own ruling, but
+  // Stockfish and this page's own FEN parser only understand the 6
+  // standard fields, so anything beyond that is stripped at the boundary.
+  return fen.trim().split(/\s+/).slice(0, 6).join(' ');
+}
+
+function getSelectedStartFen() {
+  const mode = document.querySelector('input[name="posmode"]:checked').value;
+  if (mode === 'standard') return START_FEN;
+  const custom = customFenInput.value.trim();
+  return sanitizeFen(custom || START_FEN);
+}
+
+function resetGame(fen) {
+  match.fen = fen;
+  match.history = [];
+  match.positionCounts = {};
+  match.positionCounts[fen.split(' ').slice(0,4).join(' ')] = 1;
+  match.gameOver = false;
+  match.currentGameMeta = null; // captured fresh in playOneMove() right as the game's first move is requested
+  resultText.textContent = '';
+  renderBoard();
+  renderHistory();
+  renderEval(null);
+}
+
+function updateControlsForRunState() {
+  const ready = dragonReady && sf !== null;
+  btnStart.disabled = !ready || match.running;
+  btnPause.disabled = !match.running;
+  btnStep.disabled = !ready || match.running || match.gameOver;
+  btnReset.disabled = !ready;
+  if (!ready) setStatusChip('BOOTING');
+  else if (match.running) setStatusChip('RUNNING', 'running');
+  else if (match.gameOver) setStatusChip('FINISHED', 'finished');
+  else setStatusChip('PAUSED', 'paused');
+
+  // Engine, skill & movetime freeze while a game is actively running; editable while paused/finished/idle.
+  for (const side of ['w','b']) {
+    sideInputs[side].engine.disabled = match.running;
+    sideInputs[side].skill.disabled = match.running;
+    sideInputs[side].movetime.disabled = match.running;
+  }
+
+  btnRunSet.disabled = !ready || match.running || autoplaySet !== null;
+  autoplayCountInput.disabled = autoplaySet !== null;
+  btnStopSet.disabled = autoplaySet === null;
+}
+
+function ensureScoreEntry(key) {
+  if (!match.scoreboard[key]) match.scoreboard[key] = { w: 0, d: 0, l: 0 };
+}
+
+function updateScoreboard(result) {
+  const wEngine = players.w.engine, bEngine = players.b.engine;
+  ensureScoreEntry(wEngine); ensureScoreEntry(bEngine);
+  if (result === '1-0') { match.scoreboard[wEngine].w++; match.scoreboard[bEngine].l++; }
+  else if (result === '0-1') { match.scoreboard[bEngine].w++; match.scoreboard[wEngine].l++; }
+  else { match.scoreboard[wEngine].d++; match.scoreboard[bEngine].d++; }
+}
+
+function endGame(status) {
+  match.gameOver = true;
+  match.running = false;
+  const resultLabel = status.result === '1-0' ? 'White wins' : status.result === '0-1' ? 'Black wins' : 'Draw';
+  resultText.textContent = `${resultLabel} (${status.reason})`;
+  log(`=== Game ${match.gameNum} over: ${resultLabel} — ${status.reason} ===`);
+  updateScoreboard(status.result);
+  recordMatchLogEntry(status);
+  match.gameNum++;
+  renderScoreboard();
+
+  if (autoplaySet) {
+    autoplaySet.played++;
+    updateAutoplayDashboard();
+    if (autoplaySet.played >= autoplaySet.target) {
+      log(`=== Autoplay set complete: ${autoplaySet.played} match(es) played — downloading log ===`);
+      autoplaySet = null;
+      updateAutoplayDashboard();
+      updateControlsForRunState();
+      downloadLog();
+      return;
+    }
+    updateControlsForRunState();
+    setTimeout(startNextGame, 900);
+    return;
+  }
+
+  updateControlsForRunState();
+  if (autoNextCheckbox.checked) {
+    setTimeout(startNextGame, 900);
+  }
+}
+
+function recordMatchLogEntry(status) {
+  const meta = match.currentGameMeta || { startedAt: new Date(), startFen: match.fen, white: { ...players.w }, black: { ...players.b } };
+  matchLog.push({
+    matchNumber: match.gameNum,
+    startedAt: meta.startedAt,
+    finishedAt: new Date(),
+    startFen: meta.startFen,
+    white: meta.white,
+    black: meta.black,
+    moves: match.history.map(h => h.uci),
+    result: status.result,
+    reason: status.reason,
+  });
+  updateDownloadLogButton();
+}
+
+function startNextGame() {
+  const continuingSet = !!autoplaySet;
+  const continuingIndefinite = !continuingSet && autoNextCheckbox.checked;
+  if (!continuingSet && !continuingIndefinite) return; // stopped in the meantime — stale timeout, do nothing
+
+  if (continuingSet || swapColorsCheckbox.checked) {
+    swapPlayersAndBaseline();
+  }
+  applyBaselineToPlayers(); // discard any pause-time tweaks from the previous game
+  syncSideInputsFromState();
+
+  resetGame(getSelectedStartFen());
+  match.running = true;
+  updateControlsForRunState();
+  updateAutoplayDashboard();
+  playOneMove();
+}
+
+function updateAutoplayDashboard() {
+  if (autoplaySet) {
+    autoplayProgress.textContent = `Running — ${autoplaySet.played} of ${autoplaySet.target} match(es) complete.`;
+  } else if (matchLog.length) {
+    autoplayProgress.textContent = `No set running. ${matchLog.length} match(es) logged so far.`;
+  } else {
+    autoplayProgress.textContent = 'No set running.';
+  }
+}
+
+let moveInFlight = false;
+
+async function playOneMove() {
+  if (match.gameOver || moveInFlight) return;
+  moveInFlight = true;
+  try {
+    await playOneMoveInner();
+  } finally {
+    moveInFlight = false;
+  }
+}
+
+async function playOneMoveInner() {
+  if (!match.currentGameMeta) {
+    // Snapshot the settings actually in effect right now — this runs at the
+    // moment the game's first move is requested, so any tweaks made after
+    // "New game" but before "Start" are captured correctly.
+    match.currentGameMeta = {
+      startedAt: new Date(),
+      startFen: match.fen,
+      white: { ...players.w },
+      black: { ...players.b },
+    };
+  }
+  const turn = match.fen.split(' ')[1];
+  const sideCfg = players[turn];
+  setThinking(turn, true);
+  let result;
+  try {
+    result = await getMove(sideCfg, match.fen);
+  } catch (err) {
+    log('Engine error: ' + err.message, 'alert');
+    setThinking(turn, false);
+    match.running = false;
+    resultText.textContent = 'Stopped — engine error.';
+    updateControlsForRunState();
+    return;
+  }
+  setThinking(turn, false);
+
+  if (!result.move || result.move === '0000') {
+    const status = evaluateGameStatus(match.fen, match.positionCounts);
+    if (status.over) { endGame(status); }
+    else {
+      match.running = false;
+      resultText.textContent = 'Stopped — engine returned no move.';
+      log('Engine returned no move in a non-terminal position.', 'alert');
+      updateControlsForRunState();
+    }
+    return;
+  }
+
+  const prevFen = match.fen;
+  let newFen;
+  try {
+    newFen = applyUciMove(match.fen, result.move);
+  } catch (err) {
+    log('Failed to apply move ' + result.move + ': ' + err.message, 'alert');
+    match.running = false;
+    resultText.textContent = 'Stopped — illegal move produced.';
+    updateControlsForRunState();
+    return;
+  }
+  match.fen = newFen;
+  match.history.push({
+    moveNumber: fenToState(prevFen).fullmove,
+    side: turn,
+    engine: sideCfg.engine,
+    uci: result.move,
+    eval: result.score,
+  });
+  const repKey = newFen.split(' ').slice(0,4).join(' ');
+  match.positionCounts[repKey] = (match.positionCounts[repKey] || 0) + 1;
+
+  renderBoard();
+  renderHistory();
+  renderEval(result.score);
+
+  const status = evaluateGameStatus(match.fen, match.positionCounts);
+  if (status.over) { endGame(status); return; }
+
+  if (match.running) {
+    const delay = parseInt(moveDelayInput.value, 10) || 0;
+    setTimeout(playOneMove, delay);
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Button wiring                                                          */
+/* ---------------------------------------------------------------------- */
+
+btnStart.addEventListener('click', () => {
+  if (match.gameOver || !setStarted) {
+    captureBaseline();
+    resetGame(getSelectedStartFen());
+    setStarted = true;
+  }
+  match.running = true;
+  updateControlsForRunState();
+  playOneMove();
+});
+btnPause.addEventListener('click', () => {
+  match.running = false;
+  updateControlsForRunState();
+});
+btnStep.addEventListener('click', () => {
+  if (match.running) return;
+  if (match.gameOver || !setStarted) {
+    captureBaseline();
+    resetGame(getSelectedStartFen());
+    setStarted = true;
+  }
+  playOneMove();
+});
+btnReset.addEventListener('click', () => {
+  match.running = false;
+  autoplaySet = null;
+  captureBaseline();
+  resetGame(getSelectedStartFen());
+  setStarted = true;
+  updateControlsForRunState();
+  updateAutoplayDashboard();
+});
+btnFlip.addEventListener('click', () => boardEl.classList.toggle('flipped'));
+btnToggleLog.addEventListener('click', () => {
+  logPanel.style.display = logPanel.style.display === 'none' ? 'block' : 'none';
+});
+btnDownloadLog.addEventListener('click', downloadLog);
+btnSwapNow.addEventListener('click', () => {
+  swapPlayersAndBaseline();
+  syncSideInputsFromState();
+});
+btnRunSet.addEventListener('click', () => {
+  const n = parseInt(autoplayCountInput.value, 10);
+  if (!n || n < 1) return;
+  autoplaySet = { target: n, played: 0 };
+  captureBaseline();
+  match.running = false;
+  resetGame(getSelectedStartFen());
+  setStarted = true;
+  match.running = true;
+  updateControlsForRunState();
+  updateAutoplayDashboard();
+  playOneMove();
+});
+btnStopSet.addEventListener('click', () => {
+  autoplaySet = null;
+  match.running = false;
+  updateControlsForRunState();
+  updateAutoplayDashboard();
+});
+document.querySelectorAll('input[name="posmode"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    customFenInput.disabled = document.querySelector('input[name="posmode"]:checked').value !== 'custom';
+  });
+});
+
+/* ---------------------------------------------------------------------- */
+/* Boot sequence                                                          */
+/* ---------------------------------------------------------------------- */
+
+async function boot() {
+  try {
+    setStatusChip('BOOTING');
+    subtitle.textContent = 'Loading Pet Dragon (WASM)…';
+    await init();
+    wasm_main();
+    dragonReady = true;
+    log(`Pet Dragon ready: ${engine_name()} ${engine_version()} by ${engine_author()}`, 'dragon');
+
+    subtitle.textContent = 'Starting Stockfish…';
+    sf = new StockfishEngine();
+    await sf.init();
+    log(`Stockfish ready: ${sf.idName || 'Stockfish'}`, 'stockfish');
+
+    bootLed.classList.add('on');
+    subtitle.textContent = 'Both engines ready.';
+    footerInfo.textContent =
+      `Stockfish: ${sf.idName || 'unknown'}${sf.idAuthor ? ' — ' + sf.idAuthor : ''}   ·   ` +
+      `Pet Dragon: ${engine_name()} ${engine_version()} by ${engine_author()}`;
+
+    resetGame(getSelectedStartFen());
+    updateControlsForRunState();
+    updateAutoplayDashboard();
+  } catch (err) {
+    console.error(err);
+    subtitle.textContent = 'Boot error — see console.';
+    setStatusChip('ERROR', 'finished');
+    log('Boot error: ' + err.message, 'alert');
+  }
+}
+
+boot();
+</script>
+</body>
+</html>
