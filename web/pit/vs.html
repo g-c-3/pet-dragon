@@ -208,9 +208,15 @@
     margin-top:24px; font-family:var(--font-mono); font-size:10.5px; color:var(--muted);
     border-top:1px solid var(--line); padding-top:10px;
   }
+
+  #fireworksCanvas{
+    position:fixed; inset:0; width:100vw; height:100vh;
+    pointer-events:none; z-index:9999;
+  }
 </style>
 </head>
 <body>
+<canvas id="fireworksCanvas"></canvas>
 <div class="app">
 
   <header class="bench-header">
@@ -977,12 +983,94 @@ function updateScoreboard(result) {
   else { match.scoreboard[wEngine].d++; match.scoreboard[bEngine].d++; }
 }
 
+/* ---------------------------------------------------------------------- */
+/* Fireworks — a small canvas particle celebration fired once per game    */
+/* ends, win or draw. Self-contained (no libraries), themed off the       */
+/* page's own accent colors, and cheap enough to not stutter autoplay.    */
+/* ---------------------------------------------------------------------- */
+
+const fwCanvas = $('fireworksCanvas');
+const fwCtx = fwCanvas.getContext('2d');
+let fwParticles = [];
+let fwAnimating = false;
+
+function resizeFwCanvas() {
+  fwCanvas.width = window.innerWidth;
+  fwCanvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeFwCanvas);
+resizeFwCanvas();
+
+function fwSpawnBurst() {
+  const colors = ['#e8a33d', '#7ee0c3', '#e0636a', '#f3efe6'];
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  const cx = fwCanvas.width * (0.2 + Math.random() * 0.6);
+  const cy = fwCanvas.height * (0.15 + Math.random() * 0.35);
+  const count = 46 + Math.floor(Math.random() * 20);
+  for (let i = 0; i < count; i += 1) {
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.2;
+    const speed = 2.2 + Math.random() * 2.6;
+    fwParticles.push({
+      x: cx, y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1,
+      decay: 0.011 + Math.random() * 0.012,
+      color,
+      size: 1.6 + Math.random() * 1.6,
+    });
+  }
+}
+
+function fwTick() {
+  fwCtx.clearRect(0, 0, fwCanvas.width, fwCanvas.height);
+  const gravity = 0.045;
+  let alive = false;
+  for (const p of fwParticles) {
+    if (p.life <= 0) continue;
+    p.vy += gravity;
+    p.vx *= 0.985;
+    p.vy *= 0.985;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= p.decay;
+    if (p.life > 0) {
+      alive = true;
+      fwCtx.globalAlpha = Math.max(p.life, 0);
+      fwCtx.fillStyle = p.color;
+      fwCtx.beginPath();
+      fwCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      fwCtx.fill();
+    }
+  }
+  fwCtx.globalAlpha = 1;
+  fwParticles = fwParticles.filter(p => p.life > 0);
+  if (alive || fwParticles.length) {
+    requestAnimationFrame(fwTick);
+  } else {
+    fwAnimating = false;
+    fwCtx.clearRect(0, 0, fwCanvas.width, fwCanvas.height);
+  }
+}
+
+function launchFireworks() {
+  const bursts = 3 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < bursts; i += 1) {
+    setTimeout(fwSpawnBurst, i * 280);
+  }
+  if (!fwAnimating) {
+    fwAnimating = true;
+    requestAnimationFrame(fwTick);
+  }
+}
+
 function endGame(status) {
   match.gameOver = true;
   match.running = false;
   const resultLabel = status.result === '1-0' ? 'White wins' : status.result === '0-1' ? 'Black wins' : 'Draw';
   resultText.textContent = `${resultLabel} (${status.reason})`;
   log(`=== Game ${match.gameNum} over: ${resultLabel} — ${status.reason} ===`);
+  launchFireworks();
   updateScoreboard(status.result);
   recordMatchLogEntry(status);
   match.gameNum++;
