@@ -349,11 +349,17 @@
 </div>
 
 <script type="module">
+/* Pet Dragon's WASM build (pet_dragon.js / pet_dragon_bg.wasm) is produced
+ * by CI (see .github/workflows/deploy.yml) and is never committed to the
+ * repo — it only exists as the output of that workflow, published to the
+ * repo's GitHub Pages site. That deployment reruns on every push to main,
+ * so importing straight from it always gets the latest build without this
+ * page needing any sibling files of its own. */
 import init, {
   engine_author, engine_name, engine_version,
   legal_moves_from_fen,
   search_from_fen_with_eval, wasm_main
-} from './pet_dragon.js';
+} from 'https://g-c-3.github.io/pet-dragon/pkg/pet_dragon.js';
 
 /* ---------------------------------------------------------------------- */
 /* Embedded chess rules helper: FEN parsing, move application, check/mate  */
@@ -584,15 +590,39 @@ function log(msg, cls) {
 /* Stockfish adapter (runs in a Web Worker, spoken to via UCI text lines)  */
 /* ---------------------------------------------------------------------- */
 
+// jsDelivr mirror of the "stockfish" npm package. Pinned to the @18 major
+// version range (jsDelivr resolves this to the newest 18.x.x release) —
+// the lite/single-threaded build is used because it needs no cross-origin
+// isolation headers (COOP/COEP), which a static host like GitHub Pages
+// can't set. Filenames embed the major version, so a future Stockfish 19
+// would need this constant bumped along with it.
+const STOCKFISH_JS_URL   = 'https://cdn.jsdelivr.net/npm/stockfish@18/bin/stockfish-18-lite-single.js';
+const STOCKFISH_WASM_URL = 'https://cdn.jsdelivr.net/npm/stockfish@18/bin/stockfish-18-lite-single.wasm';
+
 class StockfishEngine {
   constructor() {
-    this.worker = new Worker('stockfish_min.js');
+    this.worker = null;
     this.pending = null;
     this.currentSkill = null;
     this.idName = null;
     this.idAuthor = null;
-    this.worker.onmessage = e => this._handle(e.data);
-    this.worker.onerror = e => log('Stockfish worker error: ' + e.message, 'alert');
+  }
+  async _spawnWorker() {
+    // Browsers refuse `new Worker(crossOriginUrl)` outright, so the CDN
+    // script is fetched as text (jsDelivr sends the CORS headers this
+    // needs) and handed to the browser as a same-origin blob: URL instead.
+    // The "#<wasm-url>,worker" suffix is stockfish.js's own convention for
+    // pinning where its companion .wasm lives — without it, the engine
+    // would try to resolve the .wasm next to the meaningless blob: URL
+    // instead of next to the real file on jsDelivr.
+    const resp = await fetch(STOCKFISH_JS_URL);
+    if (!resp.ok) throw new Error('Failed to fetch Stockfish from jsDelivr: HTTP ' + resp.status);
+    const code = await resp.text();
+    const blobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+    const worker = new Worker(blobUrl + '#' + encodeURIComponent(STOCKFISH_WASM_URL) + ',worker');
+    worker.onmessage = e => this._handle(e.data);
+    worker.onerror = e => log('Stockfish worker error: ' + e.message, 'alert');
+    this.worker = worker;
   }
   _handle(line) {
     if (typeof line !== 'string') return;
@@ -612,6 +642,7 @@ class StockfishEngine {
   send(cmd) { log('> ' + cmd, 'sent'); this.worker.postMessage(cmd); }
   waitFor(matchFn) { return new Promise(resolve => { this.pending = { matchFn, resolve, lastScore: null }; }); }
   async init() {
+    await this._spawnWorker();
     this.send('uci');
     await this.waitFor(l => l.trim() === 'uciok');
     this.send('isready');
@@ -1201,16 +1232,16 @@ document.querySelectorAll('input[name="posmode"]').forEach(radio => {
 async function boot() {
   try {
     setStatusChip('BOOTING');
-    subtitle.textContent = 'Loading Pet Dragon (WASM)…';
+    subtitle.textContent = 'Loading Pet Dragon (WASM) from g-c-3.github.io/pet-dragon…';
     await init();
     wasm_main();
     dragonReady = true;
-    log(`Pet Dragon ready: ${engine_name()} ${engine_version()} by ${engine_author()}`, 'dragon');
+    log(`Pet Dragon ready: ${engine_name()} ${engine_version()} by ${engine_author()} (loaded from GitHub Pages build)`, 'dragon');
 
-    subtitle.textContent = 'Starting Stockfish…';
+    subtitle.textContent = 'Starting Stockfish from jsDelivr…';
     sf = new StockfishEngine();
     await sf.init();
-    log(`Stockfish ready: ${sf.idName || 'Stockfish'}`, 'stockfish');
+    log(`Stockfish ready: ${sf.idName || 'Stockfish'} (loaded from cdn.jsdelivr.net)`, 'stockfish');
 
     bootLed.classList.add('on');
     subtitle.textContent = 'Both engines ready.';
