@@ -590,39 +590,26 @@ function log(msg, cls) {
 /* Stockfish adapter (runs in a Web Worker, spoken to via UCI text lines)  */
 /* ---------------------------------------------------------------------- */
 
-// jsDelivr mirror of the "stockfish" npm package. Pinned to the @18 major
-// version range (jsDelivr resolves this to the newest 18.x.x release) —
-// the lite/single-threaded build is used because it needs no cross-origin
-// isolation headers (COOP/COEP), which a static host like GitHub Pages
-// can't set. Filenames embed the major version, so a future Stockfish 19
-// would need this constant bumped along with it.
-const STOCKFISH_JS_URL   = 'https://cdn.jsdelivr.net/npm/stockfish@18/bin/stockfish-18-lite-single.js';
-const STOCKFISH_WASM_URL = 'https://cdn.jsdelivr.net/npm/stockfish@18/bin/stockfish-18-lite-single.wasm';
+// Served as a sibling file next to vs.html (web/pit/stockfish-18-lite-single.js
+// + .wasm), NOT from a CDN. jsDelivr's npm mode refuses to serve *any* file
+// from the "stockfish" package (HTTP 403) because the package as a whole
+// (multi-threaded + lite + asm-js builds bundled together) is far over
+// jsDelivr's 100MB npm size cap — even though the one ~7MB lite/single file
+// this page actually needs is well under that on its own. GitHub Release
+// assets were the other option, but GitHub doesn't send CORS headers on
+// those, so a browser can't fetch() them either. Hosting the two files
+// alongside vs.html avoids both dead ends.
+const STOCKFISH_JS_PATH = 'stockfish-18-lite-single.js';
 
 class StockfishEngine {
   constructor() {
-    this.worker = null;
+    this.worker = new Worker(STOCKFISH_JS_PATH);
     this.pending = null;
     this.currentSkill = null;
     this.idName = null;
     this.idAuthor = null;
-  }
-  async _spawnWorker() {
-    // Browsers refuse `new Worker(crossOriginUrl)` outright, so the CDN
-    // script is fetched as text (jsDelivr sends the CORS headers this
-    // needs) and handed to the browser as a same-origin blob: URL instead.
-    // The "#<wasm-url>,worker" suffix is stockfish.js's own convention for
-    // pinning where its companion .wasm lives — without it, the engine
-    // would try to resolve the .wasm next to the meaningless blob: URL
-    // instead of next to the real file on jsDelivr.
-    const resp = await fetch(STOCKFISH_JS_URL);
-    if (!resp.ok) throw new Error('Failed to fetch Stockfish from jsDelivr: HTTP ' + resp.status);
-    const code = await resp.text();
-    const blobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
-    const worker = new Worker(blobUrl + '#' + encodeURIComponent(STOCKFISH_WASM_URL) + ',worker');
-    worker.onmessage = e => this._handle(e.data);
-    worker.onerror = e => log('Stockfish worker error: ' + e.message, 'alert');
-    this.worker = worker;
+    this.worker.onmessage = e => this._handle(e.data);
+    this.worker.onerror = e => log('Stockfish worker error: ' + e.message, 'alert');
   }
   _handle(line) {
     if (typeof line !== 'string') return;
@@ -642,7 +629,6 @@ class StockfishEngine {
   send(cmd) { log('> ' + cmd, 'sent'); this.worker.postMessage(cmd); }
   waitFor(matchFn) { return new Promise(resolve => { this.pending = { matchFn, resolve, lastScore: null }; }); }
   async init() {
-    await this._spawnWorker();
     this.send('uci');
     await this.waitFor(l => l.trim() === 'uciok');
     this.send('isready');
@@ -1238,10 +1224,10 @@ async function boot() {
     dragonReady = true;
     log(`Pet Dragon ready: ${engine_name()} ${engine_version()} by ${engine_author()} (loaded from GitHub Pages build)`, 'dragon');
 
-    subtitle.textContent = 'Starting Stockfish from jsDelivr…';
+    subtitle.textContent = 'Starting Stockfish…';
     sf = new StockfishEngine();
     await sf.init();
-    log(`Stockfish ready: ${sf.idName || 'Stockfish'} (loaded from cdn.jsdelivr.net)`, 'stockfish');
+    log(`Stockfish ready: ${sf.idName || 'Stockfish'}`, 'stockfish');
 
     bootLed.classList.add('on');
     subtitle.textContent = 'Both engines ready.';
