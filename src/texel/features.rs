@@ -754,8 +754,15 @@ fn open_line_side_raw(pos: &Position, color: Color) -> (i32, i32, i32, i32, i32,
             rook_7th += 1;
         }
 
-        let rook_file_attacks = rook_attacks(sq, all_occ);
-        if (rook_file_attacks & file_mask & our_queens).is_not_empty() {
+        // Mirrors eval/open_lines.rs exactly — file AND rank battery,
+        // one attack-set computation, no double-count risk (see comment
+        // in open_lines.rs for why).
+        let rook_attack_bb = rook_attacks(sq, all_occ);
+        if (rook_attack_bb & file_mask & our_queens).is_not_empty() {
+            battery_rq += 1;
+        }
+        let rank_mask = Bitboard::rank_mask(rank);
+        if (rook_attack_bb & rank_mask & our_queens).is_not_empty() {
             battery_rq += 1;
         }
 
