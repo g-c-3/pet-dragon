@@ -33,24 +33,28 @@ use crate::types::{Color, PieceKind, Square};
 // ── King safety weights ───────────────────────────────────────────────────────
 // Originally from Ethereal (GPL v3, Andrew Grant); as of Phase 14 (D35)
 // ATTACKER_WEIGHT/OPEN_FILE_NEAR_KING/SEMI_OPEN_FILE_NEAR_KING/
-// PAWN_SHIELD_BONUS are Pet-Dragon-specific Texel-tuned values (147,283
-// samples, weight_decay=0.08, 100 epochs — see SESSION_LOG). Ethereal's
-// values remain the tuner's starting point (src/texel/weights.rs).
+// PAWN_SHIELD_BONUS became Pet-Dragon-specific Texel-tuned values, and
+// PAWN_STORM_BONUS/KNIGHT_NEAR_OWN_KING_BONUS/BISHOP_NEAR_OWN_KING_BONUS
+// (Phase 24 additions) got their first-ever tune, all in Phase 25 (Session
+// 84, D66) against 62,125 fresh self-play positions (weight_decay=0.03,
+// 75 epochs — see SESSION_LOG). Ethereal's values remain the tuner's
+// ORIGINAL starting point historically (src/texel/weights.rs's
+// TunableWeights::default() now mirrors these Phase-25 values).
 // MAX_KING_DANGER is untouched — a structural clamp, not a tunable weight
 // (D35's one deliberate nonlinearity in the whole HCE).
 
 /// Penalty per attacker targeting the king zone (indexed by attacker count 0-7+)
 /// Escalates rapidly — many attackers = danger
-const ATTACKER_WEIGHT: [i32; 8] = [0, -5, 43, 79, 89, 94, 97, 99];
+const ATTACKER_WEIGHT: [i32; 8] = [0, -16, 28, 86, 103, 96, 97, 99];
 
 /// Penalty for each open file adjacent to or on the king's file (MG only)
-const OPEN_FILE_NEAR_KING: i32 = -21;
+const OPEN_FILE_NEAR_KING: i32 = -12;
 
 /// Penalty for each semi-open file adjacent to or on the king's file (MG only)
-const SEMI_OPEN_FILE_NEAR_KING: i32 = -19;
+const SEMI_OPEN_FILE_NEAR_KING: i32 = -22;
 
 /// Pawn shield bonus per pawn within 2 ranks of king on king's or adjacent file (MG only)
-const PAWN_SHIELD_BONUS: i32 = 16;
+const PAWN_SHIELD_BONUS: i32 = 23;
 
 /// Pawn-storm bonus (D63 item 2, ROADMAP Phase 24) — the mirror image of
 /// the pawn shield: scores ENEMY pawns advanced on files near this king
@@ -61,14 +65,16 @@ const PAWN_SHIELD_BONUS: i32 = 16;
 /// Indexed by the rank distance from the most-advanced enemy pawn on a
 /// king-adjacent file to the king's own rank — a pawn already 0-2 ranks
 /// away is a live attacking resource, one still on its own half of the
-/// board isn't a storm yet. Hand-picked starting values, NOT yet
-/// Texel-tuned — same status Phase 8's original Ethereal-derived HCE
-/// terms had before Phase 14's tuning pass. Like every other constant in
-/// this file, wired into `texel::predict()`'s `king_safety_side()` via a
-/// matching `TunableWeights::pawn_storm_bonus` field — see
-/// `src/texel/{features,predict,weights,weights_f64,predict_f64}.rs`
+/// board isn't a storm yet. Texel-tuned for the first time in Phase 25
+/// (Session 84, D66) — the tuned curve isn't monotonic (index 2 sits well
+/// above its neighbours), unlike the smooth hand-picked original. Flagged
+/// as a watch item in DECISIONS.md D66 rather than blocking on it — worth
+/// re-checking once more self-play data accumulates. Like every other
+/// constant in this file, wired into `texel::predict()`'s
+/// `king_safety_side()` via a matching `TunableWeights::pawn_storm_bonus`
+/// field — see `src/texel/{features,predict,weights,weights_f64,predict_f64}.rs`
 /// (learned the hard way on D63 item 1 not to skip this).
-const PAWN_STORM_BONUS: [i32; 8] = [40, 32, 24, 16, 8, 0, 0, 0];
+const PAWN_STORM_BONUS: [i32; 8] = [14, 10, 46, 13, 14, 6, 1, -5];
 
 /// Minor-piece defensive clustering bonus (D63 item 3, ROADMAP Phase 24,
 /// design option A — see SESSION_LOG/DECISIONS discussion before
@@ -84,6 +90,21 @@ const PAWN_STORM_BONUS: [i32; 8] = [40, 32, 24, 16, 8, 0, 0, 0];
 /// this scores OUR OWN minor pieces sitting near OUR OWN king
 /// (clustering, defensive side) — a genuinely different effect, not
 /// double-counting the same proximity from two angles.
+///
+/// NOT updated by Phase 25's Texel pass (Session 84, D66) despite a tuned
+/// result existing — the tuner returned small NEGATIVE values here
+/// (knight -1, bishop -3), which directly contradicts two existing tests
+/// that encode a validated invariant (sheltering minors near your own
+/// king should help, not hurt) — `test_minor_piece_shelter_knight_same_zone_vs_different`
+/// hard-asserts this constant is positive, and
+/// `test_king_safety_rewards_minor_piece_shelter` would flip outcome
+/// entirely. Unlike `bishop_pair`/`rook_on_seventh` in material.rs, this
+/// pair didn't recover under weight_decay=0.03 across a 75-epoch run —
+/// treated as this term's first tune landing on noise rather than signal
+/// (D63 item 3, genuinely rare feature — same king-file-zone as a
+/// friendly minor is a narrow condition in 62,125 samples), not applied.
+/// Kept at the Phase 24 hand-picked defaults. Re-check once more
+/// self-play data accumulates (DECISIONS.md D66).
 const KNIGHT_NEAR_OWN_KING_BONUS: i32 = 8;
 const BISHOP_NEAR_OWN_KING_BONUS: i32 = 6;
 

@@ -13,11 +13,12 @@
 //
 // Piece values were originally borrowed from Ethereal chess engine (GPL v3,
 // Andrew Grant); as of Phase 14 (D35) they are Pet-Dragon-specific values
-// produced by Texel tuning against 147,283 real Pet Dragon self-play
-// positions (src/bin/texel_tune.rs, weight_decay=0.08, 100 epochs — see
-// SESSION_LOG). The Ethereal values remain the tuner's starting point
-// (src/texel/weights.rs's TunableWeights::default()), not the values
-// compiled here anymore.
+// produced by Texel tuning. Re-tuned in Phase 25 (Session 84, D66) against
+// 62,125 fresh self-play positions (src/bin/texel_tune.rs, weight_decay=0.03,
+// 75 epochs — see SESSION_LOG), superseding the Phase 14 values. The
+// Ethereal values remain the tuner's ORIGINAL starting point historically;
+// src/texel/weights.rs's TunableWeights::default() now mirrors these
+// Phase-25 values, not the Ethereal ones.
 //
 // Tapered evaluation:
 //   score = (mg_score * phase + eg_score * (24 - phase)) / 24
@@ -42,33 +43,33 @@ pub const PHASE_WEIGHTS: [i32; 6] = [
 ];
 
 // ── Middlegame piece values (centipawns) ──────────────────────────────────────
-// From Ethereal's classical evaluation (GPL v3)
+// Phase 25 Texel-tuned (Session 84, D66)
 
 pub const MG_VALUES: [i32; 6] = [
-    93,   // Pawn
-    327,  // Knight
-    359,  // Bishop
-    477,  // Rook
-    1025, // Queen
+    97,   // Pawn
+    304,  // Knight
+    350,  // Bishop
+    474,  // Rook
+    1037, // Queen
     0,    // King (handled separately)
 ];
 
 // ── Endgame piece values ──────────────────────────────────────────────────────
-// Rooks and Queens become more powerful in the endgame
+// Phase 25 Texel-tuned (Session 84, D66)
 
 pub const EG_VALUES: [i32; 6] = [
-    105,  // Pawn
-    278,  // Knight
-    291,  // Bishop
-    519,  // Rook
-    932,  // Queen
+    118,  // Pawn
+    286,  // Knight
+    294,  // Bishop
+    540,  // Rook
+    930,  // Queen
     0,    // King
 ];
 
 // ── Bishop pair bonus ─────────────────────────────────────────────────────────
 // Having both bishops is worth extra in open positions
-pub const BISHOP_PAIR_MG: i32 = 18;
-pub const BISHOP_PAIR_EG: i32 = 29;
+pub const BISHOP_PAIR_MG: i32 = 2;
+pub const BISHOP_PAIR_EG: i32 = 15;
 
 // ── Tapered score helper ──────────────────────────────────────────────────────
 

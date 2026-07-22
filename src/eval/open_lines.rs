@@ -24,10 +24,13 @@
 //
 // Weights originally adapted from Ethereal (GPL v3, Andrew Grant) with Pet
 // Dragon starting position adjustments (weights active from move 1 — no
-// suppression). As of Phase 14 (D35) these are Pet-Dragon-specific
-// Texel-tuned values (147,283 samples, weight_decay=0.08, 100 epochs —
-// see SESSION_LOG). Ethereal's values remain the tuner's starting point
-// (src/texel/weights.rs).
+// suppression). As of Phase 14 (D35) these became Pet-Dragon-specific
+// Texel-tuned values, and were re-tuned in Phase 25 (Session 84, D66)
+// against 62,125 fresh self-play positions (weight_decay=0.03, 75 epochs
+// — see SESSION_LOG), superseding the Phase 14 values. Ethereal's values
+// remain the tuner's ORIGINAL starting point historically
+// (src/texel/weights.rs's TunableWeights::default() now mirrors these
+// Phase-25 values, not the Ethereal ones).
 // ============================================================================
 
 use crate::bitboard::{rook_attacks, bishop_attacks};
@@ -39,31 +42,41 @@ use crate::types::{Color, PieceKind};
 // ── Open line bonuses ─────────────────────────────────────────────────────────
 
 /// Rook on fully open file (no pawns of any colour)
-const ROOK_OPEN_FILE: i64 = s(44, 14);
+const ROOK_OPEN_FILE: i64 = s(41, 9);
 
 /// Rook on semi-open file (no own pawns, enemy pawn present)
-const ROOK_SEMI_OPEN_FILE: i64 = s(21, 6);
+const ROOK_SEMI_OPEN_FILE: i64 = s(14, 4);
 
-/// Rook on the 7th rank (or 2nd for Black) — attacks enemy pawns/king
-const ROOK_ON_SEVENTH: i64 = s(8, 47);
+/// Rook on the 7th rank (or 2nd for Black) — attacks enemy pawns/king.
+/// MG flipped negative in Phase 25's tune (was s(8,47), default Phase 14
+/// value) — checked against `test_rook_on_seventh`: that test's position
+/// has phase=2 (near-pure endgame weighting), so the still-strongly
+/// positive EG value (39) dominates the taper and the test still passes.
+/// Applied as tuned rather than held back like the king-safety minor-piece
+/// pair, because nothing here contradicts a validated invariant — a
+/// smaller/negative MG contribution just means the 7th-rank bonus is
+/// mostly an endgame idea per this data, which is a plausible finding,
+/// not a broken one. Worth a re-check alongside the other watch items in
+/// DECISIONS.md D66 once more data exists.
+const ROOK_ON_SEVENTH: i64 = s(-14, 39);
 
 /// Two rooks connected (same file or rank, nothing between them)
-const ROOKS_CONNECTED: i64 = s(17, 15);
+const ROOKS_CONNECTED: i64 = s(11, 14);
 
 /// Queen on open file
-const QUEEN_OPEN_FILE: i64 = s(5, 3);
+const QUEEN_OPEN_FILE: i64 = s(5, 13);
 
 /// Queen on semi-open file
-const QUEEN_SEMI_OPEN_FILE: i64 = s(1, 1);
+const QUEEN_SEMI_OPEN_FILE: i64 = s(14, 21);
 
 /// Battery: Queen + Rook on same open file (combined attack)
-const BATTERY_ROOK_QUEEN: i64 = s(23, 14);
+const BATTERY_ROOK_QUEEN: i64 = s(33, 12);
 
 /// Battery: Queen + Bishop on same open diagonal
-const BATTERY_BISHOP_QUEEN: i64 = s(15, 5);
+const BATTERY_BISHOP_QUEEN: i64 = s(33, 19);
 
 /// Contested file penalty: both sides have rook on same file
-const CONTESTED_FILE: i64 = s(-6, -7);
+const CONTESTED_FILE: i64 = s(-12, -7);
 
 // ── Main evaluation function ──────────────────────────────────────────────────
 

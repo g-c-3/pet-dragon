@@ -33,18 +33,21 @@ use crate::types::{Color, PieceKind, Square};
 
 // ── Pawn structure bonus/penalty tables ───────────────────────────────────────
 // Originally from Ethereal (GPL v3, Andrew Grant); as of Phase 14 (D35)
-// these are Pet-Dragon-specific Texel-tuned values (147,283 samples,
-// weight_decay=0.08, 100 epochs — see SESSION_LOG). Ethereal's values
-// remain the tuner's starting point (src/texel/weights.rs).
+// these became Pet-Dragon-specific Texel-tuned values, and were re-tuned in
+// Phase 25 (Session 84, D66) against 62,125 fresh self-play positions
+// (weight_decay=0.03, 75 epochs — see SESSION_LOG), superseding the Phase 14
+// values. Ethereal's values remain the tuner's ORIGINAL starting point
+// historically (src/texel/weights.rs's TunableWeights::default() now
+// mirrors these Phase-25 values, not the Ethereal ones).
 
 /// Isolated pawn penalty (no friendly pawn on adjacent files)
-const ISOLATED_PENALTY: i64 = s(-16, -17);
+const ISOLATED_PENALTY: i64 = s(-17, -17);
 
 /// Doubled pawn penalty (two pawns on same file)
-const DOUBLED_PENALTY: i64 = s(-18, -47);
+const DOUBLED_PENALTY: i64 = s(-27, -44);
 
 /// Backward pawn penalty (can't safely advance, stop square enemy-controlled)
-const BACKWARD_PENALTY: i64 = s(-17, -9);
+const BACKWARD_PENALTY: i64 = s(-15, -22);
 
 /// Passed pawn bonus by rank (0-indexed rank relative to own back rank).
 /// Index 0 = rank closest to own start (least advanced), 5 = one step from promo.
@@ -55,13 +58,13 @@ const BACKWARD_PENALTY: i64 = s(-17, -9);
 /// For White: rank index = pawn.rank() - 1 (rank 2 = index 1, rank 7 = index 6)
 /// For Black: rank index = 6 - pawn.rank() (rank 7 = index 1, rank 2 = index 6)
 const PASSED_PAWN_BONUS: [i64; 8] = [
-    s(  5,   9),  // rank 1 / rank 8 (start)
-    s( 12,  19),  // rank 2 / rank 7
-    s( 14,  27),  // rank 3 / rank 6
-    s( 25,  44),  // rank 4 / rank 5 (dangerous)
-    s( 40,  68),  // rank 5 / rank 4
-    s( 57,  97),  // rank 6 / rank 3 (very dangerous)
-    s(102, 165),  // rank 7 / rank 2 (about to promote)
+    s( 25,  21),  // rank 1 / rank 8 (start)
+    s( 22,   2),  // rank 2 / rank 7
+    s(-12,  38),  // rank 3 / rank 6
+    s( 41,  57),  // rank 4 / rank 5 (dangerous)
+    s( 27,  77),  // rank 5 / rank 4
+    s( 71,  83),  // rank 6 / rank 3 (very dangerous)
+    s( 75, 135),  // rank 7 / rank 2 (about to promote)
     s(  0,   0),  // rank 8 / rank 1 (promotion rank — handled separately)
 ];
 
@@ -77,12 +80,10 @@ const PASSED_PAWN_BONUS: [i64; 8] = [
 // (`passed_king_enemy_dist_diff` / `passed_king_own_dist_diff`) — see
 // `src/texel/{features,predict,weights}.rs`.
 //
-// Hand-picked starting values, NOT yet Texel-tuned (`TunableWeights`'s
-// defaults just copy these verbatim, same as every other pawns.rs
-// constant) — same status Phase 8's original Ethereal-derived HCE terms
-// had before Phase 14's tuning pass.
-const ENEMY_KING_DIST_EG: i32 = 1; // per (square × advancement): farther enemy king = safer passer
-const OWN_KING_DIST_EG:   i32 = 1; // per (square × advancement): closer own king = safer passer
+// Hand-picked at introduction (Phase 24), Texel-tuned for the first time in
+// Phase 25 (Session 84, D66) — both landed on the same value in this pass.
+const ENEMY_KING_DIST_EG: i32 = 3; // per (square × advancement): farther enemy king = safer passer
+const OWN_KING_DIST_EG:   i32 = 3; // per (square × advancement): closer own king = safer passer
 
 // ── Main evaluation function ──────────────────────────────────────────────────
 

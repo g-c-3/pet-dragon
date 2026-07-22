@@ -27,47 +27,50 @@ use crate::eval::material::{s, taper};
 use crate::position::Position;
 use crate::types::{Color, PieceKind};
 
-// ── Mobility bonus tables (D35, Phase 14 Texel-tuned) ────────────────────────
+// ── Mobility bonus tables (Phase 25, Session 84, D66 Texel-tuned) ────────────
 // Originally borrowed from Ethereal (GPL v3, Andrew Grant); as of Phase 14
-// these are Pet-Dragon-specific Texel-tuned values (147,283 samples,
-// weight_decay=0.08, 100 epochs — see SESSION_LOG). Ethereal's values
-// remain the tuner's starting point (src/texel/weights.rs).
+// these became Pet-Dragon-specific Texel-tuned values, and were re-tuned in
+// Phase 25 against 62,125 fresh self-play positions (weight_decay=0.03,
+// 75 epochs — see SESSION_LOG), superseding the Phase 14 values. Ethereal's
+// values remain the tuner's ORIGINAL starting point historically
+// (src/texel/weights.rs's TunableWeights::default() now mirrors these
+// Phase-25 values, not the Ethereal ones).
 // Each table indexed by mobility count (squares attacked to non-own squares).
 // Values are packed i64 scores: high 32 = MG, low 32 = EG.
 // Knight: 0-8 mobility, Bishop: 0-13, Rook: 0-14, Queen: 0-27
 
 /// Knight mobility bonus (0–8 squares reachable)
 const KNIGHT_MOBILITY: [i64; 9] = [
-    s(-58,-75), s(-46,-47), s(-16,-24), s( -2, -8),
-    s(  6,  7), s( 11,  8), s( 18, 16), s( 21, 14),
-    s( 25, 17),
+    s( -72, -94), s( -30, -56), s( -19, -13), s(  -1,  -4),
+    s(   8,  10), s(   2,  14), s(  17,  12), s(   9,  11),
+    s(  10,  21),
 ];
 
 /// Bishop mobility bonus (0–13 squares reachable)
 const BISHOP_MOBILITY: [i64; 14] = [
-    s(-42,-50), s(-16,-26), s( 22,  3), s( 34, 20),
-    s( 43, 29), s( 52, 44), s( 52, 56), s( 58, 55),
-    s( 57, 58), s( 58, 65), s( 74, 70), s( 73, 78),
-    s( 90, 93), s( 94, 91),
+    s( -29, -39), s(   1, -21), s(  20,   3), s(  30,  33),
+    s(  37,  33), s(  49,  50), s(  44,  49), s(  64,  52),
+    s(  59,  55), s(  53,  58), s(  58,  67), s(  65,  80),
+    s(  70,  91), s(  79,  91),
 ];
 
 /// Rook mobility bonus (0–14 squares reachable)
 const ROOK_MOBILITY: [i64; 15] = [
-    s(-64,-79), s(-26,-13), s(-17, 24), s( -6, 60),
-    s( -1, 69), s(  3, 83), s( 12, 92), s( 17, 97),
-    s( 18,102), s( 22,102), s( 28,103), s( 34,107),
-    s( 45,112), s( 48,121), s( 51,108),
+    s( -63, -78), s( -14, -14), s( -17,  35), s(   8,  64),
+    s( -17,  84), s(  -8,  80), s(   9,  95), s(  19, 101),
+    s(  11,  99), s(   8, 100), s(  30, 117), s(  44, 100),
+    s(  45, 121), s(  44, 111), s(  55, 109),
 ];
 
 /// Queen mobility bonus (0–27 squares reachable)
 const QUEEN_MOBILITY: [i64; 28] = [
-    s(-43,-37), s(-21,-18), s(  0,  3), s(  7, 18),
-    s( 11, 32), s( 22, 50), s( 31, 61), s( 44, 75),
-    s( 42, 78), s( 47, 95), s( 54, 93), s( 61,104),
-    s( 62,115), s( 65,118), s( 67,123), s( 72,128),
-    s( 73,133), s( 73,136), s( 76,142), s( 81,144),
-    s( 88,153), s( 88,159), s( 94,169), s( 99,174),
-    s(108,190), s(102,193), s(106,206), s(110,214),
+    s( -64, -48), s( -23, -32), s(  14,   6), s(   6,  33),
+    s(   0,  23), s(  30,  47), s(  34,  57), s(  49,  85),
+    s(  44,  80), s(  39,  79), s(  69, 101), s(  63,  99),
+    s(  56, 127), s(  62, 114), s(  71, 123), s(  59, 112),
+    s(  86, 152), s(  63, 139), s(  78, 138), s(  79, 159),
+    s(  74, 148), s(  90, 151), s( 105, 176), s(  87, 164),
+    s(  94, 174), s( 116, 202), s(  97, 194), s( 112, 217),
 ];
 
 // ── Main evaluation function ──────────────────────────────────────────────────

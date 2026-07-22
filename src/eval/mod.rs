@@ -44,10 +44,11 @@ use open_lines::evaluate_open_lines;
 
 // ── Tempo bonus ───────────────────────────────────────────────────────────────
 /// Bonus for the side to move — having the initiative. Originally 10cp
-/// (hand-picked); as of Phase 14 (D35) this is Pet-Dragon-specific
-/// Texel-tuned (147,283 samples, weight_decay=0.08, 100 epochs — see
-/// SESSION_LOG).
-const TEMPO: i32 = 20;
+/// (hand-picked); as of Phase 14 (D35) became Pet-Dragon-specific
+/// Texel-tuned, re-tuned in Phase 25 (Session 84, D66) against 62,125
+/// fresh self-play positions (weight_decay=0.03, 75 epochs — see
+/// SESSION_LOG), superseding the Phase 14 value.
+const TEMPO: i32 = 24;
 
 // ── Main evaluation entry point ───────────────────────────────────────────────
 
@@ -142,8 +143,10 @@ mod tests {
         setup();
         let pos = Position::start_pos().unwrap();
         let score = evaluate(&pos);
-        // Start is symmetric — only tempo bonus remains (~10)
-        assert!(score.abs() <= 20,
+        // Start is symmetric — only tempo bonus remains (TEMPO=24 as of
+        // Phase 25's re-tune, D66 — bound widened from the old tight 20 to
+        // keep a little headroom above the current tempo value)
+        assert!(score.abs() <= 30,
             "Start position should evaluate near zero (tempo only): {}", score);
     }
 
