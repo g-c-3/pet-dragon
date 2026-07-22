@@ -120,9 +120,18 @@ fn open_line_score(pos: &Position, color: Color) -> i64 {
             score += ROOK_ON_SEVENTH;
         }
 
-        // Battery: Queen + Rook on same file
-        let rook_file_attacks = rook_attacks(sq, all_occ);
-        if (rook_file_attacks & file_mask & our_queens).is_not_empty() {
+        // Battery: Queen + Rook on same file or same rank.
+        // rook_attacks() already returns both file and rank rays, so one
+        // attack-set computation covers both checks — just AND against the
+        // relevant mask. A queen can only be on the file OR the rank
+        // relative to the rook (never both, distinct squares), so there's
+        // no double-count risk between the two branches below.
+        let rook_attack_bb = rook_attacks(sq, all_occ);
+        if (rook_attack_bb & file_mask & our_queens).is_not_empty() {
+            score += BATTERY_ROOK_QUEEN;
+        }
+        let rank_mask = Bitboard::rank_mask(rank);
+        if (rook_attack_bb & rank_mask & our_queens).is_not_empty() {
             score += BATTERY_ROOK_QUEEN;
         }
 
@@ -276,6 +285,20 @@ mod tests {
         let our_score = open_line_score(&pos2, Color::White);
         // Rook on d4 attacks Queen on d1 along d-file → BATTERY_ROOK_QUEEN
         assert!(our_score > 0, "Rook+Queen battery should give bonus: {}", our_score);
+    }
+
+    #[test]
+    fn test_battery_rook_queen_same_rank() {
+        setup();
+        // White Queen a1, Rook b1 — same rank, adjacent, nothing between.
+        // This is the pattern the original file-only check missed: in Pet
+        // Dragon's start position (all pieces on ranks 1-2), a queen and
+        // rook are actually MORE likely to share a rank than a file, since
+        // a file only has 2 slots total per color while a rank has 7.
+        let fen = "4k3/8/8/8/8/8/8/QR2K3 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        let our_score = open_line_score(&pos, Color::White);
+        assert!(our_score > 0, "Rook+Queen same-rank battery should give bonus: {}", our_score);
     }
 
     #[test]
