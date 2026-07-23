@@ -163,10 +163,12 @@ impl Default for TunableWeights {
                 s(0, 0),
             ],
             // D63 item 1 — copied verbatim from eval/pawns.rs's
-            // ENEMY_KING_DIST_EG / OWN_KING_DIST_EG. Texel-tuned for the
-            // first time in Phase 25 — both landed on 3.
-            enemy_king_dist_eg: 3,
-            own_king_dist_eg: 3,
+            // ENEMY_KING_DIST_EG / OWN_KING_DIST_EG. NOT updated to Phase
+            // 25's tuned result (3, a 3x jump) — that value broke
+            // test_passed_pawn_bonus in eval/pawns.rs (CI-confirmed).
+            // Kept at Phase 24 hand-picked defaults — see DECISIONS.md D70.
+            enemy_king_dist_eg: 1,
+            own_king_dist_eg: 1,
 
             // eval/king_safety.rs
             attacker_weight: [0, -16, 28, 86, 103, 96, 97, 99],
