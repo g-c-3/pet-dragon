@@ -19,6 +19,14 @@
 //   6. Quiet moves by history score (moves that historically cause cutoffs)
 //   7. Losing captures (SEE < 0) — last resort
 //
+// Additive, not a separate tier: Phase 23.4's bucketed opening statistics
+// (D67/D71, Session 84) add a bonus on top of whichever tier above a move
+// already lands in, ONLY at the true, unmoved start of the game (fullmove
+// 1, White to move, search ply 0 — never at an interior search node, and
+// never on a position reached after any moves, real or hypothetical, have
+// been made). See OPENING_STATS_BONUS below for why this can't override
+// TT/winning-capture signals.
+//
 // ⚠️ Pet Dragon note:
 //   Pawn double-steps from rank 1 get a history bonus initialised above 0.
 //   They are developing moves that simultaneously open rank 1 for other
@@ -27,6 +35,7 @@
 // ============================================================================
 
 use crate::movegen::MoveList;
+use crate::opening_stats;
 use crate::position::Position;
 use crate::search::see::see_value_of;
 use crate::search::SearchInfo;
@@ -48,6 +57,20 @@ const LOSING_CAPTURE_BASE:   i32 = -500_000;
 /// Bonus for pawn double-steps from rank 1 (Pet Dragon specific)
 /// These are developing moves — rank above standard pawn pushes
 const PET_DRAGON_RANK1_PUSH_BONUS: i32 = 50_000;
+
+/// Bonus for a move flagged by Phase 23.4's bucketed opening statistics
+/// (D67/D71, Session 84) — an additive nudge, not a replacement for normal
+/// scoring: added on top of whatever score the move already earned, so it
+/// can never override a TT move or a winning capture (both score in the
+/// millions), and sits below COUNTERMOVE_SCORE so a real countermove signal
+/// still wins on a tie. Only meaningfully moves the needle for an otherwise
+/// ordinary quiet move, exactly matching D67's "nudge earlier in ordering,
+/// let full search still evaluate and override it" design — this is a
+/// move-ordering hint, not a forced move. Table entries are currently thin
+/// (2 entries as of Session 84 — see DECISIONS.md D71), so in practice this
+/// almost never fires yet; it's wired in now so the mechanism is proven
+/// correct in the engine itself, ahead of the table actually filling in.
+const OPENING_STATS_BONUS: i32 = 150_000;
 
 // ── MVV-LVA table ─────────────────────────────────────────────────────────────
 // Most Valuable Victim - Least Valuable Attacker
@@ -145,20 +168,87 @@ pub fn score_moves(
         Move::NULL
     };
 
+    // Phase 23.4 opening-stats bias (D67/D71) — looked up at most once per
+    // call, not per move. Gated on BOTH `ply == 0` (this is the actual
+    // search root, not a recursive interior node reached via make/unmake —
+    // score_moves is called at every node, and ply grows monotonically with
+    // search depth, so ply==0 can only be true at the outermost call) AND
+    // the position itself being the literal, unmoved game start (fullmove
+    // 1, White to move — true if and only if zero moves, real or
+    // hypothetical, have been made from Pet Dragon's random starting
+    // setup). Both conditions are required: ply==0 alone would also fire
+    // every time `go` is called from an arbitrary mid-game UCI position,
+    // which has nothing to do with the bucket key (that's keyed on the
+    // game's ORIGINAL rook/knight files, not wherever they've moved to
+    // by move 15). Without this second check the table would occasionally
+    // false-positive-match a mid-game file arrangement that happens to
+    // coincide with a real starting-setup bucket.
+    let opening_bias_move: Option<Move> = if ply == 0
+        && pos.fullmove_number == 1
+        && color == Color::White
+    {
+        // sorted_files returns None for anything other than exactly 2
+        // pieces — arbitrary UCI-supplied FENs (analysis positions, test
+        // FENs, hand-crafted endgames) can have any number of rooks/
+        // knights or none at all, unlike selfplay.rs's guaranteed-fresh
+        // Pet Dragon random setups. A miss here just means "not a bucket
+        // we have data for," same graceful fallthrough as a genuine table
+        // miss — never a crash.
+        match (
+            sorted_files(pos.piece_bb(Color::White, PieceKind::Rook)),
+            sorted_files(pos.piece_bb(Color::White, PieceKind::Knight)),
+        ) {
+            (Some(rook_files), Some(knight_files)) => {
+                opening_stats::lookup(rook_files, knight_files).and_then(|(mv_uci, _win_rate, _count)| {
+                    (0..moves.len())
+                        .map(|i| moves.get(i))
+                        .find(|m| m.to_uci() == mv_uci)
+                })
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     let mut scored: Vec<ScoredMove> = Vec::with_capacity(moves.len());
 
     for i in 0..moves.len() {
         let mv    = moves.get(i);
-        let score = score_move(
+        let mut score = score_move(
             pos, mv, info, tt_move,
             killer1, killer2, countermove,
             color_idx, ply,
             prev_move,
         );
+        if opening_bias_move == Some(mv) {
+            score += OPENING_STATS_BONUS;
+        }
         scored.push(ScoredMove { mv, score });
     }
 
     scored
+}
+
+/// Sorted (ascending) list of files (0..8) occupied by the given bitboard,
+/// or `None` if it doesn't have exactly 2 bits set. `selfplay.rs`'s helper
+/// of the same name panics on a mismatch instead, because it only ever
+/// sees guaranteed-fresh `Position::generate_with_seed` output (exactly 2
+/// rooks/2 knights by construction, so a mismatch there is a real bug).
+/// This one CANNOT make that assumption — `ordering.rs` sees arbitrary
+/// UCI-supplied positions (analysis FENs, hand-crafted test/endgame
+/// positions, anything with zero rooks or three knights or whatever a
+/// user or test throws at it), so a mismatch here is a completely normal
+/// "not a bucket we have data for" case, not a program-invariant
+/// violation — must degrade gracefully, never panic, since this runs on
+/// every real search call.
+fn sorted_files(bb: crate::bitboard::Bitboard) -> Option<[u8; 2]> {
+    let mut files: Vec<u8> = bb.map(|sq| sq.file()).collect();
+    if files.len() != 2 {
+        return None;
+    }
+    files.sort_unstable();
+    Some([files[0], files[1]])
 }
 
 /// Score a single move, optionally conditioned on the previous move for
