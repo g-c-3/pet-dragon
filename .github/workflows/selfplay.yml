@@ -11,6 +11,13 @@ name: Self-Play Data Generation (Sharded, D50)
 # seed_start keeps every run's games distinct from every prior run too —
 # same reproducibility contract as the old single-job workflow, just
 # fanned out. Total games per run = shards * games_per_shard.
+#
+# Phase 23.4 / D67 (Session 84): each shard also now produces a second,
+# separate output — one row per game (starting_seed | rook_files |
+# knight_files | root_move_uci | game_result) for the bucketed opening
+# statistics pipeline. Uploaded and merged the same way as the main NNUE
+# data, as its own artifact (`opening-data-combined-...`) — this does not
+# change the primary selfplay artifact's contents or name.
 on:
   workflow_dispatch:
     inputs:
@@ -99,11 +106,15 @@ jobs:
           ${{ inputs.games_per_shard }}
           selfplay_data_shard.txt
           ${{ steps.seed.outputs.shard_seed }}
+          opening_data_shard.txt
 
       - name: Report shard output size
         run: |
           wc -l selfplay_data_shard.txt
           ls -lh selfplay_data_shard.txt
+          echo "--- opening-stats output (Phase 23.4, D67) ---"
+          wc -l opening_data_shard.txt
+          ls -lh opening_data_shard.txt
 
       - name: Upload shard artifact
         uses: actions/upload-artifact@v6
@@ -111,6 +122,13 @@ jobs:
           name: selfplay-shard-${{ matrix.shard }}
           path: selfplay_data_shard.txt
           retention-days: 1 # intermediate only — the merge job below folds these into one combined artifact that keeps the real 30-day retention
+
+      - name: Upload opening-stats shard artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: opening-shard-${{ matrix.shard }}
+          path: opening_data_shard.txt
+          retention-days: 1 # intermediate only, same as the NNUE shard artifact above
 
   # ── Merge every shard's output into one downloadable file ───────────
   # Runs even if some shards failed (`if: always()`) so a single flaky
@@ -151,4 +169,32 @@ jobs:
         with:
           name: selfplay-data-combined-seed${{ inputs.seed_start }}-${{ inputs.shards }}x${{ inputs.games_per_shard }}
           path: selfplay_data_combined.txt
+          retention-days: 30
+
+      - name: Download all opening-stats shard artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: opening-shard-*
+          path: opening_shards
+          merge-multiple: false
+
+      - name: Concatenate opening-stats shards (Phase 23.4, D67)
+        run: |
+          shopt -s nullglob globstar
+          files=(opening_shards/**/*.txt)
+          echo "Merging ${#files[@]} opening-stats shard file(s) (expected ${{ inputs.shards }})"
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::warning::No opening-stats shard files found — skipping combined opening-stats artifact. Selfplay data above is unaffected."
+          else
+            cat "${files[@]}" > opening_data_combined.txt
+            wc -l opening_data_combined.txt
+            ls -lh opening_data_combined.txt
+          fi
+
+      - name: Upload combined opening-stats data
+        if: hashFiles('opening_data_combined.txt') != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: opening-data-combined-seed${{ inputs.seed_start }}-${{ inputs.shards }}x${{ inputs.games_per_shard }}
+          path: opening_data_combined.txt
           retention-days: 30
