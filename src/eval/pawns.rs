@@ -80,10 +80,20 @@ const PASSED_PAWN_BONUS: [i64; 8] = [
 // (`passed_king_enemy_dist_diff` / `passed_king_own_dist_diff`) — see
 // `src/texel/{features,predict,weights}.rs`.
 //
-// Hand-picked at introduction (Phase 24), Texel-tuned for the first time in
-// Phase 25 (Session 84, D66) — both landed on the same value in this pass.
-const ENEMY_KING_DIST_EG: i32 = 3; // per (square × advancement): farther enemy king = safer passer
-const OWN_KING_DIST_EG:   i32 = 3; // per (square × advancement): closer own king = safer passer
+// Hand-picked at introduction (Phase 24), first Texel-tuned in Phase 25
+// (Session 84, D66) — both landed on 3, a 3x jump from the hand-picked
+// default. NOT applied: this is a compound/product feature
+// (king_distance × rank_advancement), sparser and more overfit-prone
+// than a simple per-rank bucket, and the tuned 3x value broke
+// `test_passed_pawn_bonus` (CI-confirmed, not speculative — a pawn e5
+// with the enemy king already sitting on the promotion square and the
+// defending king 7 squares away swings this term to -84, overwhelming
+// the base passed-pawn bonus). Same rejection category as
+// `KNIGHT_NEAR_OWN_KING_BONUS`/`BISHOP_NEAR_OWN_KING_BONUS` in
+// king_safety.rs — first tune of a sparse term, broke a real test, held
+// at the hand-picked default rather than shipped. See DECISIONS.md D70.
+const ENEMY_KING_DIST_EG: i32 = 1; // per (square × advancement): farther enemy king = safer passer
+const OWN_KING_DIST_EG:   i32 = 1; // per (square × advancement): closer own king = safer passer
 
 // ── Main evaluation function ──────────────────────────────────────────────────
 
