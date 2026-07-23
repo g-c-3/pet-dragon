@@ -1,0 +1,144 @@
+name: Aggregate Opening Statistics (Phase 23.4, D67/D71)
+
+# Manual trigger only — run from the Actions tab ("Run workflow" button),
+# fully usable from the mobile GitHub app, no terminal needed.
+#
+# Prerequisite: one or more opening-stats data artifacts from selfplay.yml
+# (Phase 23.4 step 1/2, D67) — same three-source pattern as texel_tune.yml
+# (Run ID / committed path / direct URL), so accumulated batches from
+# multiple separate selfplay.yml runs can all be combined in one aggregation
+# pass. Note (D71, Session 84): the true bucket keyspace is larger than
+# D67's original "420 buckets" estimate, so a single small batch is
+# expected to produce few or zero qualifying table entries — this is not a
+# failure, see DECISIONS.md D71. The workflow succeeds either way and
+# reports how many entries it produced.
+on:
+  workflow_dispatch:
+    inputs:
+      data_run_id:
+        description: "Optional: comma-separated Run ID(s) of selfplay.yml runs to include (uses each run's opening-data-combined-* artifact). Leave blank if only using data_paths/data_urls below."
+        required: false
+        default: ""
+        type: string
+      data_paths:
+        description: "Optional: comma-separated repo-relative paths to committed opening-stats data .txt files. Leave blank if only using data_run_id/data_urls."
+        required: false
+        default: ""
+        type: string
+      data_urls:
+        description: "Optional: comma-separated direct download URLs for opening-stats data .txt files (e.g. a GitHub Release asset URL). Leave blank if not needed."
+        required: false
+        default: ""
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  aggregate_opening_stats:
+    name: Aggregate Opening Stats
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: aggregate-opening-stats-release
+
+      - name: Download opening-stats artifacts
+        # Optional — only runs if data_run_id was provided. Loops over a
+        # comma-separated list so multiple selfplay.yml batches (different
+        # seed_start ranges) can be combined in one aggregation pass —
+        # this is the normal way this table is expected to grow over time.
+        if: inputs.data_run_id != ''
+        run: |
+          mkdir -p data/opening
+          IFS=',' read -ra RUN_IDS <<< "${{ inputs.data_run_id }}"
+          for rid in "${RUN_IDS[@]}"; do
+            rid=$(echo "$rid" | xargs)
+            echo "Downloading opening-stats artifact from run $rid"
+            gh run download "$rid" --repo g-c-3/pet-dragon --dir "data/opening/run_${rid}" --pattern "opening-data-combined-*"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download opening-stats data from URLs
+        if: inputs.data_urls != ''
+        run: |
+          mkdir -p data/opening_url
+          IFS=',' read -ra URLS <<< "${{ inputs.data_urls }}"
+          i=0
+          for url in "${URLS[@]}"; do
+            url=$(echo "$url" | xargs)
+            i=$((i+1))
+            echo "Downloading opening-stats data from $url"
+            curl -sL "$url" -o "data/opening_url/url_${i}.txt"
+          done
+
+      - name: Locate opening-stats data files
+        id: locate
+        # Combines three sources: (a) GH Actions artifacts downloaded above
+        # (if data_run_id was given), (b) opening-stats data files already
+        # committed to the repo (if data_paths was given), and (c) files
+        # downloaded from direct URLs (if data_urls was given). At least
+        # one source must yield files.
+        run: |
+          FILES=()
+          if [ -d data/opening ]; then
+            while IFS= read -r f; do FILES+=("$f"); done < <(find data/opening -name '*.txt')
+          fi
+          if [ -d data/opening_url ]; then
+            while IFS= read -r f; do FILES+=("$f"); done < <(find data/opening_url -name '*.txt')
+          fi
+          if [ -n "${{ inputs.data_paths }}" ]; then
+            IFS=',' read -ra PATHS <<< "${{ inputs.data_paths }}"
+            for p in "${PATHS[@]}"; do
+              p=$(echo "$p" | xargs)
+              if [ ! -f "$p" ]; then
+                echo "ERROR: committed opening-stats data path not found in checkout: $p"
+                exit 1
+              fi
+              FILES+=("$p")
+            done
+          fi
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "ERROR: no opening-stats data files found — provide data_run_id, data_paths, and/or data_urls"
+            exit 1
+          fi
+          DATA_FILES=$(IFS=,; echo "${FILES[*]}")
+          echo "data_files=$DATA_FILES" >> "$GITHUB_OUTPUT"
+          wc -l $(echo "$DATA_FILES" | tr ',' ' ')
+
+      - name: Build aggregate_opening_stats binary
+        run: cargo build --release --bin aggregate_opening_stats
+
+      - name: Run aggregation
+        run: ./target/release/aggregate_opening_stats "${{ steps.locate.outputs.data_files }}"
+
+      - name: Report output
+        run: |
+          echo "--- src/opening_stats.rs (first 40 lines) ---"
+          head -40 src/opening_stats.rs
+          echo "..."
+          echo "--- entry count ---"
+          grep -c '^    (' src/opening_stats.rs || true
+
+      - name: Upload generated opening_stats.rs as artifact
+        # Uploaded for review before committing — this workflow does NOT
+        # commit on Gokul's behalf (no auto-commit step), matching every
+        # other data-generation workflow in this repo (texel_gen.yml,
+        # texel_tune.yml): the human reviews and commits the file.
+        uses: actions/upload-artifact@v6
+        with:
+          name: opening-stats-rs
+          path: src/opening_stats.rs
+          retention-days: 30
