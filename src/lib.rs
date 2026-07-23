@@ -41,6 +41,7 @@ pub mod search;
 pub mod eval;
 pub mod texel;
 pub mod nnue;
+pub mod opening_stats;
 
 // Syzygy endgame tablebases — native only (pyrrhic-rs needs libc, not wasm32-safe)
 #[cfg(not(target_arch = "wasm32"))]
