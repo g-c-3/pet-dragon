@@ -126,6 +126,14 @@ pub struct TunableWeightsF64 {
     pub battery_bishop_queen: S,
     pub contested_file: S,
 
+    /// Phase 24 item 4 (D68) — f64 mirror of `TunableWeights::undefended_*`
+    /// / `threat_by_minor`.
+    pub undefended_knight: S,
+    pub undefended_bishop: S,
+    pub undefended_rook: S,
+    pub undefended_queen: S,
+    pub threat_by_minor: S,
+
     pub tempo: f64,
 }
 
@@ -164,6 +172,11 @@ impl TunableWeightsF64 {
             battery_rook_queen: S::zero(),
             battery_bishop_queen: S::zero(),
             contested_file: S::zero(),
+            undefended_knight: S::zero(),
+            undefended_bishop: S::zero(),
+            undefended_rook: S::zero(),
+            undefended_queen: S::zero(),
+            threat_by_minor: S::zero(),
             tempo: 0.0,
         }
     }
@@ -202,6 +215,11 @@ impl TunableWeightsF64 {
             battery_rook_queen: self.battery_rook_queen.to_packed(),
             battery_bishop_queen: self.battery_bishop_queen.to_packed(),
             contested_file: self.contested_file.to_packed(),
+            undefended_knight: self.undefended_knight.to_packed(),
+            undefended_bishop: self.undefended_bishop.to_packed(),
+            undefended_rook: self.undefended_rook.to_packed(),
+            undefended_queen: self.undefended_queen.to_packed(),
+            threat_by_minor: self.threat_by_minor.to_packed(),
             tempo: self.tempo.round() as i32,
         }
     }
@@ -219,6 +237,7 @@ impl TunableWeightsF64 {
         + 8             // D63 item 2: pawn_storm_bonus
         + 2             // D63 item 3: knight_near_own_king + bishop_near_own_king
         + 9 * 2         // open lines
+        + 5 * 2         // Phase 24 item 4 (D68): threats — 5 S-typed terms
         + 1; // tempo
 
     /// Flatten into a fixed-order `Vec<f64>` — order must exactly match
@@ -294,6 +313,16 @@ impl TunableWeightsF64 {
         v.push(self.battery_bishop_queen.eg);
         v.push(self.contested_file.mg);
         v.push(self.contested_file.eg);
+        v.push(self.undefended_knight.mg);
+        v.push(self.undefended_knight.eg);
+        v.push(self.undefended_bishop.mg);
+        v.push(self.undefended_bishop.eg);
+        v.push(self.undefended_rook.mg);
+        v.push(self.undefended_rook.eg);
+        v.push(self.undefended_queen.mg);
+        v.push(self.undefended_queen.eg);
+        v.push(self.threat_by_minor.mg);
+        v.push(self.threat_by_minor.eg);
         v.push(self.tempo);
         debug_assert_eq!(v.len(), Self::PARAM_COUNT);
         v
@@ -375,6 +404,12 @@ impl TunableWeightsF64 {
         let battery_bishop_queen = S::new(next(), next());
         let contested_file = S::new(next(), next());
 
+        let undefended_knight = S::new(next(), next());
+        let undefended_bishop = S::new(next(), next());
+        let undefended_rook = S::new(next(), next());
+        let undefended_queen = S::new(next(), next());
+        let threat_by_minor = S::new(next(), next());
+
         let tempo = next();
 
         debug_assert_eq!(i, Self::PARAM_COUNT);
@@ -409,6 +444,11 @@ impl TunableWeightsF64 {
             battery_rook_queen,
             battery_bishop_queen,
             contested_file,
+            undefended_knight,
+            undefended_bishop,
+            undefended_rook,
+            undefended_queen,
+            threat_by_minor,
             tempo,
         }
     }
@@ -446,6 +486,11 @@ impl From<&TunableWeights> for TunableWeightsF64 {
             battery_rook_queen: S::from(w.battery_rook_queen),
             battery_bishop_queen: S::from(w.battery_bishop_queen),
             contested_file: S::from(w.contested_file),
+            undefended_knight: S::from(w.undefended_knight),
+            undefended_bishop: S::from(w.undefended_bishop),
+            undefended_rook: S::from(w.undefended_rook),
+            undefended_queen: S::from(w.undefended_queen),
+            threat_by_minor: S::from(w.threat_by_minor),
             tempo: w.tempo as f64,
         }
     }
@@ -503,6 +548,11 @@ mod tests {
         assert_eq!(back_to_int.battery_rook_queen, default_weights.battery_rook_queen);
         assert_eq!(back_to_int.battery_bishop_queen, default_weights.battery_bishop_queen);
         assert_eq!(back_to_int.contested_file, default_weights.contested_file);
+        assert_eq!(back_to_int.undefended_knight, default_weights.undefended_knight);
+        assert_eq!(back_to_int.undefended_bishop, default_weights.undefended_bishop);
+        assert_eq!(back_to_int.undefended_rook, default_weights.undefended_rook);
+        assert_eq!(back_to_int.undefended_queen, default_weights.undefended_queen);
+        assert_eq!(back_to_int.threat_by_minor, default_weights.threat_by_minor);
         assert_eq!(back_to_int.tempo, default_weights.tempo);
     }
 }

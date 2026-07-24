@@ -91,6 +91,13 @@ pub struct TunableWeights {
     pub battery_bishop_queen: i64,
     pub contested_file: i64,
 
+    // ── Threats (Phase 24 item 4, D68) ──────────────────────────────────
+    pub undefended_knight: i64,
+    pub undefended_bishop: i64,
+    pub undefended_rook: i64,
+    pub undefended_queen: i64,
+    pub threat_by_minor: i64,
+
     // ── Tempo ─────────────────────────────────────────────────────────────
     pub tempo: i32,
 }
@@ -198,6 +205,15 @@ impl Default for TunableWeights {
             battery_rook_queen: s(33, 12),
             battery_bishop_queen: s(33, 19),
             contested_file: s(-12, -7),
+
+            // eval/threats.rs (Phase 24 item 4, D68) — hand-picked starting
+            // values, not yet Texel-tuned (same status Phase 8's original
+            // Ethereal-derived HCE terms had before Phase 14's tuning pass).
+            undefended_knight: s(-25, -15),
+            undefended_bishop: s(-25, -15),
+            undefended_rook: s(-40, -25),
+            undefended_queen: s(-80, -50),
+            threat_by_minor: s(15, 10),
 
             // eval/mod.rs
             tempo: 24,

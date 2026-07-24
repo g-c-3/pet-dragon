@@ -121,12 +121,21 @@ pub fn predict_f64(f: &TexelFeatures, w: &TunableWeightsF64) -> f64 {
     ol = accum_only(ol, w.battery_bishop_queen, f.battery_bishop_queen_diff);
     let open_lines_score = ol.taper(phase);
 
+    let mut th = S::zero();
+    th = accum_only(th, w.undefended_knight, f.undefended_knight_diff);
+    th = accum_only(th, w.undefended_bishop, f.undefended_bishop_diff);
+    th = accum_only(th, w.undefended_rook, f.undefended_rook_diff);
+    th = accum_only(th, w.undefended_queen, f.undefended_queen_diff);
+    th = accum_only(th, w.threat_by_minor, f.threat_by_minor_diff);
+    let threats_score = th.taper(phase);
+
     material_score
         + pst_score
         + mobility_score
         + pawns_score
         + king_safety_score
         + open_lines_score
+        + threats_score
         + w.tempo
 }
 
@@ -441,6 +450,54 @@ pub fn predict_and_accumulate_grad(
     );
     let open_lines_score = ol.taper(phase);
 
+    let mut th = S::zero();
+    th = accum_grad(
+        th,
+        w.undefended_knight,
+        &mut grad.undefended_knight,
+        f.undefended_knight_diff,
+        error_signal,
+        mg_factor,
+        eg_factor,
+    );
+    th = accum_grad(
+        th,
+        w.undefended_bishop,
+        &mut grad.undefended_bishop,
+        f.undefended_bishop_diff,
+        error_signal,
+        mg_factor,
+        eg_factor,
+    );
+    th = accum_grad(
+        th,
+        w.undefended_rook,
+        &mut grad.undefended_rook,
+        f.undefended_rook_diff,
+        error_signal,
+        mg_factor,
+        eg_factor,
+    );
+    th = accum_grad(
+        th,
+        w.undefended_queen,
+        &mut grad.undefended_queen,
+        f.undefended_queen_diff,
+        error_signal,
+        mg_factor,
+        eg_factor,
+    );
+    th = accum_grad(
+        th,
+        w.threat_by_minor,
+        &mut grad.threat_by_minor,
+        f.threat_by_minor_diff,
+        error_signal,
+        mg_factor,
+        eg_factor,
+    );
+    let threats_score = th.taper(phase);
+
     grad.tempo += error_signal;
 
     material_score
@@ -449,6 +506,7 @@ pub fn predict_and_accumulate_grad(
         + pawns_score
         + king_safety_score
         + open_lines_score
+        + threats_score
         + w.tempo
 }
 

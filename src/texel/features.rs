@@ -29,7 +29,7 @@
 // ============================================================================
 
 use crate::bitboard::{bishop_attacks, rook_attacks, queen_attacks};
-use crate::bitboard::masks::knight_attacks;
+use crate::bitboard::masks::{knight_attacks, king_attacks, pawn_attacks};
 use crate::bitboard::Bitboard;
 use crate::eval::material::game_phase;
 use crate::position::Position;
@@ -107,6 +107,18 @@ pub struct TexelFeatures {
     pub queen_open_diff: i32,
     pub queen_semi_diff: i32,
     pub battery_bishop_queen_diff: i32,
+
+    // ── Threats (Phase 24 item 4, D68) ──────────────────────────────────
+    /// Count of our undefended pieces (attackers > defenders on that
+    /// square) minus theirs, per piece kind. Pawns/King excluded — see
+    /// eval::threats module doc for why.
+    pub undefended_knight_diff: i32,
+    pub undefended_bishop_diff: i32,
+    pub undefended_rook_diff: i32,
+    pub undefended_queen_diff: i32,
+    /// Count of our knight/bishop attacks landing on an enemy rook or
+    /// queen, minus theirs. A fork counts twice, naturally.
+    pub threat_by_minor_diff: i32,
 }
 
 /// Extract the full feature summary for a position, from the side-to-move's
@@ -126,6 +138,7 @@ pub fn extract_features(pos: &Position) -> TexelFeatures {
         extract_pawns(pos, us, them);
     let king = extract_king_safety(pos, us, them);
     let ol = extract_open_lines(pos, us, them);
+    let th = extract_threats(pos, us, them);
 
     TexelFeatures {
         phase,
@@ -167,6 +180,11 @@ pub fn extract_features(pos: &Position) -> TexelFeatures {
         queen_open_diff: ol.6,
         queen_semi_diff: ol.7,
         battery_bishop_queen_diff: ol.8,
+        undefended_knight_diff: th.0,
+        undefended_bishop_diff: th.1,
+        undefended_rook_diff: th.2,
+        undefended_queen_diff: th.3,
+        threat_by_minor_diff: th.4,
     }
 }
 
@@ -714,6 +732,78 @@ fn extract_open_lines(pos: &Position, us: Color, them: Color) -> OpenLinesRaw {
 /// Returns raw event counts for one color:
 /// (rook_open, rook_semi, rook_7th, rooks_connected_pairs, battery_rook_queen,
 ///  contested_file, queen_open, queen_semi, battery_bishop_queen)
+/// Mirrors `eval::threats::evaluate_threats` exactly (Phase 24 item 4,
+/// D68) — same loops, same attacker/defender counting, same conditions.
+/// Returns (undefended_knight_diff, undefended_bishop_diff,
+/// undefended_rook_diff, undefended_queen_diff, threat_by_minor_diff).
+fn extract_threats(pos: &Position, us: Color, them: Color) -> (i32, i32, i32, i32, i32) {
+    let (uk_u, ub_u, ur_u, uq_u, tbm_u) = threats_side_raw(pos, us);
+    let (uk_t, ub_t, ur_t, uq_t, tbm_t) = threats_side_raw(pos, them);
+    (uk_u - uk_t, ub_u - ub_t, ur_u - ur_t, uq_u - uq_t, tbm_u - tbm_t)
+}
+
+/// Mirrors `eval::threats::threats_for_color` exactly, counting occurrences
+/// instead of summing packed `s()` scores — same duplication pattern
+/// already used for `open_line_side_raw` above (and every other term in
+/// this file): a deliberate mirror, not a shared function, so
+/// `predict()` can stay generic over `TunableWeights` without eval/*.rs
+/// needing to expose its internals.
+fn threats_side_raw(pos: &Position, color: Color) -> (i32, i32, i32, i32, i32) {
+    let enemy = color.flip();
+    let all_occ = pos.all_pieces();
+
+    let mut undefended_knight = 0i32;
+    let mut undefended_bishop = 0i32;
+    let mut undefended_rook = 0i32;
+    let mut undefended_queen = 0i32;
+
+    for kind in [PieceKind::Knight, PieceKind::Bishop, PieceKind::Rook, PieceKind::Queen] {
+        for sq in pos.piece_bb(color, kind) {
+            let attackers = count_attackers_raw(pos, sq, enemy, all_occ);
+            let defenders = count_attackers_raw(pos, sq, color, all_occ);
+            if attackers > defenders {
+                match kind {
+                    PieceKind::Knight => undefended_knight += 1,
+                    PieceKind::Bishop => undefended_bishop += 1,
+                    PieceKind::Rook => undefended_rook += 1,
+                    PieceKind::Queen => undefended_queen += 1,
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    let mut threat_by_minor = 0i32;
+    let enemy_rq = pos.piece_bb(enemy, PieceKind::Rook) | pos.piece_bb(enemy, PieceKind::Queen);
+    for kind in [PieceKind::Knight, PieceKind::Bishop] {
+        for sq in pos.piece_bb(color, kind) {
+            let attacks = match kind {
+                PieceKind::Knight => knight_attacks(sq),
+                PieceKind::Bishop => bishop_attacks(sq, all_occ),
+                _ => unreachable!(),
+            };
+            threat_by_minor += (attacks & enemy_rq).count() as i32;
+        }
+    }
+
+    (undefended_knight, undefended_bishop, undefended_rook, undefended_queen, threat_by_minor)
+}
+
+/// Mirrors `eval::threats::count_attackers` exactly.
+fn count_attackers_raw(pos: &Position, sq: Square, attacker_color: Color, all_occ: Bitboard) -> u32 {
+    let mut n = 0u32;
+    n += (knight_attacks(sq) & pos.piece_bb(attacker_color, PieceKind::Knight)).count();
+    n += (bishop_attacks(sq, all_occ)
+        & (pos.piece_bb(attacker_color, PieceKind::Bishop) | pos.piece_bb(attacker_color, PieceKind::Queen)))
+        .count();
+    n += (rook_attacks(sq, all_occ)
+        & (pos.piece_bb(attacker_color, PieceKind::Rook) | pos.piece_bb(attacker_color, PieceKind::Queen)))
+        .count();
+    n += (pawn_attacks(attacker_color.flip(), sq) & pos.piece_bb(attacker_color, PieceKind::Pawn)).count();
+    n += (king_attacks(sq) & pos.piece_bb(attacker_color, PieceKind::King)).count();
+    n
+}
+
 fn open_line_side_raw(pos: &Position, color: Color) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32) {
     let our_pawns = pos.piece_bb(color, PieceKind::Pawn);
     let enemy_pawns = pos.piece_bb(color.flip(), PieceKind::Pawn);
