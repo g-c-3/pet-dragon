@@ -15,7 +15,9 @@
 //   4. Pawns:       pawn structure — passed/isolated/doubled/backward
 //   5. King safety: pawn shield, open files near king, attacker count (MG only)
 //   6. Open lines:  Rook on open file, batteries, 7th rank, connected rooks
-//   7. Tempo:       small bonus for side to move (~10 centipawns)
+//   7. Threats:     undefended pieces, minor attacking rook/queen (Phase 24
+//                   item 4, D68 — adapted from Stockfish's Threats concept)
+//   8. Tempo:       small bonus for side to move (~10 centipawns)
 //
 // ⚠️ Pet Dragon notes:
 //   - No opening suppression (D6): all terms active from move 1
@@ -24,7 +26,9 @@
 //   - Rank 1 pawn rules apply in pawns.rs (D2)
 //
 // Weights from Ethereal chess engine (GPL v3, Andrew Grant) with
-// Pet Dragon adaptations as noted above.
+// Pet Dragon adaptations as noted above. threats.rs additionally credits
+// Stockfish (GPL v3) for the underlying Threats concept — see that file's
+// header for the specific scoping/attribution notes.
 // ============================================================================
 
 pub mod material;
@@ -33,6 +37,7 @@ pub mod mobility;
 pub mod pawns;
 pub mod king_safety;
 pub mod open_lines;
+pub mod threats;
 
 use crate::position::Position;
 use material::{evaluate_material, game_phase};
@@ -41,6 +46,7 @@ use mobility::evaluate_mobility;
 use pawns::evaluate_pawns;
 use king_safety::evaluate_king_safety;
 use open_lines::evaluate_open_lines;
+use threats::evaluate_threats;
 
 // ── Tempo bonus ───────────────────────────────────────────────────────────────
 /// Bonus for the side to move — having the initiative. Originally 10cp
@@ -70,6 +76,7 @@ pub fn evaluate(pos: &Position) -> i32 {
               + evaluate_pawns(pos, phase)
               + evaluate_king_safety(pos, phase)
               + evaluate_open_lines(pos, phase)
+              + evaluate_threats(pos, phase)
               + TEMPO;
 
     score
