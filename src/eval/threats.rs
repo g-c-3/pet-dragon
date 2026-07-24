@@ -77,13 +77,16 @@ const UNDEFENDED_PENALTY: [i64; 6] = [
 /// this codebase already lets multiple simultaneous threats add up.
 const THREAT_BY_MINOR_BONUS: i64 = s(15, 10);
 
-/// Evaluate threats for both sides. Returns a tapered score from White's
-/// perspective (positive favors White), same convention as every other
-/// `evaluate_*` function in `eval/`.
+/// Evaluate threats for both sides. Returns a tapered score from the side-
+/// to-move's perspective, matching every other `evaluate_*` function in
+/// this module (`us = pos.side_to_move`, not hardcoded White/Black — see
+/// `evaluate_material`/`evaluate_open_lines` for the same pattern).
 pub fn evaluate_threats(pos: &Position, phase: i32) -> i32 {
-    let white = threats_for_color(pos, Color::White);
-    let black = threats_for_color(pos, Color::Black);
-    taper(white - black, phase)
+    let us = pos.side_to_move;
+    let them = us.flip();
+    let ours = threats_for_color(pos, us);
+    let theirs = threats_for_color(pos, them);
+    taper(ours - theirs, phase)
 }
 
 fn threats_for_color(pos: &Position, color: Color) -> i64 {
@@ -202,6 +205,42 @@ mod tests {
         assert!(score > 0, "Knight forking rook+queen should score positive: {}", score);
         assert!(score >= 2 * THREAT_BY_MINOR_BONUS,
             "Forking both should score at least double the single-hit bonus: {}", score);
+    }
+
+    #[test]
+    fn test_evaluate_threats_flips_sign_with_side_to_move() {
+        setup();
+        // Regression test for a real bug caught by CI (not by this test
+        // suite originally — a gap in the initial test coverage, since
+        // every hand-written test above happened to use a fresh/White-to-
+        // move position, which is exactly what let this bug through
+        // locally). `evaluate_threats` originally hardcoded
+        // Color::White/Color::Black instead of using
+        // `pos.side_to_move`/`.flip()` like every other `evaluate_*`
+        // function — worked by coincidence whenever White was to move
+        // (game start), silently wrong sign whenever Black was to move
+        // (any mid-game position on Black's turn).
+        //
+        // Same board (White rook on d5, undefended, attacked by a Black
+        // bishop), only the side-to-move flag differs. The two results
+        // must be exact negatives of each other — "us minus them" flips
+        // sign precisely when whose-turn-it-is flips, board unchanged.
+        let fen_white_to_move = "4k3/8/8/3R4/8/1b6/8/4K3 w - - 0 1";
+        let fen_black_to_move = "4k3/8/8/3R4/8/1b6/8/4K3 b - - 0 1";
+
+        let pos_w = Position::from_fen(fen_white_to_move).unwrap();
+        let pos_b = Position::from_fen(fen_black_to_move).unwrap();
+        let phase_w = game_phase(&pos_w);
+        let phase_b = game_phase(&pos_b);
+
+        let score_w = evaluate_threats(&pos_w, phase_w);
+        let score_b = evaluate_threats(&pos_b, phase_b);
+
+        assert_eq!(score_w, -score_b,
+            "same board, only side-to-move differs — scores must be exact negatives: white-to-move={}, black-to-move={}",
+            score_w, score_b);
+        assert!(score_w < 0, "White's own hanging rook should be bad for White (White to move): {}", score_w);
+        assert!(score_b > 0, "White's hanging rook should be good for Black (Black to move): {}", score_b);
     }
 
     #[test]
