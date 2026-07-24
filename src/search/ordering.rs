@@ -730,6 +730,83 @@ mod tests {
     }
 
     #[test]
+    fn test_opening_stats_bias_applies_to_known_bucket() {
+        // D67 step 6 (D72, Session 84) — hand-verification against a real
+        // table entry, not just the generated file's own structural
+        // self-tests. Hand-constructed (not seed-generated) but follows
+        // Pet Dragon's real structural rules exactly: full 16-square
+        // back-two-ranks setup, Black's setup a same-file mirror of
+        // White's (rank r <-> rank 9-r) — matches
+        // `opening_stats::OPENING_STATS`'s first real entry as of Session
+        // 84 (bucket key 207: rook_files=(0,3)=(a,d),
+        // knight_files=(1,7)=(b,h) -> "a2a7", win_rate 0.9677, n=31 games).
+        //
+        // Traced by hand before writing this test (see DECISIONS.md D72):
+        // with the a-file rook specifically on a2 (not a1), and Black's
+        // mirrored setup necessarily placing a like-for-like piece on a7
+        // (ranks 3-6 always empty at the true game start), `a2a7` is
+        // always a legal ROOK-TAKES-ROOK capture whenever this bucket
+        // applies — not a quiet move. That's a real, replicable tactical
+        // pattern (an immediate equal-value trade), consistent with the
+        // observed ~97% win rate, not an artifact.
+        //
+        // Skips gracefully (doesn't fail) if a future aggregation re-run
+        // has changed or dropped this specific entry — this test verifies
+        // the MECHANISM against whatever entry 207 currently holds, not a
+        // permanently frozen data point; regenerating the table is a
+        // normal, expected maintenance action (D67/D71), not something
+        // that should break CI on its own.
+        setup();
+
+        const KEY_207: u16 = 207;
+        let entry = opening_stats::OPENING_STATS.iter().find(|e| e.0 == KEY_207);
+        let Some(&(_, expected_move_uci, _win_rate, _count)) = entry else {
+            return; // table regenerated since this test was written — fine, skip
+        };
+
+        let fen = "pnbrkbqn/rppppppp/8/8/8/8/RPPPPPPP/PNBRKBQN w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        assert_eq!(pos.fullmove_number, 1);
+        assert_eq!(pos.side_to_move, crate::types::Color::White);
+
+        let moves = generate_moves(&pos);
+        let info  = SearchInfo::new();
+        let scored = score_moves(&pos, &moves, &info, Move::NULL, 0, Move::NULL);
+
+        let target = scored.iter().find(|s| s.mv.to_uci() == expected_move_uci)
+            .unwrap_or_else(|| panic!(
+                "expected move {expected_move_uci} (from table entry 207) to be a legal \
+                 move in this hand-constructed position — if this fails, the FEN above no \
+                 longer matches bucket key 207's actual (rook_files, knight_files), not a \
+                 real engine bug; re-derive the FEN from the current table entry."
+            ));
+
+        // The flagged move should be a rook-takes-rook capture per the
+        // hand-trace above (EQUAL_CAPTURE_SCORE tier) PLUS the opening-
+        // stats bonus on top — confirms the bonus is actually additive,
+        // not replacing the move's own legitimate capture score.
+        assert!(target.mv.kind.is_capture(),
+            "a2a7 should be a legal capture in this mirrored setup (Black's a7 always holds a like-for-like mirrored piece)");
+        assert!(target.score >= EQUAL_CAPTURE_SCORE + OPENING_STATS_BONUS,
+            "flagged move should score at least equal-capture tier plus the opening-stats bonus, got {}", target.score);
+
+        // And the bonus should be the actual differentiator versus what an
+        // identical capture would score WITHOUT the bias — construct the
+        // same position's move list score via score_move-equivalent logic
+        // isn't directly reusable here (score_move is private and folded
+        // into score_moves), so instead confirm indirectly: no other
+        // legal move in this position can reach TT_MOVE_SCORE or
+        // WINNING_CAPTURE_BASE tiers (nothing to capture that isn't an
+        // equal trade at the start), so the flagged move should be the
+        // single highest-scoring move in the whole list — the bonus is
+        // what pushes an equal-capture ahead of every other equal-capture
+        // sharing the same MVV-LVA score.
+        let max_score = scored.iter().map(|s| s.score).max().unwrap();
+        assert_eq!(target.score, max_score,
+            "opening-stats-flagged move should be the single highest-scored move in this position");
+    }
+
+    #[test]
     fn test_update_ordering_on_cutoff() {
         setup();
         let pos   = Position::start_pos().unwrap();
