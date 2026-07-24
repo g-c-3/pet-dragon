@@ -438,6 +438,12 @@ fn write_tuned_weights(
     out.push_str(&format!("battery_bishop_queen: {},\n", fmt_packed(w.battery_bishop_queen)));
     out.push_str(&format!("contested_file: {},\n\n", fmt_packed(w.contested_file)));
 
+    out.push_str(&format!("undefended_knight: {},\n", fmt_packed(w.undefended_knight)));
+    out.push_str(&format!("undefended_bishop: {},\n", fmt_packed(w.undefended_bishop)));
+    out.push_str(&format!("undefended_rook: {},\n", fmt_packed(w.undefended_rook)));
+    out.push_str(&format!("undefended_queen: {},\n", fmt_packed(w.undefended_queen)));
+    out.push_str(&format!("threat_by_minor: {},\n\n", fmt_packed(w.threat_by_minor)));
+
     out.push_str(&format!("tempo: {},\n", w.tempo));
 
     fs::write(path, out).expect("failed to write tuned weights file");
