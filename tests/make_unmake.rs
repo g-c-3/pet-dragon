@@ -91,7 +91,7 @@ fn test_make_unmake_with_en_passant() {
 #[test]
 fn test_make_unmake_promotion_position() {
     setup();
-    let fen = "3k4/4P3/8/8/8/8/8/4K3 w - - 0 1";
+    let fen = "7k/4P3/8/8/8/8/8/4K3 w - - 0 1";
     let pos = Position::from_fen(fen).unwrap();
     assert_make_unmake_reversible(&pos);
 }
