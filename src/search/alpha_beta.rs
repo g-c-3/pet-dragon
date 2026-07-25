@@ -412,15 +412,41 @@ fn alpha_beta_with_excluded(
     // ── Null move pruning ─────────────────────────────────────────────────────
     // Skip our move — if position is still good, prune
     // Guard: disable in zugzwang-prone positions (only kings/pawns)
+    //
+    // Optional king-exposure guard (ROADMAP Phase 26 item 1, unproven — off
+    // by default via SearchInfo::null_move_king_guard / UCI
+    // "NullMoveKingGuard"). Pet Dragon's randomized starting pawn structure
+    // can leave a king with no natural shield from move 1, unlike standard
+    // chess where an early-game king is reliably safe — the zugzwang guard
+    // above doesn't cover this. When enabled, a king with very few safe
+    // squares around it either skips null-move entirely (<=1 safe square)
+    // or gets a smaller reduction (<=2 safe squares). `king_safe_squares`
+    // is `None` (zero cost, computed nothing) when the guard is off, so
+    // default engine behavior is byte-identical to before this option
+    // existed.
+    let king_safe_squares = if info.null_move_king_guard {
+        Some(king_safe_square_count(pos, pos.side_to_move))
+    } else {
+        None
+    };
+
     let can_null_move = !pv_node
         && !in_check
         && depth >= MIN_DEPTH_NULL_MOVE
         && static_eval >= beta
         && has_non_pawn_material(pos, pos.side_to_move)
-        && prev_move != Move::NULL; // No consecutive null moves
+        && prev_move != Move::NULL // No consecutive null moves
+        && king_safe_squares.map_or(true, |n| n > 1);
 
     if can_null_move {
-        let r = 3 + depth / 6; // Adaptive reduction
+        let mut r = 3 + depth / 6; // Adaptive reduction
+        if let Some(n) = king_safe_squares {
+            if n <= 2 {
+                // Exposed king: be more conservative than usual, but never
+                // reduce below 1 (that would make null-move a no-op search).
+                r = r.saturating_sub(1).max(1);
+            }
+        }
 
         // Make null move (just flip side to move)
         pos.side_to_move = pos.side_to_move.flip();
@@ -735,6 +761,35 @@ fn has_non_pawn_material(pos: &Position, color: Color) -> bool {
         || pos.count_pieces(color, PieceKind::Bishop) > 0
         || pos.count_pieces(color, PieceKind::Rook)   > 0
         || pos.count_pieces(color, PieceKind::Queen)  > 0
+}
+
+/// Count squares adjacent to `color`'s king that are currently "safe": not
+/// occupied by `color`'s own pieces, and not attacked by the enemy.
+///
+/// Used only by the optional null-move king-exposure guard
+/// (`SearchInfo::null_move_king_guard`, ROADMAP Phase 26 item 1, off by
+/// default) — a deliberately cheap, coarse proxy for "how exposed is this
+/// king right now", not a full king-safety evaluation (that's the far more
+/// expensive `eval::king_safety::evaluate_king_safety`, unsuitable to call
+/// at every null-move check). Max possible return value is 8 (every ring
+/// square safe); a king on an edge or in a corner has fewer ring squares to
+/// begin with, so a low count there isn't itself meaningful in isolation —
+/// only the guard's own thresholds (see `alpha_beta()`) give it meaning.
+#[inline]
+fn king_safe_square_count(pos: &Position, color: Color) -> u32 {
+    use crate::bitboard::masks::king_attacks;
+
+    let king_sq = pos.king_sq(color);
+    let ring = king_attacks(king_sq) & !pos.occupied(color);
+    let enemy = color.flip();
+
+    let mut count = 0u32;
+    for sq in ring {
+        if !pos.is_attacked(sq, enemy) {
+            count += 1;
+        }
+    }
+    count
 }
 
 /// Quick check if a move gives check (used for pruning decisions)
@@ -1086,5 +1141,94 @@ mod tests {
             assert!(s1.abs() <= INFINITY,
                 "qs_depth=-1 score out of bounds (seed {}): {}", seed, s1);
         }
+    }
+
+    // ── King-exposure guard (ROADMAP Phase 26 item 1) ───────────────────────
+
+    #[test]
+    fn test_null_move_king_guard_defaults_to_false() {
+        // Default engine behavior must be byte-identical to before this
+        // option existed — verified at the SearchInfo level, not just
+        // main.rs's UCI plumbing (that's covered separately in main.rs's
+        // own test suite, same split as skill_level/contempt).
+        let info = SearchInfo::new();
+        assert!(!info.null_move_king_guard,
+            "null_move_king_guard must default to false");
+    }
+
+    #[test]
+    fn test_king_safe_square_count_open_center_king_is_full_ring() {
+        setup();
+        // King on e4 with nothing nearby: all 8 ring squares are empty and
+        // unattacked, so every one of them counts as safe.
+        let fen = "8/8/8/8/4K3/8/8/7k w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        assert_eq!(king_safe_square_count(&pos, Color::White), 8,
+            "an open center king should have all 8 ring squares safe");
+    }
+
+    #[test]
+    fn test_king_safe_square_count_excludes_own_occupied_ring_squares() {
+        setup();
+        // King in the corner has only 3 ring squares to begin with (a2, b1,
+        // b2); two are occupied by its own pawns, so only b1 remains in the
+        // ring at all, and nothing attacks it.
+        let fen = "7k/8/8/8/8/8/PP6/K7 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        assert_eq!(king_safe_square_count(&pos, Color::White), 1,
+            "own pieces occupying ring squares must not count as safe \
+             (or unsafe) — they're simply excluded from the ring");
+    }
+
+    #[test]
+    fn test_king_safe_square_count_excludes_enemy_attacked_ring_squares() {
+        setup();
+        // Black rook on the open e-file attacks e5 (a ring square of the
+        // White king on e4) but not e3 (blocked by the king itself) — only
+        // e5 should be excluded, leaving 7 of the 8 ring squares safe.
+        let fen = "4r3/8/8/8/4K3/8/8/7k w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        assert_eq!(king_safe_square_count(&pos, Color::White), 7,
+            "a ring square attacked by the enemy must not count as safe");
+    }
+
+    #[test]
+    fn test_null_move_king_guard_off_matches_pre_guard_behavior() {
+        setup();
+        // With the guard left at its default (false), a heavily king-boxed
+        // position must still allow the normal null-move path to run
+        // exactly as it did before this option existed — i.e. search
+        // completes and returns a legal move, unaffected by how few safe
+        // squares the king has. This is the "byte-identical when off"
+        // contract the doc comments on SearchInfo::null_move_king_guard
+        // and the guard site in alpha_beta() both promise.
+        let fen = "7k/8/8/8/8/8/PP6/K7 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let (mv, _score) = make_search(&mut pos, 4);
+        assert_ne!(mv, Move::NULL,
+            "search must return a legal move regardless of king exposure \
+             when the guard is disabled (the default)");
+    }
+
+    #[test]
+    fn test_null_move_king_guard_on_still_searches_safely() {
+        setup();
+        // With the guard enabled on a heavily king-boxed position (safe
+        // squares == 1, at or below both guard thresholds), null-move
+        // should either be skipped or reduced — either way the search
+        // itself must still complete and return a legal move, not panic
+        // or return a bogus depth/reduction.
+        let fen = "7k/8/8/8/8/8/PP6/K7 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        info.null_move_king_guard = true;
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 4, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.best_move, Move::NULL,
+            "search must return a legal move with the guard enabled");
+        assert!(score.abs() <= INFINITY);
     }
 }

@@ -246,6 +246,26 @@ pub struct SearchInfo {
     /// Persistent across moves, same as `skill_level` above.
     pub contempt: i32,
 
+    // ── Null-move king-exposure guard (Phase 26 item 1, unproven — off by default) ──
+    /// UCI `NullMoveKingGuard` setting, default `false`. When `false`
+    /// (the default), null-move pruning in `alpha_beta.rs` behaves exactly
+    /// as before this option existed — this field adds zero cost or
+    /// behavior change to the default engine. When `true`, null-move
+    /// pruning becomes more conservative (smaller reduction, or skipped
+    /// entirely) when the side-to-move's king has very few safe squares
+    /// around it — see `alpha_beta.rs::king_safe_square_count()`. Pet
+    /// Dragon's randomized starting pawn structure can leave a king with
+    /// no natural shield from move 1, unlike standard chess where an
+    /// early-game king is reliably safe; the standard null-move zugzwang
+    /// guard (`has_non_pawn_material`) doesn't cover this. Deliberately a
+    /// runtime UCI option rather than a compile-time change — ROADMAP.md
+    /// Phase 26 item 1 flags this as unproven, needing its own isolated
+    /// SPRT-style A/B comparison (same binary, two `uci_match_runner`
+    /// configs differing only in this option) before ever being trusted
+    /// as a default. Persistent across moves, same as `skill_level`/
+    /// `contempt` above.
+    pub null_move_king_guard: bool,
+
     // ── Lazy SMP thread identity (Phase 23.2 / D49) ───────────────────────────
     /// Which Lazy SMP thread this `SearchInfo` belongs to: `0` for the main
     /// thread (the only thread whose result is ever reported — see the
@@ -293,6 +313,7 @@ impl SearchInfo {
             syzygy: None,
             skill_level: crate::search::skill::MAX_SKILL_LEVEL,
             contempt: 0,
+            null_move_king_guard: false,
             thread_id: 0,
         }
     }
