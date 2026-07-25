@@ -164,6 +164,18 @@ struct EngineState {
     /// support, without a rebuild, before ever being trusted as a
     /// default).
     null_move_king_guard: bool,
+
+    // ── Non-pawn-material correction history (Phase 26 item 3a, D80/D82) ──
+    /// UCI `NonPawnCorrectionHistory` setting, default `false`. Threaded
+    /// into `main_info`/`h_info.nonpawn_correction_enabled` in cmd_go,
+    /// same pattern as `null_move_king_guard` above — see
+    /// `SearchInfo::nonpawn_correction_enabled`'s doc comment. D82
+    /// corrects item 3a's initial always-on shipment to match this
+    /// established discipline: unvalidated correction sources ship
+    /// gated off, get their own isolated SPRT-style A/B via this option
+    /// (same binary, `uci_match_runner`, no rebuild needed), and only
+    /// then is a default flip considered.
+    nonpawn_correction_enabled: bool,
 }
 
 impl EngineState {
@@ -195,6 +207,7 @@ impl EngineState {
             skill_level: pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
             contempt: 0,
             null_move_king_guard: false,
+            nonpawn_correction_enabled: false,
             limit_strength: false,
             elo: pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
         }
@@ -395,6 +408,7 @@ fn cmd_uci() {
     // ever being trusted as a default — see DECISIONS.md and
     // ROADMAP.md Phase 26 item 1.
     println!("option name NullMoveKingGuard type check default false");
+    println!("option name NonPawnCorrectionHistory type check default false");
     println!();
     println!("uciok");
 }
@@ -494,6 +508,12 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
             // skill level, unlike multipv/move overhead — recorded here,
             // applied to the active search's SearchInfo in cmd_go.
             state.null_move_king_guard = value.eq_ignore_ascii_case("true");
+        }
+        "nonpawncorrectionhistory" => {
+            // Phase 26 item 3a, D82: same pattern as nullmovekingguard —
+            // playing-strength-affecting, recorded here, applied in
+            // cmd_go.
+            state.nonpawn_correction_enabled = value.eq_ignore_ascii_case("true");
         }
         "uci_elo" => {
             if let Ok(n) = value.parse::<i32>() {
@@ -725,6 +745,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     // pairing above.
     let contempt  = state.contempt;
     let null_move_king_guard = state.null_move_king_guard;
+    let nonpawn_correction_enabled = state.nonpawn_correction_enabled;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -764,6 +785,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                 h_info.skill_level = skill_level;
                 h_info.contempt = contempt;
                 h_info.null_move_king_guard = null_move_king_guard;
+                h_info.nonpawn_correction_enabled = nonpawn_correction_enabled;
                 // Phase 23.2/D49: thread identity, consumed by
                 // lmr_thread_base() and thread_tie_break() to vary this
                 // helper's LMR aggressiveness and quiet-move tie-breaking
@@ -793,6 +815,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.skill_level = skill_level;
         main_info.contempt = contempt;
         main_info.null_move_king_guard = null_move_king_guard;
+        main_info.nonpawn_correction_enabled = nonpawn_correction_enabled;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -1239,6 +1262,40 @@ mod tests {
             "The SearchInfo actually used by the search thread must reflect \
              the configured NullMoveKingGuard value, not just EngineState's \
              own copy of it");
+    }
+
+    #[test]
+    fn test_nonpawn_correction_history_option_defaults_to_false() {
+        setup();
+        let state = EngineState::new();
+        assert!(!state.nonpawn_correction_enabled,
+            "NonPawnCorrectionHistory should default to false — byte- \
+             identical to before item 3a existed for any GUI that never \
+             touches this option (D82)");
+    }
+
+    #[test]
+    fn test_nonpawn_correction_history_option_parses_true_and_false() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name NonPawnCorrectionHistory value true");
+        assert!(state.nonpawn_correction_enabled);
+        cmd_setoption(&mut state, "setoption name NonPawnCorrectionHistory value false");
+        assert!(!state.nonpawn_correction_enabled);
+    }
+
+    #[test]
+    fn test_cmd_go_applies_nonpawn_correction_history_to_search() {
+        setup();
+        let mut state = EngineState::new();
+        state.nonpawn_correction_enabled = true;
+        cmd_go(&mut state, "go depth 4");
+        let returned = state.wait_for_search()
+            .expect("search should have produced a SearchInfo");
+        assert!(returned.nonpawn_correction_enabled,
+            "The SearchInfo actually used by the search thread must reflect \
+             the configured NonPawnCorrectionHistory value, not just \
+             EngineState's own copy of it");
     }
 
     #[test]
