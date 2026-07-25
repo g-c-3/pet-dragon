@@ -380,26 +380,39 @@ fn test_perft_castling_blocked_by_intervening_piece_depth2() {
     setup();
     let fen = "4k3/8/8/8/8/8/8/4KN1R w K - 0 1";
     let pos = Position::from_fen(fen).unwrap();
-    // Hand count, branch by White's 16 depth-1 moves. Black has only a
-    // king on e8, with 5 candidate replies (d8,d7,e7,f7,f8) — reduced
-    // only when the h1 rook has slid all the way to h8, since a rook on
-    // h8 attacks along the fully open 8th rank (g8, f8, and e8 itself —
-    // this move gives check):
-    //   King moves (Kd1,Kd2,Ke2,Kf2): black unaffected, 5 replies each
+    // Hand count, branch by White's 16 depth-1 moves, verified against a
+    // standalone perft_divide run of this exact position (the first
+    // version of this test had a hand-counting error — see below).
+    // Black's king (e8) has 5 candidate replies (d8,d7,e7,f7,f8), reduced
+    // whenever the h1 rook reaches a rank where it can attack one or more
+    // of them:
+    //   King moves (Kd1,Kd2,Ke2,Kf2): unaffected, 5 replies each
     //     -> 4 x 5 = 20
-    //   Knight moves (Nd2,Ne3,Ng3,Nh2): none come near e8, 5 replies each
+    //   Knight moves (Nd2,Ne3,Ng3,Nh2): unaffected, 5 replies each
     //     -> 4 x 5 = 20
-    //   Rook moves Rg1,Rh2..Rh7 (7 branches, none reach rank 8):
-    //     5 replies each -> 7 x 5 = 35
-    //   Rook Rh8 (the 8th rook branch): now attacks rank 8 outward from
-    //     h8 (g8, f8, e8 — check). Black king's only legal replies are
-    //     the 3 squares off rank 8 and off the h-file: d7, e7, f7 (d8
-    //     and f8 are both still on the rook's open rank-8 line even
-    //     after the king leaves e8, so both remain attacked) -> 3
-    // Total = 20 + 20 + 35 + 3 = 78.
-    assert_eq!(perft(&pos, 2), 78,
-        "perft(2) must be 78 — see comment for the hand-verified branch \
-         breakdown, including the Rh8 branch which gives check along the \
-         now-open 8th rank");
+    //   Rook moves Rg1,Rh2,Rh3,Rh4,Rh5,Rh6 (6 branches, none reach rank
+    //     7 or 8): unaffected, 5 replies each -> 6 x 5 = 30
+    //   Rook Rh7: now attacks along the fully open 7th rank (g7 through
+    //     a7 — nothing blocks it), hitting d7, e7, AND f7. Only d8 and
+    //     f8 (rank 8, untouched by a rook on h7) remain safe -> 2
+    //   Rook Rh8: attacks along the fully open 8th rank instead (g8, f8,
+    //     e8 itself — check). Legal replies are the 3 squares off both
+    //     rank 8 and the h-file: d7, e7, f7 -> 3
+    // Total = 20 + 20 + 30 + 2 + 3 = 75.
+    //
+    // The original version of this test asserted 78, having correctly
+    // hand-counted the Rh8 branch (3) but wrongly assumed Rh7 was
+    // unaffecting (assumed 5, actually 2) — missing that a rook doesn't
+    // need to reach the king's own rank to restrict its mobility, only
+    // the rank the king would be moving *to*. Caught by CI (`cargo test`
+    // failed: left 75, right 78), root-caused by building the crate
+    // standalone in a scratch cargo project and running `perft_divide`
+    // directly against this FEN rather than re-guessing by hand a second
+    // time.
+    assert_eq!(perft(&pos, 2), 75,
+        "perft(2) must be 75 — see comment for the hand-verified branch \
+         breakdown, including both the Rh7 branch (restricts the king via \
+         the now-open 7th rank without itself giving check) and the Rh8 \
+         branch (gives check along the open 8th rank)");
 }
 
