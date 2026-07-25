@@ -256,7 +256,7 @@ mod tests {
     fn test_rook_on_open_file_scores_positive() {
         setup();
         // White Rook on e1, no pawns on e-file → open file bonus
-        let fen = "4k3/pppp1ppp/8/8/8/8/PPPP1PPP/4RK2 w - - 0 1";
+        let fen = "6k1/pppp1ppp/8/8/8/8/PPPP1PPP/4RK2 w - - 0 1";
         let pos = Position::from_fen(fen).unwrap();
         let phase = game_phase(&pos);
         let score = evaluate_open_lines(&pos, phase);
@@ -269,7 +269,7 @@ mod tests {
         setup();
         // White Rook on e7 (7th rank) attacking Black pawns
         // Put a white rook on e7 manually — use a FEN that has it
-        let fen2 = "4k3/ppppRppp/8/8/8/8/8/4K3 w - - 0 1";
+        let fen2 = "6k1/ppppRppp/8/8/8/8/8/4K3 w - - 0 1";
         let pos2 = Position::from_fen(fen2).unwrap();
         let phase = game_phase(&pos2);
         let score = evaluate_open_lines(&pos2, phase);
@@ -280,7 +280,7 @@ mod tests {
     fn test_connected_rooks_bonus() {
         setup();
         // Two White rooks on same rank with nothing between
-        let fen = "4k3/8/8/8/8/8/8/R3RK2 w - - 0 1";
+        let fen = "7k/8/8/8/8/8/8/R3RK2 w - - 0 1";
         let pos = Position::from_fen(fen).unwrap();
         let our_score = open_line_score(&pos, Color::White);
         // Should include ROOKS_CONNECTED bonus
