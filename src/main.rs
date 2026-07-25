@@ -153,6 +153,17 @@ struct EngineState {
     limit_strength: bool,
     /// UCI `UCI_Elo` setting. Only used when `limit_strength` is true.
     elo: i32,
+
+    // ── Null-move king-exposure guard (Phase 26 item 1, unproven — off by default) ──
+    /// UCI `NullMoveKingGuard` setting, default `false`. Threaded into
+    /// `main_info`/`h_info.null_move_king_guard` in cmd_go, same pattern
+    /// as `contempt`/`skill_level` above — see
+    /// `SearchInfo::null_move_king_guard`'s doc comment for the full
+    /// reasoning (a runtime UCI option specifically so it can be A/B
+    /// tested via `uci_match_runner`'s existing per-engine `setoption`
+    /// support, without a rebuild, before ever being trusted as a
+    /// default).
+    null_move_king_guard: bool,
 }
 
 impl EngineState {
@@ -183,6 +194,7 @@ impl EngineState {
             move_overhead_ms: pet_dragon_lib::search::time::OVERHEAD_MS,
             skill_level: pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
             contempt: 0,
+            null_move_king_guard: false,
             limit_strength: false,
             elo: pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
         }
@@ -374,6 +386,14 @@ fn cmd_uci() {
         pet_dragon_lib::search::skill::ELO_TABLE[0],
         pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize]
     );
+    // Phase 26 item 1 (unproven, off by default): more conservative
+    // null-move pruning when the side-to-move's king has very few safe
+    // squares around it. A runtime option rather than a compile-time
+    // change specifically so it can be A/B tested via uci_match_runner's
+    // per-engine setoption support (same binary, two configs) before
+    // ever being trusted as a default — see DECISIONS.md and
+    // ROADMAP.md Phase 26 item 1.
+    println!("option name NullMoveKingGuard type check default false");
     println!();
     println!("uciok");
 }
@@ -467,6 +487,12 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
         }
         "uci_limitstrength" => {
             state.limit_strength = value.eq_ignore_ascii_case("true");
+        }
+        "nullmovekingguard" => {
+            // Phase 26 item 1: playing-strength-affecting like contempt/
+            // skill level, unlike multipv/move overhead — recorded here,
+            // applied to the active search's SearchInfo in cmd_go.
+            state.null_move_king_guard = value.eq_ignore_ascii_case("true");
         }
         "uci_elo" => {
             if let Ok(n) = value.parse::<i32>() {
@@ -697,6 +723,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     // SearchInfo, same value build_time_control used for the time-fraction
     // pairing above.
     let contempt  = state.contempt;
+    let null_move_king_guard = state.null_move_king_guard;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -731,6 +758,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                 // into a low-skill main search's move ordering/scores.
                 h_info.skill_level = skill_level;
                 h_info.contempt = contempt;
+                h_info.null_move_king_guard = null_move_king_guard;
                 // Phase 23.2/D49: thread identity, consumed by
                 // lmr_thread_base() and thread_tie_break() to vary this
                 // helper's LMR aggressiveness and quiet-move tie-breaking
@@ -758,6 +786,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.multipv = multipv;
         main_info.skill_level = skill_level;
         main_info.contempt = contempt;
+        main_info.null_move_king_guard = null_move_king_guard;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -1167,6 +1196,43 @@ mod tests {
         assert_eq!(returned.contempt, 40,
             "The SearchInfo actually used by the search thread must reflect \
              the configured Contempt value, not just EngineState's own copy of it");
+    }
+
+    #[test]
+    fn test_null_move_king_guard_option_defaults_to_false() {
+        setup();
+        let state = EngineState::new();
+        assert!(!state.null_move_king_guard,
+            "NullMoveKingGuard should default to false — byte-identical to \
+             pre-Phase-26 null-move behavior for any GUI that never touches \
+             this option");
+    }
+
+    #[test]
+    fn test_null_move_king_guard_option_parses_true_and_false() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name NullMoveKingGuard value true");
+        assert!(state.null_move_king_guard);
+        cmd_setoption(&mut state, "setoption name NullMoveKingGuard value false");
+        assert!(!state.null_move_king_guard);
+    }
+
+    #[test]
+    fn test_cmd_go_applies_null_move_king_guard_to_search() {
+        setup();
+        let mut state = EngineState::new();
+        state.null_move_king_guard = true;
+        cmd_go(&mut state, "go depth 4");
+        let returned = state.wait_for_search()
+            .expect("search should have produced a SearchInfo");
+        // Same reasoning as test_cmd_go_applies_contempt_to_search: prove
+        // cmd_go's wiring reaches the SearchInfo the search thread actually
+        // used, not just EngineState's own copy of the setting.
+        assert!(returned.null_move_king_guard,
+            "The SearchInfo actually used by the search thread must reflect \
+             the configured NullMoveKingGuard value, not just EngineState's \
+             own copy of it");
     }
 
     #[test]
