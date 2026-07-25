@@ -573,7 +573,7 @@ mod tests {
 fn test_promotion() {
     setup();
     // White pawn on e7, can promote — Black King moved away from e8
-    let fen = "3k4/4P3/8/8/8/8/8/4K3 w - - 0 1";
+    let fen = "7k/4P3/8/8/8/8/8/4K3 w - - 0 1";
         let pos = Position::from_fen(fen).unwrap();
         let mut list = MoveList::new();
         generate_pawn_pushes(&pos, Color::White, &mut list);
