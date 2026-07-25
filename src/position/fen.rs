@@ -48,6 +48,14 @@ pub enum FenError {
     InvalidFullmoveNumber(String),
     WrongNumberOfFields(usize),
     KingNotFound(Color),
+    /// D81/D83: the side NOT to move is in check — an unreachable state
+    /// from any legal game (that side's own prior move could never
+    /// legally leave its own king in check). Rejected at parse time
+    /// rather than silently accepted, since letting it through allowed
+    /// move generation to offer a pseudo-legal "capture" of the enemy
+    /// king, which crashed the engine the first time `in_check` was
+    /// next called with no king left on the board.
+    OpponentInCheck(Color),
 }
 
 impl std::fmt::Display for FenError {
@@ -69,6 +77,10 @@ impl std::fmt::Display for FenError {
                 write!(f, "Wrong number of FEN fields: {}", n),
             FenError::KingNotFound(c) =>
                 write!(f, "King not found for {:?}", c),
+            FenError::OpponentInCheck(c) =>
+                write!(f, "Illegal position: {:?} is in check but it is \
+                           not {:?}'s move — the side not to move can \
+                           never legally be in check", c, c),
         }
     }
 }

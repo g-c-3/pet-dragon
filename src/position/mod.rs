@@ -150,6 +150,26 @@ impl Position {
         pos.fullmove_number = parsed.fullmove_number;
         pos.pawn_starts     = parsed.pawn_starts;
 
+        // ── Legality validation (D81/D83) ───────────────────────────────────
+        // Reject at parse time rather than returning a Position that will
+        // later panic. Both checks exist because `king_sq()` unconditionally
+        // `.expect()`s a king to be present — see D81 for the crash this
+        // was found from (an illegal input FEN, not a search bug).
+        for &color in &[Color::White, Color::Black] {
+            if pos.piece_bb(color, PieceKind::King).count() != 1 {
+                return Err(FenError::KingNotFound(color));
+            }
+        }
+        // The side NOT to move being in check is an unreachable state from
+        // legal play (that side's own prior move could never legally leave
+        // its own king in check) — and, left unrejected, allows move
+        // generation to offer a pseudo-legal capture of that king, which
+        // crashes the very next `in_check` call once the king is gone.
+        let waiting_side = pos.side_to_move.flip();
+        if pos.in_check(waiting_side) {
+            return Err(FenError::OpponentInCheck(waiting_side));
+        }
+
         // Compute initial Zobrist hash
         pos.hash = pos.compute_hash();
 
@@ -1079,5 +1099,62 @@ mod tests {
         // independent of the search-tree-relative is_repetition() logic.
         assert!(pos.is_threefold_repetition(),
             "3rd occurrence must be a real threefold regardless of search ply");
+    }
+
+    // ── from_fen legality validation (ROADMAP Phase 26 item 4, D81/D83) ────
+
+    #[test]
+    fn test_from_fen_accepts_legal_position_where_side_to_move_is_in_check() {
+        // The side TO MOVE being in check is completely normal (e.g.
+        // right after a checking move) and must NOT be rejected — only
+        // the side NOT to move being in check is illegal.
+        let fen = "4k3/8/8/8/8/8/8/4KQ2 b - - 0 1"; // Black to move, in check from Qf1
+        assert!(Position::from_fen(fen).is_ok(),
+            "side to move being in check is legal and must be accepted");
+    }
+
+    #[test]
+    fn test_from_fen_rejects_opponent_in_check() {
+        // The exact D81 crash FEN — a legal-looking queen move (d4-h8,
+        // open diagonal) that happens to land on the enemy king, only
+        // possible because this FEN illegally left the side not to move
+        // already in check. Previously this parsed successfully and
+        // later crashed `alpha_beta` with "King must always be on the
+        // board"; now it must be rejected at parse time instead.
+        let fen = "3r3k/8/8/8/3Q4/8/8/K7 w - - 0 1";
+        match Position::from_fen(fen) {
+            Err(FenError::OpponentInCheck(Color::Black)) => {}
+            other => panic!(
+                "expected Err(OpponentInCheck(Black)), got {:?}", other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_from_fen_rejects_missing_king() {
+        // KingNotFound existed as a declared FenError variant but was
+        // never actually constructed anywhere before this diff (D83) —
+        // a FEN with no king for one side would previously build a
+        // Position that panics the first time anything calls
+        // `king_sq()`, instead of failing to parse in the first place.
+        let fen = "8/8/8/8/8/8/8/4K3 w - - 0 1"; // no black king at all
+        match Position::from_fen(fen) {
+            Err(FenError::KingNotFound(Color::Black)) => {}
+            other => panic!(
+                "expected Err(KingNotFound(Black)), got {:?}", other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_from_fen_rejects_two_kings_same_color() {
+        let fen = "4k3/8/8/8/8/8/8/4KK2 w - - 0 1"; // two white kings
+        match Position::from_fen(fen) {
+            Err(FenError::KingNotFound(Color::White)) => {}
+            other => panic!(
+                "expected Err(KingNotFound(White)) for a duplicate king, got {:?}",
+                other
+            ),
+        }
     }
 }
