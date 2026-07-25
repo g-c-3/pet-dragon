@@ -220,6 +220,7 @@ impl EngineState {
                 self.info.history      = returned_info.history;
                 self.info.countermoves = returned_info.countermoves;
                 self.info.correction_history = returned_info.correction_history.clone();
+                self.info.correction_history_nonpawn = returned_info.correction_history_nonpawn.clone();
                 return Some(returned_info);
             }
         }
@@ -733,6 +734,10 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         &mut state.info.correction_history,
         pet_dragon_lib::search::pruning::CorrectionHistory::new(),
     );
+    let correction_nonpawn = std::mem::replace(
+        &mut state.info.correction_history_nonpawn,
+        pet_dragon_lib::search::pruning::CorrectionHistory::new(),
+    );
 
     let handle: JoinHandle<SearchInfo> = std::thread::spawn(move || {
         // ── Helper threads ────────────────────────────────────────────────────
@@ -776,6 +781,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.history      = history;
         main_info.countermoves = countermoves;
         main_info.correction_history = correction;
+        main_info.correction_history_nonpawn = correction_nonpawn;
         main_info.ponder_hit_soft_ms = ponder_hit_soft_ms;
         main_info.ponder_hit_hard_ms = ponder_hit_hard_ms;
         // Phase 19: MultiPV reporting comes from the main thread only —
