@@ -155,7 +155,7 @@ mod tests {
         // output) and check the result never exceeds the documented ceiling.
         setup();
         let pos = Position::from_fen(
-            "QQQQQQQQ/QQQQQQQQ/8/8/8/8/8/k6K w - - 0 1",
+            "QQQQQQQQ/QQQQQQQQ/8/8/8/8/3p4/3k3K w - - 0 1",
         )
         .expect("valid FEN");
         let score = evaluate_nnue(&pos);
