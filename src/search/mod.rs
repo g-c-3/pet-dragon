@@ -196,6 +196,19 @@ pub struct SearchInfo {
     /// a game, snapshotted out and back in around each search thread
     /// spawn) — see `main.rs`.
     pub correction_history_nonpawn: crate::search::pruning::CorrectionHistory,
+
+    /// UCI `NonPawnCorrectionHistory` setting, default `false` (D82 —
+    /// corrected from item 3a's initial always-on shipment to match
+    /// item 1's own established discipline: an unvalidated correction
+    /// source ships gated off, gets its own isolated SPRT-style A/B via
+    /// this option, and only then is a default flip to `true`
+    /// considered). When `false`, `alpha_beta.rs` never reads or writes
+    /// `correction_history_nonpawn` — behavior is byte-identical to
+    /// before item 3a existed. When `true`, the non-pawn-material
+    /// correction table (see that field's own doc comment) is applied
+    /// and updated alongside the existing pawn-hash table. Persistent
+    /// across moves, same threading pattern as `null_move_king_guard`.
+    pub nonpawn_correction_enabled: bool,
     /// Shared stop flag — set by UCI `stop` command or when time expires.
     /// All threads sharing this Arc terminate as soon as the flag is set.
     pub stop_flag: Arc<AtomicBool>,
@@ -321,6 +334,7 @@ impl SearchInfo {
             seldepth:          0,
             correction_history: crate::search::pruning::CorrectionHistory::new(),
             correction_history_nonpawn: crate::search::pruning::CorrectionHistory::new(),
+            nonpawn_correction_enabled: false,
             stop_flag: Arc::new(AtomicBool::new(false)),
             ponder_hit_soft_ms: Arc::new(AtomicU64::new(u64::MAX)),
             ponder_hit_hard_ms: Arc::new(AtomicU64::new(u64::MAX)),

@@ -392,19 +392,26 @@ fn alpha_beta_with_excluded(
     // correction-history update at the end of this node (Phase 13.2);
     // static_eval is the corrected value all pruning decisions use.
     //
-    // Two independent correction sources (Phase 26 item 3a, D80): pawn
-    // structure and non-pawn material placement. Both are read against
-    // raw_static_eval and their corrections summed via chained .apply()
-    // calls (mathematically identical to summing directly, since apply()
-    // is just addition) — each source learns its own correction
-    // independently in the update step below, neither cascades into the
-    // other's baseline.
+    // Two independent correction sources (Phase 26 item 3a, D80/D82): pawn
+    // structure (always on) and non-pawn material placement (gated behind
+    // `info.nonpawn_correction_enabled`, default false, until its own
+    // SPRT-style A/B validates it — D82 corrects item 3a's initial
+    // always-on shipment to match item 1's own established discipline).
+    // Both, when active, are read against raw_static_eval and their
+    // corrections summed via chained .apply() calls (mathematically
+    // identical to summing directly) — each source learns its own
+    // correction independently in the update step below, neither cascades
+    // into the other's baseline.
     let raw_static_eval = if !in_check { evaluate(pos) } else { -INFINITY };
     let static_eval = if !in_check {
         let phash = pawn_hash(pos);
-        let nphash = nonpawn_hash(pos);
         let corrected = info.correction_history.apply(raw_static_eval, phash, pos.side_to_move);
-        info.correction_history_nonpawn.apply(corrected, nphash, pos.side_to_move)
+        if info.nonpawn_correction_enabled {
+            let nphash = nonpawn_hash(pos);
+            info.correction_history_nonpawn.apply(corrected, nphash, pos.side_to_move)
+        } else {
+            corrected
+        }
     } else {
         raw_static_eval
     };
@@ -748,20 +755,24 @@ fn alpha_beta_with_excluded(
         tt.store(pos.hash, depth as i8, tt_score, bound, best_move);
     }
 
-    // ── Correction history update (Phase 13.2; second source Phase 26 item 3a, D80) ──
+    // ── Correction history update (Phase 13.2; second source Phase 26 item 3a, D80/D82) ──
     // Skip when in check (static eval meaningless), search was aborted, or
     // the result is a mate score (error signal is noise, not eval drift).
     // Both sources update against the same raw_static_eval baseline,
-    // independently — see the static-eval comment above for why.
+    // independently — see the static-eval comment above for why. The
+    // non-pawn source only runs when info.nonpawn_correction_enabled is
+    // true (default false — see that field's doc comment).
     if !info.stop && !in_check && !crate::search::is_mate_score(best_score) {
         let phash = pawn_hash(pos);
-        let nphash = nonpawn_hash(pos);
         info.correction_history.update(
             phash, pos.side_to_move, raw_static_eval, best_score, depth,
         );
-        info.correction_history_nonpawn.update(
-            nphash, pos.side_to_move, raw_static_eval, best_score, depth,
-        );
+        if info.nonpawn_correction_enabled {
+            let nphash = nonpawn_hash(pos);
+            info.correction_history_nonpawn.update(
+                nphash, pos.side_to_move, raw_static_eval, best_score, depth,
+            );
+        }
     }
 
     best_score
@@ -1251,10 +1262,44 @@ mod tests {
     // ── Non-pawn-material correction history (ROADMAP Phase 26 item 3a, D80) ──
 
     #[test]
+    fn test_nonpawn_correction_defaults_to_false() {
+        // D82: an unvalidated correction source ships gated off, same
+        // discipline as null_move_king_guard — default engine behavior
+        // must be byte-identical to before item 3a existed for anyone
+        // who never touches this option.
+        let info = SearchInfo::new();
+        assert!(!info.nonpawn_correction_enabled,
+            "nonpawn_correction_enabled must default to false");
+    }
+
+    #[test]
+    fn test_nonpawn_correction_off_leaves_table_untouched() {
+        setup();
+        // With the flag left at its default (false), even a position
+        // guaranteed to produce a large error when the flag IS on (the
+        // same hanging-queen position used below) must leave the
+        // non-pawn table completely untouched — proves the gating
+        // actually short-circuits both the apply() and update() call
+        // sites, not just one of them.
+        let fen = "3r2k1/ppp2ppp/8/8/3Q4/8/PPP2PPP/4K3 b - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let _ = alpha_beta(
+            &mut pos, 6, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        let nphash = nonpawn_hash(&pos);
+        assert_eq!(info.correction_history_nonpawn.get(nphash, pos.side_to_move), 0,
+            "non-pawn table must stay untouched when the flag is off");
+    }
+
+    #[test]
     fn test_nonpawn_correction_history_wired_into_search() {
         setup();
         // Proves the update() call site added in this diff is actually
-        // reached during a real search, not just present in dead code.
+        // reached during a real search when the flag is enabled, not
+        // just present in dead code.
         //
         // Deliberately NOT using the start position: a well-balanced,
         // symmetric position can produce a genuinely tiny search-vs-
@@ -1269,10 +1314,15 @@ mod tests {
         // no recapture available. Static eval at the root still counts
         // the queen (it hasn't been captured yet); search immediately
         // finds Rxd4 winning it. That gap is large enough (~600+cp) to
-        // survive the rounding at any reasonable depth.
+        // survive the rounding at any reasonable depth. King placed on
+        // g8 (not h8) deliberately — h8 sits on the queen's d4-h8
+        // diagonal, which made an earlier draft of this exact position
+        // an illegal FEN (opponent already in check when not to move)
+        // and crashed the engine entirely; see DECISIONS.md D81.
         let fen = "3r2k1/ppp2ppp/8/8/3Q4/8/PPP2PPP/4K3 b - - 0 1";
         let mut pos = Position::from_fen(fen).unwrap();
         let mut info = SearchInfo::new();
+        info.nonpawn_correction_enabled = true;
         info.time_allocated_ms = 60_000;
         let tt = TranspositionTable::new(16);
         let _ = alpha_beta(
@@ -1283,8 +1333,8 @@ mod tests {
         assert_ne!(corr, 0,
             "non-pawn correction table should have a non-zero entry for \
              the root position's hash after search discovers the hanging \
-             queen — if this is 0, the new update() call in this diff \
-             likely isn't being reached");
+             queen, with the flag enabled — if this is 0, the new \
+             update() call in this diff likely isn't being reached");
     }
 
     #[test]
