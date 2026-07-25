@@ -39,7 +39,7 @@ use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
-    pruning::{lmr_thread_base, pawn_hash, should_apply_lmp, should_try_probcut, try_probcut},
+    pruning::{lmr_thread_base, nonpawn_hash, pawn_hash, should_apply_lmp, should_try_probcut, try_probcut},
     see::see,
     SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
@@ -391,10 +391,20 @@ fn alpha_beta_with_excluded(
     // Only compute if needed for pruning. raw_static_eval feeds the
     // correction-history update at the end of this node (Phase 13.2);
     // static_eval is the corrected value all pruning decisions use.
+    //
+    // Two independent correction sources (Phase 26 item 3a, D80): pawn
+    // structure and non-pawn material placement. Both are read against
+    // raw_static_eval and their corrections summed via chained .apply()
+    // calls (mathematically identical to summing directly, since apply()
+    // is just addition) — each source learns its own correction
+    // independently in the update step below, neither cascades into the
+    // other's baseline.
     let raw_static_eval = if !in_check { evaluate(pos) } else { -INFINITY };
     let static_eval = if !in_check {
         let phash = pawn_hash(pos);
-        info.correction_history.apply(raw_static_eval, phash, pos.side_to_move)
+        let nphash = nonpawn_hash(pos);
+        let corrected = info.correction_history.apply(raw_static_eval, phash, pos.side_to_move);
+        info.correction_history_nonpawn.apply(corrected, nphash, pos.side_to_move)
     } else {
         raw_static_eval
     };
@@ -738,13 +748,19 @@ fn alpha_beta_with_excluded(
         tt.store(pos.hash, depth as i8, tt_score, bound, best_move);
     }
 
-    // ── Correction history update (Phase 13.2) ────────────────────────────────
+    // ── Correction history update (Phase 13.2; second source Phase 26 item 3a, D80) ──
     // Skip when in check (static eval meaningless), search was aborted, or
     // the result is a mate score (error signal is noise, not eval drift).
+    // Both sources update against the same raw_static_eval baseline,
+    // independently — see the static-eval comment above for why.
     if !info.stop && !in_check && !crate::search::is_mate_score(best_score) {
         let phash = pawn_hash(pos);
+        let nphash = nonpawn_hash(pos);
         info.correction_history.update(
             phash, pos.side_to_move, raw_static_eval, best_score, depth,
+        );
+        info.correction_history_nonpawn.update(
+            nphash, pos.side_to_move, raw_static_eval, best_score, depth,
         );
     }
 
@@ -1230,5 +1246,66 @@ mod tests {
         assert_ne!(info.best_move, Move::NULL,
             "search must return a legal move with the guard enabled");
         assert!(score.abs() <= INFINITY);
+    }
+
+    // ── Non-pawn-material correction history (ROADMAP Phase 26 item 3a, D80) ──
+
+    #[test]
+    fn test_nonpawn_correction_history_wired_into_search() {
+        setup();
+        // Proves the update() call site added in this diff is actually
+        // reached during a real search, not just present in dead code.
+        //
+        // Deliberately NOT using the start position: a well-balanced,
+        // symmetric position can produce a genuinely tiny search-vs-
+        // static-eval error, which the weighted-average update formula
+        // (`entry = (entry*(256-w) + error*w) / 256`, integer division)
+        // can legitimately round straight back down to 0 — that would
+        // make this test flaky/misleading, not a real signal of broken
+        // wiring. Verified this directly against a real build before
+        // picking this position (see DECISIONS.md D80).
+        //
+        // Instead: an undefended queen on an open file, Black to move,
+        // no recapture available. Static eval at the root still counts
+        // the queen (it hasn't been captured yet); search immediately
+        // finds Rxd4 winning it. That gap is large enough (~600+cp) to
+        // survive the rounding at any reasonable depth.
+        let fen = "3r2k1/ppp2ppp/8/8/3Q4/8/PPP2PPP/4K3 b - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let _ = alpha_beta(
+            &mut pos, 6, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        let nphash = nonpawn_hash(&pos);
+        let corr = info.correction_history_nonpawn.get(nphash, pos.side_to_move);
+        assert_ne!(corr, 0,
+            "non-pawn correction table should have a non-zero entry for \
+             the root position's hash after search discovers the hanging \
+             queen — if this is 0, the new update() call in this diff \
+             likely isn't being reached");
+    }
+
+    #[test]
+    fn test_nonpawn_and_pawn_corrections_are_independent_sources() {
+        setup();
+        // The two tables must not be the same underlying storage — a
+        // regression here (e.g. accidentally aliasing or copy-pasting
+        // the pawn table's hash into both call sites) would silently
+        // collapse two independent signal sources into one. Confirmed by
+        // directly seeding each table via a different hash and checking
+        // the other table wasn't touched.
+        let mut info = SearchInfo::new();
+        info.correction_history.update(0xAAAA, Color::White, 100, 200, 8);
+        info.correction_history_nonpawn.update(0xBBBB, Color::White, 100, 150, 8);
+        assert_ne!(info.correction_history.get(0xAAAA, Color::White), 0);
+        assert_eq!(info.correction_history_nonpawn.get(0xAAAA, Color::White), 0,
+            "updating the pawn table at a given hash must not leak into \
+             the non-pawn table at the same hash");
+        assert_ne!(info.correction_history_nonpawn.get(0xBBBB, Color::White), 0);
+        assert_eq!(info.correction_history.get(0xBBBB, Color::White), 0,
+            "updating the non-pawn table at a given hash must not leak \
+             into the pawn table at the same hash");
     }
 }

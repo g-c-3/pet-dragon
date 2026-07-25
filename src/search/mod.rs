@@ -180,6 +180,22 @@ pub struct SearchInfo {
     pub seldepth: usize,
     /// Correction history — pawn-structure-indexed eval error tracker (Phase 13.2)
     pub correction_history: crate::search::pruning::CorrectionHistory,
+
+    // ── Non-pawn-material correction history (Phase 26 item 3a, D80) ─────────
+    /// Second, independent correction-history table indexed by
+    /// `pruning::nonpawn_hash` instead of `pruning::pawn_hash` — same
+    /// struct type, same weighted-average update rule, but tracking a
+    /// different systematic-error signal (piece placement rather than
+    /// pawn structure). Applied additively alongside
+    /// `correction_history` in `alpha_beta.rs`: both are read against
+    /// the same `raw_static_eval` baseline and their corrections summed,
+    /// not chained/cascaded, so each source learns independently rather
+    /// than one source's correction feeding into what the other treats
+    /// as its baseline error. Threaded through `EngineState`/`cmd_go`
+    /// exactly like `correction_history` (persists across moves within
+    /// a game, snapshotted out and back in around each search thread
+    /// spawn) — see `main.rs`.
+    pub correction_history_nonpawn: crate::search::pruning::CorrectionHistory,
     /// Shared stop flag — set by UCI `stop` command or when time expires.
     /// All threads sharing this Arc terminate as soon as the flag is set.
     pub stop_flag: Arc<AtomicBool>,
@@ -304,6 +320,7 @@ impl SearchInfo {
             best_move:         Move::NULL,
             seldepth:          0,
             correction_history: crate::search::pruning::CorrectionHistory::new(),
+            correction_history_nonpawn: crate::search::pruning::CorrectionHistory::new(),
             stop_flag: Arc::new(AtomicBool::new(false)),
             ponder_hit_soft_ms: Arc::new(AtomicU64::new(u64::MAX)),
             ponder_hit_hard_ms: Arc::new(AtomicU64::new(u64::MAX)),

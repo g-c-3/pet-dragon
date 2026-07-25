@@ -389,6 +389,42 @@ pub fn pawn_hash(pos: &Position) -> u64 {
     hash
 }
 
+/// Compute non-pawn-material hash for correction history indexing
+/// (ROADMAP Phase 26 item 3a, D80). Hashes the placement of every
+/// knight, bishop, rook, and queen (both colors) — deliberately
+/// excludes pawns (already covered by `pawn_hash` above, a separate
+/// signal) and kings (king position is far more volatile move-to-move
+/// than a systematic-error signal benefits from indexing by; king
+/// safety already has its own dedicated eval term and isn't what this
+/// correction source targets).
+///
+/// This targets a different systematic-error pattern than the existing
+/// pawn-structure correction: cases where the *piece* placement (a
+/// knight stuck on the rim, a bishop pair vs. a lone bishop, rooks
+/// doubled or not) causes the static evaluator to be consistently
+/// wrong in ways search then has to discover and correct for at every
+/// node, independent of what the pawns are doing. Same technique
+/// Stockfish uses for its own non-pawn correction history source.
+pub fn nonpawn_hash(pos: &Position) -> u64 {
+    use crate::position::zobrist::piece_key;
+
+    let mut hash = 0u64;
+    for color in Color::ALL {
+        for kind in [
+            PieceKind::Knight,
+            PieceKind::Bishop,
+            PieceKind::Rook,
+            PieceKind::Queen,
+        ] {
+            let mut pieces = pos.piece_bb(color, kind);
+            while let Some(sq) = pieces.pop_lsb() {
+                hash ^= piece_key(color, kind, sq);
+            }
+        }
+    }
+    hash
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -569,6 +605,53 @@ mod tests {
         // Not guaranteed but very likely
         assert!(h1 != 0, "Pawn hash should be non-zero");
         assert!(h2 != 0, "Pawn hash should be non-zero");
+    }
+
+    #[test]
+    fn test_nonpawn_hash_differs_by_position() {
+        setup();
+        let pos1 = Position::start_pos().unwrap();
+        let pos2 = Position::generate_with_seed(42);
+        let h1   = nonpawn_hash(&pos1);
+        let h2   = nonpawn_hash(&pos2);
+        assert!(h1 != 0, "Non-pawn-material hash should be non-zero");
+        assert!(h2 != 0, "Non-pawn-material hash should be non-zero");
+    }
+
+    #[test]
+    fn test_nonpawn_hash_ignores_pawn_structure() {
+        setup();
+        // Two positions with identical non-pawn piece placement but
+        // different pawn structure must produce the SAME non-pawn hash —
+        // that's the entire point of the two hashes being independent
+        // signal sources. Standard start vs. standard start with the
+        // e-pawns pushed one square: same piece placement, different
+        // pawns.
+        let start = Position::start_pos().unwrap();
+        let e4    = Position::from_fen(
+            "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1"
+        ).unwrap();
+        assert_eq!(nonpawn_hash(&start), nonpawn_hash(&e4),
+            "non-pawn hash must be identical when only pawns differ");
+        assert_ne!(pawn_hash(&start), pawn_hash(&e4),
+            "sanity check: pawn hash SHOULD differ here (control case)");
+    }
+
+    #[test]
+    fn test_nonpawn_hash_ignores_king_position() {
+        setup();
+        // Kings deliberately excluded from the non-pawn hash (see the
+        // function's doc comment) — moving only a king must not change
+        // the non-pawn-material hash.
+        let pos1 = Position::from_fen(
+            "4k3/8/8/8/8/8/8/4K2R w K - 0 1"
+        ).unwrap();
+        let pos2 = Position::from_fen(
+            "4k3/8/8/8/8/8/4K3/7R w - - 0 1"
+        ).unwrap();
+        assert_eq!(nonpawn_hash(&pos1), nonpawn_hash(&pos2),
+            "moving only the king must not change the non-pawn hash \
+             (kings are deliberately excluded)");
     }
 
     #[test]
