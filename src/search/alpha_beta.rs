@@ -585,11 +585,16 @@ fn alpha_beta_with_excluded(
 
             if score < singular_beta {
                 tt_move_extension = 1;
-            } else if singular_beta >= beta {
-                // Multi-cut: skip move generation/TT store entirely,
-                // mirroring probcut's early-return shape above.
+            } else if info.singular_multicut_enabled && singular_beta >= beta {
+                // Multi-cut (D59): skip move generation/TT store entirely,
+                // mirroring probcut's early-return shape above. Phase 27
+                // (Session 86): gated behind info.singular_multicut_enabled,
+                // default `true` (byte-identical to before this option
+                // existed) — see SearchInfo::singular_multicut_enabled's
+                // doc comment.
                 return singular_beta;
-            } else if tt_score >= beta {
+            } else if info.singular_multicut_enabled && tt_score >= beta {
+                // Negative extension (D59) — same Phase 27 gate as above.
                 tt_move_extension = if pv_node { -1 } else { -2 };
             }
         }
@@ -671,7 +676,12 @@ fn alpha_beta_with_excluded(
         // without raising alpha, instead of just reducing them. See
         // `pruning::should_apply_lmp` for the full rationale and the
         // depth→threshold table.
-        if should_apply_lmp(
+        // Phase 27 (Session 86): gated behind info.lmp_enabled, default
+        // `true` (byte-identical to before this option existed) — see
+        // SearchInfo::lmp_enabled's doc comment. Lets the same binary be
+        // A/B'd against the external-Stockfish bench regression without a
+        // rebuild.
+        if info.lmp_enabled && should_apply_lmp(
             depth, moves_tried, is_quiet, in_check, gives_check, pv_node,
             alpha, beta,
         ) {
@@ -1532,6 +1542,62 @@ mod tests {
         info.correction_extension_enabled = true;
         let phash = pawn_hash(&pos);
         info.correction_history.update(phash, pos.side_to_move, 0, 512, 16);
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 7, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.best_move, Move::NULL);
+        assert!(score.abs() <= INFINITY);
+    }
+
+    // ── Phase 27 diagnostic toggles (D59/D60 A/B, Session 86) ─────────────────
+
+    #[test]
+    fn test_lmp_enabled_defaults_to_true() {
+        // Unlike the Phase 26 items above, D60 is already default-on
+        // production behavior — `true` is the byte-identical-to-current
+        // default, not an opt-in.
+        let info = SearchInfo::new();
+        assert!(info.lmp_enabled, "lmp_enabled must default to true");
+    }
+
+    #[test]
+    fn test_singular_multicut_enabled_defaults_to_true() {
+        let info = SearchInfo::new();
+        assert!(info.singular_multicut_enabled,
+            "singular_multicut_enabled must default to true");
+    }
+
+    #[test]
+    fn test_lmp_disabled_still_searches_safely() {
+        setup();
+        // With LMP switched off, the move loop falls back to searching
+        // every quiet move at full width — must still complete and return
+        // a legal move, just doing more work per node.
+        let mut pos = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.lmp_enabled = false;
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 6, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.best_move, Move::NULL);
+        assert!(score.abs() <= INFINITY);
+    }
+
+    #[test]
+    fn test_singular_multicut_disabled_still_searches_safely() {
+        setup();
+        // With the D59 additions switched off, only Phase 13.3's original
+        // base singular extension branch can fire — must still complete
+        // and return a legal move at a depth deep enough to reach the
+        // singular-extension code path (same depth as the existing
+        // test_search_at_singular_extension_depth_no_panic coverage).
+        let mut pos = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.singular_multicut_enabled = false;
         info.time_allocated_ms = 60_000;
         let tt = TranspositionTable::new(16);
         let score = alpha_beta(

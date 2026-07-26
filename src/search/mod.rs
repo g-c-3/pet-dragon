@@ -339,6 +339,38 @@ pub struct SearchInfo {
     /// spawn loop. Not reset by `reset_for_search()` — thread identity
     /// doesn't change between searches on the same thread.
     pub thread_id: usize,
+
+    // ── Phase 27 diagnostic toggles (Session 86) ──────────────────────────────
+    // Both D59/D60 shipped in Session 82 explicitly flagged "⚠️ not yet
+    // Elo-measured against a real match". Phase 27 (ROADMAP.md) is
+    // investigating a 6-for-6 loss regression against external Stockfish
+    // (100ms and 1000ms/move) where material stays level early then
+    // collapses hard late-game, in every recorded bench so far. These two
+    // options exist purely to let the *same binary* be A/B'd via
+    // `uci_match_runner`/the existing Engine Bench tool without a rebuild,
+    // same reasoning as `null_move_king_guard`. Both default `true` —
+    // unlike `null_move_king_guard` et al, D59/D60 are *already* default-on
+    // production behavior, so `true` is the byte-identical-to-current
+    // default; setting either `false` reverts that one technique to its
+    // pre-D59/D60 behavior for comparison.
+    /// UCI `LMPEnabled` setting, default `true`. When `false`,
+    /// `alpha_beta.rs`'s move loop never calls `pruning::should_apply_lmp`
+    /// — Late Move Pruning (D60) never fires, reverting to pre-D60
+    /// behavior. When `true` (the default), behavior is unchanged from
+    /// before this option existed.
+    pub lmp_enabled: bool,
+    /// UCI `SingularMultiCutEnabled` setting, default `true`. Gates only
+    /// the two D59 additions on top of Phase 13.3/D16's original base
+    /// singular extension: the multi-cut early return
+    /// (`singular_beta >= beta`) and the negative extension
+    /// (`tt_score >= beta`) branches in `alpha_beta.rs`. The base
+    /// `score < singular_beta → tt_move_extension = 1` branch is
+    /// untouched by this option — that's Phase 13.3's original, separately
+    /// validated behavior, not part of what Phase 27 is investigating.
+    /// When `false`, those two branches are skipped entirely (as if D59
+    /// had never landed); when `true` (the default), behavior is
+    /// unchanged from before this option existed.
+    pub singular_multicut_enabled: bool,
 }
 
 impl SearchInfo {
@@ -380,6 +412,8 @@ impl SearchInfo {
             contempt: 0,
             null_move_king_guard: false,
             thread_id: 0,
+            lmp_enabled: true,
+            singular_multicut_enabled: true,
         }
     }
 
