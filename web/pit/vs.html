@@ -891,6 +891,17 @@ function sideSummary(cfg) {
   return `${ENGINE_LABEL[cfg.engine] || cfg.engine} (skill ${cfg.skill}, movetime ${cfg.movetime}ms)`;
 }
 
+// Phase 27 (Session 88): mirrors search_from_fen_with_eval's own
+// doc-commented eval format on the Rust side — signed centipawns,
+// White-relative, or mateN/mate-N. `?` only if an engine genuinely
+// returned no score (shouldn't happen for either engine in this tool,
+// but toWhiteRelativeEval can return null defensively).
+function formatEvalToken(ev) {
+  if (!ev) return '?';
+  if (ev.type === 'mate') return `mate${ev.val}`;
+  return (ev.val > 0 ? '+' : '') + ev.val;
+}
+
 function buildLogText() {
   const lines = [];
   lines.push('Engine Bench — match log');
@@ -908,7 +919,7 @@ function buildLogText() {
     // printed unconditionally for a simple, always-parseable log format —
     // both true is the production-default config.
     lines.push(`Pet Dragon diagnostics: LMPEnabled=${entry.dragonLmpEnabled}, SingularMultiCutEnabled=${entry.dragonMulticutEnabled}`);
-    lines.push(`Moves (${entry.moves.length} plies): ${entry.moves.join(' ') || '(none)'}`);
+    lines.push(`Moves (${entry.moves.length} plies — each shown as move(eval); eval is White-relative centipawns after that move, or mateN/mate-N): ${entry.moves.map(m => `${m.uci}(${formatEvalToken(m.eval)})`).join(' ') || '(none)'}`);
     lines.push(`Result: ${entry.result} — ${resultLabel} (${entry.reason})`);
     lines.push('-'.repeat(64));
   });
@@ -1145,7 +1156,12 @@ function recordMatchLogEntry(status) {
     startFen: meta.startFen,
     white: meta.white,
     black: meta.black,
-    moves: match.history.map(h => h.uci),
+    // Phase 27 (Session 88): carry each move's White-relative eval
+    // alongside the UCI token (both engines already compute one — see
+    // toWhiteRelativeEval/parsePetDragonResult — it just wasn't being
+    // exported before). Lets a downloaded log show the engine's own
+    // assessment leading into a collapse, not just the moves themselves.
+    moves: match.history.map(h => ({ uci: h.uci, eval: h.eval })),
     result: status.result,
     reason: status.reason,
     dragonLmpEnabled: meta.dragonLmpEnabled,
