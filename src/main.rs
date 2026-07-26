@@ -188,6 +188,17 @@ struct EngineState {
     /// threading pattern as the others — see
     /// `SearchInfo::correction_extension_enabled`'s doc comment.
     correction_extension_enabled: bool,
+
+    // ── Phase 27 diagnostic toggles (Session 86) ──────────────────────────────
+    /// UCI `LMPEnabled` setting, default `true` (byte-identical to current
+    /// production behavior — D60 already ships default-on, unlike the
+    /// Phase 26 items above). Threaded into `main_info`/`h_info.lmp_enabled`
+    /// in cmd_go — see `SearchInfo::lmp_enabled`'s doc comment.
+    lmp_enabled: bool,
+    /// UCI `SingularMultiCutEnabled` setting, default `true`, same
+    /// reasoning as `lmp_enabled` above — see
+    /// `SearchInfo::singular_multicut_enabled`'s doc comment.
+    singular_multicut_enabled: bool,
 }
 
 impl EngineState {
@@ -222,6 +233,8 @@ impl EngineState {
             nonpawn_correction_enabled: false,
             continuation_correction_enabled: false,
             correction_extension_enabled: false,
+            lmp_enabled: true,
+            singular_multicut_enabled: true,
             limit_strength: false,
             elo: pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
         }
@@ -425,6 +438,12 @@ fn cmd_uci() {
     println!("option name NonPawnCorrectionHistory type check default false");
     println!("option name ContinuationCorrectionHistory type check default false");
     println!("option name CorrectionExtension type check default false");
+    // Phase 27 (Session 86): D59/D60 diagnostic toggles, both default true
+    // (byte-identical to current production behavior) — set either false
+    // to A/B against the external-Stockfish bench regression under
+    // investigation. See DECISIONS.md and ROADMAP.md Phase 27.
+    println!("option name LMPEnabled type check default true");
+    println!("option name SingularMultiCutEnabled type check default true");
     println!();
     println!("uciok");
 }
@@ -538,6 +557,16 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
         "correctionextension" => {
             // Phase 26 item 3c, D89: same pattern.
             state.correction_extension_enabled = value.eq_ignore_ascii_case("true");
+        }
+        "lmpenabled" => {
+            // Phase 27 (Session 86): same recorded-here/applied-in-cmd_go
+            // pattern as the others, but default true — see
+            // SearchInfo::lmp_enabled's doc comment.
+            state.lmp_enabled = value.eq_ignore_ascii_case("true");
+        }
+        "singularmulticutenabled" => {
+            // Phase 27 (Session 86): same pattern as lmpenabled.
+            state.singular_multicut_enabled = value.eq_ignore_ascii_case("true");
         }
         "uci_elo" => {
             if let Ok(n) = value.parse::<i32>() {
@@ -772,6 +801,8 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let nonpawn_correction_enabled = state.nonpawn_correction_enabled;
     let continuation_correction_enabled = state.continuation_correction_enabled;
     let correction_extension_enabled = state.correction_extension_enabled;
+    let lmp_enabled = state.lmp_enabled;
+    let singular_multicut_enabled = state.singular_multicut_enabled;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -814,6 +845,8 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                 h_info.nonpawn_correction_enabled = nonpawn_correction_enabled;
                 h_info.continuation_correction_enabled = continuation_correction_enabled;
                 h_info.correction_extension_enabled = correction_extension_enabled;
+                h_info.lmp_enabled = lmp_enabled;
+                h_info.singular_multicut_enabled = singular_multicut_enabled;
                 // Phase 23.2/D49: thread identity, consumed by
                 // lmr_thread_base() and thread_tie_break() to vary this
                 // helper's LMR aggressiveness and quiet-move tie-breaking
@@ -846,6 +879,8 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.nonpawn_correction_enabled = nonpawn_correction_enabled;
         main_info.continuation_correction_enabled = continuation_correction_enabled;
         main_info.correction_extension_enabled = correction_extension_enabled;
+        main_info.lmp_enabled = lmp_enabled;
+        main_info.singular_multicut_enabled = singular_multicut_enabled;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -1393,6 +1428,75 @@ mod tests {
         assert!(returned.correction_extension_enabled,
             "The SearchInfo actually used by the search thread must reflect \
              the configured CorrectionExtension value, not just \
+             EngineState's own copy of it");
+    }
+
+    #[test]
+    fn test_lmp_enabled_option_defaults_to_true() {
+        setup();
+        let state = EngineState::new();
+        assert!(state.lmp_enabled,
+            "LMPEnabled should default to true — D60 already ships \
+             default-on in production, unlike the Phase 26 items above; \
+             this option exists only to A/B disable it (Phase 27)");
+    }
+
+    #[test]
+    fn test_lmp_enabled_option_parses_true_and_false() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name LMPEnabled value false");
+        assert!(!state.lmp_enabled);
+        cmd_setoption(&mut state, "setoption name LMPEnabled value true");
+        assert!(state.lmp_enabled);
+    }
+
+    #[test]
+    fn test_cmd_go_applies_lmp_enabled_to_search() {
+        setup();
+        let mut state = EngineState::new();
+        state.lmp_enabled = false;
+        cmd_go(&mut state, "go depth 4");
+        let returned = state.wait_for_search()
+            .expect("search should have produced a SearchInfo");
+        assert!(!returned.lmp_enabled,
+            "The SearchInfo actually used by the search thread must reflect \
+             the configured LMPEnabled value, not just EngineState's own \
+             copy of it");
+    }
+
+    #[test]
+    fn test_singular_multicut_enabled_option_defaults_to_true() {
+        setup();
+        let state = EngineState::new();
+        assert!(state.singular_multicut_enabled,
+            "SingularMultiCutEnabled should default to true — D59's \
+             multi-cut/negative-extension additions already ship \
+             default-on in production; this option exists only to A/B \
+             disable them (Phase 27)");
+    }
+
+    #[test]
+    fn test_singular_multicut_enabled_option_parses_true_and_false() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name SingularMultiCutEnabled value false");
+        assert!(!state.singular_multicut_enabled);
+        cmd_setoption(&mut state, "setoption name SingularMultiCutEnabled value true");
+        assert!(state.singular_multicut_enabled);
+    }
+
+    #[test]
+    fn test_cmd_go_applies_singular_multicut_enabled_to_search() {
+        setup();
+        let mut state = EngineState::new();
+        state.singular_multicut_enabled = false;
+        cmd_go(&mut state, "go depth 4");
+        let returned = state.wait_for_search()
+            .expect("search should have produced a SearchInfo");
+        assert!(!returned.singular_multicut_enabled,
+            "The SearchInfo actually used by the search thread must reflect \
+             the configured SingularMultiCutEnabled value, not just \
              EngineState's own copy of it");
     }
 
