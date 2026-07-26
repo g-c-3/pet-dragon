@@ -209,6 +209,23 @@ pub struct SearchInfo {
     /// and updated alongside the existing pawn-hash table. Persistent
     /// across moves, same threading pattern as `null_move_king_guard`.
     pub nonpawn_correction_enabled: bool,
+
+    // ── Continuation-based correction history (Phase 26 item 3b, D86) ────────
+    /// Third, independent correction-history table indexed by
+    /// `pruning::continuation_hash` — the last two real moves' squares,
+    /// not any board-state property (unlike `correction_history` /
+    /// `correction_history_nonpawn`). Same struct type, same
+    /// weighted-average update rule. Applied additively alongside the
+    /// other two when `continuation_correction_enabled` is true.
+    pub correction_history_continuation: crate::search::pruning::CorrectionHistory,
+
+    /// UCI `ContinuationCorrectionHistory` setting, default `false`.
+    /// Shipped gated-off from the start this time (learning from
+    /// D82's retrofit on item 3a) — an unvalidated correction source
+    /// gets its own isolated SPRT-style A/B via this option before any
+    /// default flip is considered. When false, `alpha_beta.rs` never
+    /// reads or writes `correction_history_continuation`.
+    pub continuation_correction_enabled: bool,
     /// Shared stop flag — set by UCI `stop` command or when time expires.
     /// All threads sharing this Arc terminate as soon as the flag is set.
     pub stop_flag: Arc<AtomicBool>,
@@ -335,6 +352,8 @@ impl SearchInfo {
             correction_history: crate::search::pruning::CorrectionHistory::new(),
             correction_history_nonpawn: crate::search::pruning::CorrectionHistory::new(),
             nonpawn_correction_enabled: false,
+            correction_history_continuation: crate::search::pruning::CorrectionHistory::new(),
+            continuation_correction_enabled: false,
             stop_flag: Arc::new(AtomicBool::new(false)),
             ponder_hit_soft_ms: Arc::new(AtomicU64::new(u64::MAX)),
             ponder_hit_hard_ms: Arc::new(AtomicU64::new(u64::MAX)),

@@ -39,7 +39,7 @@ use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
-    pruning::{lmr_thread_base, nonpawn_hash, pawn_hash, should_apply_lmp, should_try_probcut, try_probcut},
+    pruning::{continuation_hash, lmr_thread_base, nonpawn_hash, pawn_hash, should_apply_lmp, should_try_probcut, try_probcut},
     see::see,
     SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
@@ -406,9 +406,18 @@ fn alpha_beta_with_excluded(
     let static_eval = if !in_check {
         let phash = pawn_hash(pos);
         let corrected = info.correction_history.apply(raw_static_eval, phash, pos.side_to_move);
-        if info.nonpawn_correction_enabled {
+        let corrected = if info.nonpawn_correction_enabled {
             let nphash = nonpawn_hash(pos);
             info.correction_history_nonpawn.apply(corrected, nphash, pos.side_to_move)
+        } else {
+            corrected
+        };
+        if info.continuation_correction_enabled {
+            if let Some(chash) = continuation_hash(pos, prev_move) {
+                info.correction_history_continuation.apply(corrected, chash, pos.side_to_move)
+            } else {
+                corrected
+            }
         } else {
             corrected
         }
@@ -772,6 +781,13 @@ fn alpha_beta_with_excluded(
             info.correction_history_nonpawn.update(
                 nphash, pos.side_to_move, raw_static_eval, best_score, depth,
             );
+        }
+        if info.continuation_correction_enabled {
+            if let Some(chash) = continuation_hash(pos, prev_move) {
+                info.correction_history_continuation.update(
+                    chash, pos.side_to_move, raw_static_eval, best_score, depth,
+                );
+            }
         }
     }
 
@@ -1357,5 +1373,93 @@ mod tests {
         assert_eq!(info.correction_history.get(0xBBBB, Color::White), 0,
             "updating the non-pawn table at a given hash must not leak \
              into the pawn table at the same hash");
+    }
+
+    // ── Continuation-based correction history (ROADMAP Phase 26 item 3b, D86) ──
+
+    #[test]
+    fn test_continuation_correction_defaults_to_false() {
+        let info = SearchInfo::new();
+        assert!(!info.continuation_correction_enabled,
+            "continuation_correction_enabled must default to false");
+    }
+
+    #[test]
+    fn test_continuation_correction_off_leaves_table_untouched() {
+        setup();
+        let fen = "3r2k1/ppp2ppp/8/8/3Q4/8/PPP2PPP/4K3 b - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let _ = alpha_beta(
+            &mut pos, 6, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        // With no prev_move at the root and the flag off, the table
+        // must never be touched — check a broad sample of hashes stays
+        // at exactly the fresh-table default (0) rather than trying to
+        // reconstruct which hash the root would have used.
+        assert_eq!(info.correction_history_continuation.get(0, Color::Black), 0);
+        assert_eq!(info.correction_history_continuation.get(12345, Color::White), 0);
+    }
+
+    #[test]
+    fn test_continuation_correction_history_wired_into_search() {
+        setup();
+        // Same hanging-queen position as item 3a's own wiring test (see
+        // that test's comment for why the start position isn't used —
+        // small natural error rounds to 0 under the weighted-average
+        // formula). continuation_hash additionally needs 2 real moves
+        // of history to return Some at all; rather than actually play
+        // out two arbitrary opening moves (which would change the
+        // position and defeat the point), synthetically attach two
+        // history entries directly — continuation_hash only reads
+        // pos.history's move squares, never the resulting board state
+        // (see that function's own doc comment), so this is exactly
+        // equivalent to having really played them.
+        let fen = "3r2k1/ppp2ppp/8/8/3Q4/8/PPP2PPP/4K3 b - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let synth = |from, to| crate::position::HistoryEntry {
+            mv: Move::new(from, to, MoveKind::Quiet),
+            castling: pos.castling,
+            en_passant: None,
+            halfmove_clock: 0,
+            hash: pos.hash,
+            captured: None,
+        };
+        pos.history.push(synth(Square::A2, Square::A3));
+        let prev_move = Move::new(Square::H7, Square::H6, MoveKind::Quiet);
+        pos.history.push(synth(Square::H7, Square::H6));
+
+        let mut info = SearchInfo::new();
+        info.continuation_correction_enabled = true;
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let _ = alpha_beta(
+            &mut pos, 6, -INFINITY, INFINITY, 0, true, &mut info, &tt, prev_move,
+        );
+        let chash = continuation_hash(&pos, prev_move)
+            .expect("2 real moves of history were attached — must be Some");
+        let corr = info.correction_history_continuation.get(chash, pos.side_to_move);
+        assert_ne!(corr, 0,
+            "continuation correction table should have a non-zero entry \
+             for the root's own continuation hash after search \
+             discovers the hanging queen — if this is 0, the new \
+             update() call in this diff likely isn't being reached");
+    }
+
+    #[test]
+    fn test_continuation_correction_independent_of_other_sources() {
+        setup();
+        // Same independence proof as item 3a's, extended to all three
+        // tables — seeding one must never leak into either of the
+        // other two at the same hash value.
+        let mut info = SearchInfo::new();
+        info.correction_history.update(0xAAAA, Color::White, 100, 200, 8);
+        info.correction_history_nonpawn.update(0xBBBB, Color::White, 100, 150, 8);
+        info.correction_history_continuation.update(0xCCCC, Color::White, 100, 180, 8);
+        assert_ne!(info.correction_history_continuation.get(0xCCCC, Color::White), 0);
+        assert_eq!(info.correction_history.get(0xCCCC, Color::White), 0);
+        assert_eq!(info.correction_history_nonpawn.get(0xCCCC, Color::White), 0);
     }
 }

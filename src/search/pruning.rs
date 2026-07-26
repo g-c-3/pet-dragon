@@ -389,6 +389,61 @@ pub fn pawn_hash(pos: &Position) -> u64 {
     hash
 }
 
+/// Compute a continuation-based hash for correction history indexing
+/// (ROADMAP Phase 26 item 3b, D86). Captures "what were the last two
+/// real moves played" as a position-INDEPENDENT signal — deliberately
+/// just the four square indices (from/to of each of the last two real
+/// moves), not conditioned on piece type or color the way move
+/// ordering's `cont_hist` is (see `search/mod.rs`'s `ContHistoryTable`
+/// for that richer, per-candidate-move table). This is a coarser,
+/// cheaper per-NODE signal for the correction table, not a per-move
+/// score — some systematic eval errors track "what just happened"
+/// (e.g. a piece retreating, a specific short tactical sequence)
+/// rather than "what the board looks like right now", which is what
+/// `pawn_hash`/`nonpawn_hash` capture instead.
+///
+/// Reads the second-to-last entry directly from `pos.history` (already
+/// maintained by `make_move_with_history`/`unmake_move_with_history`)
+/// rather than threading a new parameter through `alpha_beta`'s
+/// recursion. `prev_move` (the last real move) is already an existing
+/// parameter and always matches `pos.history.last().mv` whenever it's
+/// not `Move::NULL` — every call site that passes a non-null
+/// `prev_move` does so immediately after `pos.make_move_with_history`
+/// pushed that same move onto `pos.history`; null-move pruning's
+/// synthetic side-flip is never pushed to `pos.history` and always
+/// passes `Move::NULL` as `prev_move`, so a null move is never
+/// mistaken for real history here.
+///
+/// Returns `None` when there isn't a real two-move history yet (root
+/// of search, or fewer than two real moves have been made in this
+/// line) — the correction site treats `None` as "skip this source for
+/// this node".
+pub fn continuation_hash(pos: &Position, prev_move: Move) -> Option<u64> {
+    if prev_move == Move::NULL {
+        return None;
+    }
+    let n = pos.history.len();
+    if n < 2 {
+        return None;
+    }
+    let prev_prev_move = pos.history[n - 2].mv;
+
+    let a = prev_move.from.index() as u64;
+    let b = prev_move.to.index() as u64;
+    let c = prev_prev_move.from.index() as u64;
+    let d = prev_prev_move.to.index() as u64;
+
+    // splitmix64-style mix of the four square indices (each 0..64, so
+    // all four fit comfortably in the low 24 bits combined before mixing)
+    let mut h = a | (b << 6) | (c << 12) | (d << 18);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    h ^= h >> 16;
+    Some(h)
+}
+
 /// Compute non-pawn-material hash for correction history indexing
 /// (ROADMAP Phase 26 item 3a, D80). Hashes the placement of every
 /// knight, bishop, rook, and queen (both colors) — deliberately
@@ -652,6 +707,100 @@ mod tests {
         assert_eq!(nonpawn_hash(&pos1), nonpawn_hash(&pos2),
             "moving only the king must not change the non-pawn hash \
              (kings are deliberately excluded)");
+    }
+
+    #[test]
+    fn test_continuation_hash_none_at_root() {
+        setup();
+        // prev_move == Move::NULL means "no history at all yet" (the
+        // search root) — must return None, not compute anything.
+        let pos = Position::start_pos().unwrap();
+        assert_eq!(continuation_hash(&pos, Move::NULL), None,
+            "continuation_hash must be None with no previous move");
+    }
+
+    #[test]
+    fn test_continuation_hash_none_with_only_one_real_move() {
+        setup();
+        // A real prev_move exists, but pos.history has only that one
+        // entry — not enough for a "pair", must return None.
+        let mut pos = Position::start_pos().unwrap();
+        let mv = Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush);
+        pos.make_move_with_history(mv);
+        assert_eq!(continuation_hash(&pos, mv), None,
+            "continuation_hash must be None with only one move of history");
+    }
+
+    #[test]
+    fn test_continuation_hash_some_with_two_real_moves() {
+        setup();
+        let mut pos = Position::start_pos().unwrap();
+        let mv1 = Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush);
+        pos.make_move_with_history(mv1);
+        let mv2 = Move::new(Square::E7, Square::E5, MoveKind::DoublePawnPush);
+        pos.make_move_with_history(mv2);
+        assert!(continuation_hash(&pos, mv2).is_some(),
+            "continuation_hash must be Some once two real moves exist");
+    }
+
+    #[test]
+    fn test_continuation_hash_differs_for_different_move_pairs() {
+        setup();
+        // Same first move (e2e4), different second move (e7e5 vs d7d5)
+        // must produce different hashes — otherwise the "pair" signal
+        // degenerates to just the single most-recent move.
+        let mut pos_a = Position::start_pos().unwrap();
+        pos_a.make_move_with_history(
+            Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush));
+        let mv2a = Move::new(Square::E7, Square::E5, MoveKind::DoublePawnPush);
+        pos_a.make_move_with_history(mv2a);
+
+        let mut pos_b = Position::start_pos().unwrap();
+        pos_b.make_move_with_history(
+            Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush));
+        let mv2b = Move::new(Square::D7, Square::D5, MoveKind::DoublePawnPush);
+        pos_b.make_move_with_history(mv2b);
+
+        assert_ne!(continuation_hash(&pos_a, mv2a), continuation_hash(&pos_b, mv2b),
+            "different second moves in the pair must hash differently");
+    }
+
+    #[test]
+    fn test_continuation_hash_matches_history_regardless_of_current_position() {
+        setup();
+        // The hash is a pure function of the last two moves' squares —
+        // it must be identical for two totally different resulting
+        // positions/pieces, as long as the move pair (by square) is the
+        // same. This is intentional (see the function's doc comment:
+        // deliberately position- and piece-independent), not a bug —
+        // this test documents that behavior explicitly so a future
+        // change to make it piece-aware doesn't silently drift.
+        let mut pos1 = Position::start_pos().unwrap();
+        pos1.make_move_with_history(
+            Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush));
+        let mv2 = Move::new(Square::E7, Square::E5, MoveKind::DoublePawnPush);
+        pos1.make_move_with_history(mv2);
+        let h1 = continuation_hash(&pos1, mv2);
+
+        // A contrived second position with an unrelated board but the
+        // exact same trailing two-move history by square.
+        let mut pos2 = Position::from_fen(
+            "8/8/8/8/8/8/8/4K2k w - - 0 1"
+        ).unwrap();
+        // Manually replay the same two "moves" by square onto a
+        // deliberately different board just to prove the hash only
+        // depends on pos.history's squares, not piece identity.
+        pos2.history.push(crate::position::HistoryEntry {
+            mv: Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush),
+            castling: pos2.castling,
+            en_passant: pos2.en_passant,
+            halfmove_clock: pos2.halfmove_clock,
+            hash: pos2.hash,
+            captured: None,
+        });
+        assert_eq!(h1, continuation_hash(&pos2, mv2),
+            "hash must depend only on the move-pair squares, not the \
+             board position they occurred on");
     }
 
     #[test]
