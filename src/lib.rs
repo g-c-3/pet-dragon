@@ -30,6 +30,46 @@
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
 
+// ── Phase 27 diagnostic toggles (Session 87) ────────────────────────────────
+// web/pit/vs.html and web/index.html call search_from_fen()/
+// search_from_fen_with_eval() directly as one-shot WASM functions — there is
+// no UCI stdin/stdout loop in the browser, so main.rs's setoption plumbing
+// for SearchInfo::lmp_enabled/singular_multicut_enabled (D91) is unreachable
+// from either page. These two module-global atomics plus their setter
+// functions are the WASM-side equivalent: vs.html's "Pet Dragon diagnostics"
+// checkboxes call the setters before/between games, and both search
+// functions below read them into each fresh SearchInfo. Both atomics default
+// `true` — byte-identical to current production behavior — matching
+// SearchInfo::lmp_enabled/singular_multicut_enabled's own defaults; nothing
+// changes for web/index.html's real-user-facing play page unless these
+// setters are actually called, which only vs.html does.
+#[cfg(feature = "wasm")]
+static LMP_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+#[cfg(feature = "wasm")]
+static SINGULAR_MULTICUT_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+/// Phase 27 diagnostic: enable/disable Late Move Pruning (D60) for all
+/// subsequent `search_from_fen`/`search_from_fen_with_eval` calls in this
+/// WASM instance. See the `LMP_ENABLED` doc comment above and
+/// `SearchInfo::lmp_enabled`'s doc comment for the full reasoning.
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn set_lmp_enabled(enabled: bool) {
+    LMP_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Phase 27 diagnostic: enable/disable D59's multi-cut/negative-extension
+/// singular-extension additions (Phase 13.3/D16's base extension is
+/// unaffected) for all subsequent search calls in this WASM instance. See
+/// `SINGULAR_MULTICUT_ENABLED` and `SearchInfo::singular_multicut_enabled`'s
+/// doc comments for the full reasoning.
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn set_singular_multicut_enabled(enabled: bool) {
+    SINGULAR_MULTICUT_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 // ── Module declarations ───────────────────────────────────────────────────────
 
 pub mod types;
@@ -163,6 +203,9 @@ pub fn search_from_fen(fen: &str, movetime_ms: u32, skill_level: u8) -> String {
 
     let mut info = SearchInfo::new();
     info.skill_level = skill_level;
+    info.lmp_enabled = LMP_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
+    info.singular_multicut_enabled =
+        SINGULAR_MULTICUT_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
     let mut tt   = TranspositionTable::new(32); // 32MB TT for browser
 
     // Run search
@@ -229,6 +272,9 @@ pub fn search_from_fen_with_eval(fen: &str, movetime_ms: u32, skill_level: u8) -
 
     let mut info = SearchInfo::new();
     info.skill_level = skill_level;
+    info.lmp_enabled = LMP_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
+    info.singular_multicut_enabled =
+        SINGULAR_MULTICUT_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
     let mut tt   = TranspositionTable::new(32); // 32MB TT for browser
 
     // Run search
