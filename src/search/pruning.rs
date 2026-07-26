@@ -725,7 +725,7 @@ mod tests {
         // A real prev_move exists, but pos.history has only that one
         // entry — not enough for a "pair", must return None.
         let mut pos = Position::start_pos().unwrap();
-        let mv = Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush);
+        let mv = Move::new(Square::E2, Square::E4, MoveKind::DoublePush);
         pos.make_move_with_history(mv);
         assert_eq!(continuation_hash(&pos, mv), None,
             "continuation_hash must be None with only one move of history");
@@ -735,9 +735,9 @@ mod tests {
     fn test_continuation_hash_some_with_two_real_moves() {
         setup();
         let mut pos = Position::start_pos().unwrap();
-        let mv1 = Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush);
+        let mv1 = Move::new(Square::E2, Square::E4, MoveKind::DoublePush);
         pos.make_move_with_history(mv1);
-        let mv2 = Move::new(Square::E7, Square::E5, MoveKind::DoublePawnPush);
+        let mv2 = Move::new(Square::E7, Square::E5, MoveKind::DoublePush);
         pos.make_move_with_history(mv2);
         assert!(continuation_hash(&pos, mv2).is_some(),
             "continuation_hash must be Some once two real moves exist");
@@ -751,14 +751,14 @@ mod tests {
         // degenerates to just the single most-recent move.
         let mut pos_a = Position::start_pos().unwrap();
         pos_a.make_move_with_history(
-            Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush));
-        let mv2a = Move::new(Square::E7, Square::E5, MoveKind::DoublePawnPush);
+            Move::new(Square::E2, Square::E4, MoveKind::DoublePush));
+        let mv2a = Move::new(Square::E7, Square::E5, MoveKind::DoublePush);
         pos_a.make_move_with_history(mv2a);
 
         let mut pos_b = Position::start_pos().unwrap();
         pos_b.make_move_with_history(
-            Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush));
-        let mv2b = Move::new(Square::D7, Square::D5, MoveKind::DoublePawnPush);
+            Move::new(Square::E2, Square::E4, MoveKind::DoublePush));
+        let mv2b = Move::new(Square::D7, Square::D5, MoveKind::DoublePush);
         pos_b.make_move_with_history(mv2b);
 
         assert_ne!(continuation_hash(&pos_a, mv2a), continuation_hash(&pos_b, mv2b),
@@ -777,8 +777,8 @@ mod tests {
         // change to make it piece-aware doesn't silently drift.
         let mut pos1 = Position::start_pos().unwrap();
         pos1.make_move_with_history(
-            Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush));
-        let mv2 = Move::new(Square::E7, Square::E5, MoveKind::DoublePawnPush);
+            Move::new(Square::E2, Square::E4, MoveKind::DoublePush));
+        let mv2 = Move::new(Square::E7, Square::E5, MoveKind::DoublePush);
         pos1.make_move_with_history(mv2);
         let h1 = continuation_hash(&pos1, mv2);
 
@@ -789,9 +789,22 @@ mod tests {
         ).unwrap();
         // Manually replay the same two "moves" by square onto a
         // deliberately different board just to prove the hash only
-        // depends on pos.history's squares, not piece identity.
+        // depends on pos.history's squares, not piece identity. Both
+        // entries must be pushed — continuation_hash's own contract
+        // (see its doc comment) is that `prev_move` always equals
+        // `pos.history.last().mv`; pushing only the first move here
+        // would violate that and make this test invalid, not just
+        // fail to prove the intended point.
         pos2.history.push(crate::position::HistoryEntry {
-            mv: Move::new(Square::E2, Square::E4, MoveKind::DoublePawnPush),
+            mv: Move::new(Square::E2, Square::E4, MoveKind::DoublePush),
+            castling: pos2.castling,
+            en_passant: pos2.en_passant,
+            halfmove_clock: pos2.halfmove_clock,
+            hash: pos2.hash,
+            captured: None,
+        });
+        pos2.history.push(crate::position::HistoryEntry {
+            mv: mv2,
             castling: pos2.castling,
             en_passant: pos2.en_passant,
             halfmove_clock: pos2.halfmove_clock,
