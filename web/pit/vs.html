@@ -325,6 +325,13 @@
         </table>
       </div>
 
+      <div class="card match-card">
+        <div class="card-title">Pet Dragon diagnostics (Phase 27)</div>
+        <div class="engine-tag" style="margin-bottom:8px;">Both default on — same as production. Uncheck one at a time to A/B against the external-Stockfish bench regression under investigation. Applies to every Pet Dragon move in this tab (either side); freezes while a game is running, same as engine/skill/movetime. See ROADMAP.md Phase 27 / DECISIONS.md D91/D92.</div>
+        <div class="checkbox-row"><input type="checkbox" id="dragonLmpEnabled" checked> LMP enabled (D60)</div>
+        <div class="checkbox-row"><input type="checkbox" id="dragonMulticutEnabled" checked> Singular multi-cut enabled (D59)</div>
+      </div>
+
       <div class="card autoplay-card">
         <div class="card-title">Autoplay dashboard</div>
         <div class="field-row">
@@ -364,7 +371,8 @@
 import init, {
   engine_author, engine_name, engine_version,
   legal_moves_from_fen,
-  search_from_fen_with_eval, wasm_main
+  search_from_fen_with_eval, wasm_main,
+  set_lmp_enabled, set_singular_multicut_enabled
 } from 'https://g-c-3.github.io/pet-dragon/pkg/pet_dragon.js';
 
 /* ---------------------------------------------------------------------- */
@@ -566,6 +574,8 @@ const gameCounter = $('gameCounter');
 const customFenInput = $('customFen');
 const autoNextCheckbox = $('autoNext');
 const swapColorsCheckbox = $('swapColors');
+const dragonLmpCheckbox = $('dragonLmpEnabled');
+const dragonMulticutCheckbox = $('dragonMulticutEnabled');
 const moveDelayInput = $('moveDelay');
 const footerInfo = $('footerInfo');
 const autoplayCountInput = $('autoplayCount');
@@ -763,6 +773,21 @@ for (const side of ['w','b']) {
 }
 readSideInputs();
 
+// Phase 27: apply immediately on toggle, not just at boot — both setters
+// are cheap module-global stores, safe to call any time a game isn't
+// actively running (see updateControlsForRunState()'s disabling of these
+// two checkboxes while match.running).
+dragonLmpCheckbox.addEventListener('change', () => {
+  if (!dragonReady) return; // boot() applies the checkbox's current state once ready
+  set_lmp_enabled(dragonLmpCheckbox.checked);
+  log(`Pet Dragon diagnostic: LMPEnabled = ${dragonLmpCheckbox.checked}`, 'dragon');
+});
+dragonMulticutCheckbox.addEventListener('change', () => {
+  if (!dragonReady) return;
+  set_singular_multicut_enabled(dragonMulticutCheckbox.checked);
+  log(`Pet Dragon diagnostic: SingularMultiCutEnabled = ${dragonMulticutCheckbox.checked}`, 'dragon');
+});
+
 /* ---------------------------------------------------------------------- */
 /* Board rendering                                                         */
 /* ---------------------------------------------------------------------- */
@@ -879,6 +904,10 @@ function buildLogText() {
     lines.push(`Starting FEN: ${entry.startFen}`);
     lines.push(`White: ${sideSummary(entry.white)}`);
     lines.push(`Black: ${sideSummary(entry.black)}`);
+    // Phase 27: only meaningful when Pet Dragon is playing at all, but
+    // printed unconditionally for a simple, always-parseable log format —
+    // both true is the production-default config.
+    lines.push(`Pet Dragon diagnostics: LMPEnabled=${entry.dragonLmpEnabled}, SingularMultiCutEnabled=${entry.dragonMulticutEnabled}`);
     lines.push(`Moves (${entry.moves.length} plies): ${entry.moves.join(' ') || '(none)'}`);
     lines.push(`Result: ${entry.result} — ${resultLabel} (${entry.reason})`);
     lines.push('-'.repeat(64));
@@ -965,6 +994,10 @@ function updateControlsForRunState() {
     sideInputs[side].skill.disabled = match.running;
     sideInputs[side].movetime.disabled = match.running;
   }
+  // Phase 27: same freeze-while-running rule — avoids an in-flight game
+  // silently mixing moves searched with the toggle on and off.
+  dragonLmpCheckbox.disabled = match.running;
+  dragonMulticutCheckbox.disabled = match.running;
 
   btnRunSet.disabled = !ready || match.running || autoplaySet !== null;
   autoplayCountInput.disabled = autoplaySet !== null;
@@ -1099,7 +1132,12 @@ function endGame(status) {
 }
 
 function recordMatchLogEntry(status) {
-  const meta = match.currentGameMeta || { startedAt: new Date(), startFen: match.fen, white: { ...players.w }, black: { ...players.b } };
+  const meta = match.currentGameMeta || {
+    startedAt: new Date(), startFen: match.fen,
+    white: { ...players.w }, black: { ...players.b },
+    dragonLmpEnabled: dragonLmpCheckbox.checked,
+    dragonMulticutEnabled: dragonMulticutCheckbox.checked,
+  };
   matchLog.push({
     matchNumber: match.gameNum,
     startedAt: meta.startedAt,
@@ -1110,6 +1148,8 @@ function recordMatchLogEntry(status) {
     moves: match.history.map(h => h.uci),
     result: status.result,
     reason: status.reason,
+    dragonLmpEnabled: meta.dragonLmpEnabled,
+    dragonMulticutEnabled: meta.dragonMulticutEnabled,
   });
   updateDownloadLogButton();
 }
@@ -1164,6 +1204,11 @@ async function playOneMoveInner() {
       startFen: match.fen,
       white: { ...players.w },
       black: { ...players.b },
+      // Phase 27: recorded per-game (not just once) so a downloaded log is
+      // self-describing about which A/B config produced it, same reasoning
+      // as capturing white/black fresh each game above.
+      dragonLmpEnabled: dragonLmpCheckbox.checked,
+      dragonMulticutEnabled: dragonMulticutCheckbox.checked,
     };
   }
   const turn = match.fen.split(' ')[1];
@@ -1311,6 +1356,13 @@ async function boot() {
     wasm_main();
     dragonReady = true;
     log(`Pet Dragon ready: ${engine_name()} ${engine_version()} by ${engine_author()} (loaded from GitHub Pages build)`, 'dragon');
+
+    // Phase 27: apply whatever the diagnostics checkboxes currently show
+    // (both default checked = default true = production behavior) before
+    // the first search call — see set_lmp_enabled/set_singular_multicut_enabled
+    // and DECISIONS.md D91.
+    set_lmp_enabled(dragonLmpCheckbox.checked);
+    set_singular_multicut_enabled(dragonMulticutCheckbox.checked);
 
     subtitle.textContent = 'Starting Stockfish…';
     sf = new StockfishEngine();
