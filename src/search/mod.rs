@@ -226,6 +226,20 @@ pub struct SearchInfo {
     /// default flip is considered. When false, `alpha_beta.rs` never
     /// reads or writes `correction_history_continuation`.
     pub continuation_correction_enabled: bool,
+
+    // ── Correction-signal-scaled extension margin (Phase 26 item 3c, D89) ────
+    /// UCI `CorrectionExtension` setting, default `false`. When true,
+    /// the singular-extension margin in `alpha_beta.rs` is scaled down
+    /// (by up to 1, from a base of 2) based on the base pawn-hash
+    /// correction table's magnitude for the current position —
+    /// deliberately only that source, not the two parked-off ones
+    /// (`correction_history_nonpawn`/`correction_history_continuation`,
+    /// D85/D88). A genuinely different mechanism than items 3a/3b:
+    /// this affects search-depth allocation via the existing singular-
+    /// extension machinery, not eval correction itself. When false,
+    /// the margin is always exactly 2, byte-identical to before this
+    /// option existed.
+    pub correction_extension_enabled: bool,
     /// Shared stop flag — set by UCI `stop` command or when time expires.
     /// All threads sharing this Arc terminate as soon as the flag is set.
     pub stop_flag: Arc<AtomicBool>,
@@ -354,6 +368,7 @@ impl SearchInfo {
             nonpawn_correction_enabled: false,
             correction_history_continuation: crate::search::pruning::CorrectionHistory::new(),
             continuation_correction_enabled: false,
+            correction_extension_enabled: false,
             stop_flag: Arc::new(AtomicBool::new(false)),
             ponder_hit_soft_ms: Arc::new(AtomicU64::new(u64::MAX)),
             ponder_hit_hard_ms: Arc::new(AtomicU64::new(u64::MAX)),

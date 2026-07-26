@@ -374,6 +374,25 @@ impl Default for CorrectionHistory {
     }
 }
 
+/// Compute the singular-extension margin reduction for a given
+/// correction-history magnitude (ROADMAP Phase 26 item 3c, D89).
+///
+/// Base singular margin is 2 (Phase 13.3/D59's original, unconditional
+/// value). This returns how much to subtract from it — 0 when
+/// `corr_mag` is small, up to a cap of 1 (never fully collapsing the
+/// margin to 0, which would make `singular_beta == tt_score`,
+/// degenerate) once `corr_mag` crosses `CORRECTION_EXTENSION_SCALE`.
+/// `corr_mag` is expected to be the unsigned magnitude of a
+/// `CorrectionHistory` entry (itself clamped to `[-512, 512]` — see
+/// `CorrectionHistory::update`), so the full -1 reduction requires a
+/// substantial, real systematic eval error at this position, not
+/// noise.
+#[inline]
+pub fn singular_margin_reduction(corr_mag: i32) -> i32 {
+    const CORRECTION_EXTENSION_SCALE: i32 = 300;
+    (corr_mag / CORRECTION_EXTENSION_SCALE).min(1)
+}
+
 /// Compute pawn hash for correction history indexing
 /// Only hashes pawn positions — correction is pawn-structure specific
 pub fn pawn_hash(pos: &Position) -> u64 {
@@ -814,6 +833,33 @@ mod tests {
         assert_eq!(h1, continuation_hash(&pos2, mv2),
             "hash must depend only on the move-pair squares, not the \
              board position they occurred on");
+    }
+
+    // ── Correction-scaled singular margin (ROADMAP Phase 26 item 3c, D89) ──────
+
+    #[test]
+    fn test_singular_margin_reduction_zero_below_threshold() {
+        assert_eq!(singular_margin_reduction(0), 0);
+        assert_eq!(singular_margin_reduction(150), 0);
+        assert_eq!(singular_margin_reduction(299), 0,
+            "just below the 300 threshold must still be 0");
+    }
+
+    #[test]
+    fn test_singular_margin_reduction_one_at_and_above_threshold() {
+        assert_eq!(singular_margin_reduction(300), 1);
+        assert_eq!(singular_margin_reduction(450), 1);
+    }
+
+    #[test]
+    fn test_singular_margin_reduction_capped_at_one() {
+        // CorrectionHistory entries are clamped to ±512 (see
+        // CorrectionHistory::update), so 512 is the real maximum input
+        // this ever receives in practice — must still cap at 1, not
+        // scale further.
+        assert_eq!(singular_margin_reduction(512), 1);
+        assert_eq!(singular_margin_reduction(10_000), 1,
+            "must cap at 1 regardless of how large the input is");
     }
 
     #[test]

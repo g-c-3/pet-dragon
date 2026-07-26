@@ -39,7 +39,7 @@ use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
-    pruning::{continuation_hash, lmr_thread_base, nonpawn_hash, pawn_hash, should_apply_lmp, should_try_probcut, try_probcut},
+    pruning::{continuation_hash, lmr_thread_base, nonpawn_hash, pawn_hash, should_apply_lmp, should_try_probcut, singular_margin_reduction, try_probcut},
     see::see,
     SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
@@ -550,7 +550,32 @@ fn alpha_beta_with_excluded(
             tt_hit.unwrap().score, ply as i32
         );
         if tt_score.abs() < MATE_THRESHOLD {
-            let singular_beta  = tt_score - 2 * depth;
+            // ── Correction-signal-scaled margin (Phase 26 item 3c, D89) ────
+            // Base singular margin is 2 (matches Phase 13.3/D59's
+            // original, unconditional value). When
+            // info.correction_extension_enabled is true, scale it down
+            // by up to 1 when this position's pawn-structure correction
+            // history (the only source of the three from Phase 26 item
+            // 3 that's actually validated positive — items 3a/3b both
+            // parked off per D85/D88) shows a large historical eval
+            // error: a smaller margin raises singular_beta (closer to
+            // tt_score), making the verification search more likely to
+            // fall below it and extend. The idea: search depth
+            // compensates for eval unreliability, so be more willing to
+            // extend the TT move at exactly the position types where
+            // eval has consistently needed correcting. Deliberately
+            // only reads the base pawn-hash table, not the two parked
+            // sources — using a signal already known to correlate with
+            // real eval error, not ones shown to have no effect.
+            let mut singular_margin = 2;
+            if info.correction_extension_enabled {
+                let phash = pawn_hash(pos);
+                let corr_mag = info.correction_history
+                    .get(phash, pos.side_to_move)
+                    .unsigned_abs() as i32;
+                singular_margin -= singular_margin_reduction(corr_mag);
+            }
+            let singular_beta  = tt_score - singular_margin * depth;
             let singular_depth = (depth - 1) / 2;
 
             let score = alpha_beta_with_excluded(
@@ -1461,5 +1486,58 @@ mod tests {
         assert_ne!(info.correction_history_continuation.get(0xCCCC, Color::White), 0);
         assert_eq!(info.correction_history.get(0xCCCC, Color::White), 0);
         assert_eq!(info.correction_history_nonpawn.get(0xCCCC, Color::White), 0);
+    }
+
+    // ── Correction-scaled singular extension margin (ROADMAP Phase 26 item 3c, D89) ──
+
+    #[test]
+    fn test_correction_extension_defaults_to_false() {
+        let info = SearchInfo::new();
+        assert!(!info.correction_extension_enabled,
+            "correction_extension_enabled must default to false");
+    }
+
+    #[test]
+    fn test_correction_extension_off_matches_pre_existing_behavior() {
+        setup();
+        // With the flag off (default), search on a position deep enough
+        // to reach the singular-extension code path must complete
+        // normally and return a legal move — proves the new branch
+        // doesn't interfere with the existing, already-tested singular-
+        // extension path (test_search_at_singular_extension_depth_no_panic,
+        // above) when disabled.
+        let mut pos = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 7, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.best_move, Move::NULL);
+        assert!(score.abs() <= INFINITY);
+    }
+
+    #[test]
+    fn test_correction_extension_on_still_searches_safely() {
+        setup();
+        // With the flag on, even a position where the pawn-hash
+        // correction table happens to hold a large pre-seeded value
+        // (simulating a position type with a real history of eval
+        // error) must still complete a normal search and return a
+        // legal move — the margin can only shrink to 1, never reach 0
+        // (see singular_margin_reduction's own cap), so this must never
+        // produce a degenerate singular_beta == tt_score search window.
+        let mut pos = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.correction_extension_enabled = true;
+        let phash = pawn_hash(&pos);
+        info.correction_history.update(phash, pos.side_to_move, 0, 512, 16);
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 7, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.best_move, Move::NULL);
+        assert!(score.abs() <= INFINITY);
     }
 }
