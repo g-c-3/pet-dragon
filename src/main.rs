@@ -182,6 +182,12 @@ struct EngineState {
     /// Same threading pattern as `nonpawn_correction_enabled` — see
     /// `SearchInfo::continuation_correction_enabled`'s doc comment.
     continuation_correction_enabled: bool,
+
+    // ── Correction-signal-scaled extension margin (Phase 26 item 3c, D89) ────
+    /// UCI `CorrectionExtension` setting, default `false`. Same
+    /// threading pattern as the others — see
+    /// `SearchInfo::correction_extension_enabled`'s doc comment.
+    correction_extension_enabled: bool,
 }
 
 impl EngineState {
@@ -215,6 +221,7 @@ impl EngineState {
             null_move_king_guard: false,
             nonpawn_correction_enabled: false,
             continuation_correction_enabled: false,
+            correction_extension_enabled: false,
             limit_strength: false,
             elo: pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
         }
@@ -417,6 +424,7 @@ fn cmd_uci() {
     println!("option name NullMoveKingGuard type check default false");
     println!("option name NonPawnCorrectionHistory type check default false");
     println!("option name ContinuationCorrectionHistory type check default false");
+    println!("option name CorrectionExtension type check default false");
     println!();
     println!("uciok");
 }
@@ -526,6 +534,10 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
         "continuationcorrectionhistory" => {
             // Phase 26 item 3b, D86: same pattern.
             state.continuation_correction_enabled = value.eq_ignore_ascii_case("true");
+        }
+        "correctionextension" => {
+            // Phase 26 item 3c, D89: same pattern.
+            state.correction_extension_enabled = value.eq_ignore_ascii_case("true");
         }
         "uci_elo" => {
             if let Ok(n) = value.parse::<i32>() {
@@ -759,6 +771,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let null_move_king_guard = state.null_move_king_guard;
     let nonpawn_correction_enabled = state.nonpawn_correction_enabled;
     let continuation_correction_enabled = state.continuation_correction_enabled;
+    let correction_extension_enabled = state.correction_extension_enabled;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -800,6 +813,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                 h_info.null_move_king_guard = null_move_king_guard;
                 h_info.nonpawn_correction_enabled = nonpawn_correction_enabled;
                 h_info.continuation_correction_enabled = continuation_correction_enabled;
+                h_info.correction_extension_enabled = correction_extension_enabled;
                 // Phase 23.2/D49: thread identity, consumed by
                 // lmr_thread_base() and thread_tie_break() to vary this
                 // helper's LMR aggressiveness and quiet-move tie-breaking
@@ -831,6 +845,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.null_move_king_guard = null_move_king_guard;
         main_info.nonpawn_correction_enabled = nonpawn_correction_enabled;
         main_info.continuation_correction_enabled = continuation_correction_enabled;
+        main_info.correction_extension_enabled = correction_extension_enabled;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -1344,6 +1359,40 @@ mod tests {
         assert!(returned.continuation_correction_enabled,
             "The SearchInfo actually used by the search thread must reflect \
              the configured ContinuationCorrectionHistory value, not just \
+             EngineState's own copy of it");
+    }
+
+    #[test]
+    fn test_correction_extension_option_defaults_to_false() {
+        setup();
+        let state = EngineState::new();
+        assert!(!state.correction_extension_enabled,
+            "CorrectionExtension should default to false — shipped \
+             gated-off from the start (D89), same discipline as items \
+             3a/3b");
+    }
+
+    #[test]
+    fn test_correction_extension_option_parses_true_and_false() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name CorrectionExtension value true");
+        assert!(state.correction_extension_enabled);
+        cmd_setoption(&mut state, "setoption name CorrectionExtension value false");
+        assert!(!state.correction_extension_enabled);
+    }
+
+    #[test]
+    fn test_cmd_go_applies_correction_extension_to_search() {
+        setup();
+        let mut state = EngineState::new();
+        state.correction_extension_enabled = true;
+        cmd_go(&mut state, "go depth 4");
+        let returned = state.wait_for_search()
+            .expect("search should have produced a SearchInfo");
+        assert!(returned.correction_extension_enabled,
+            "The SearchInfo actually used by the search thread must reflect \
+             the configured CorrectionExtension value, not just \
              EngineState's own copy of it");
     }
 
