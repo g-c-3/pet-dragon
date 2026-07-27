@@ -106,6 +106,8 @@ pub fn quiescence(
         return 0;
     }
 
+    info.nodes += 1;
+
     if ply >= MAX_PLY {
         return evaluate(pos);
     }
