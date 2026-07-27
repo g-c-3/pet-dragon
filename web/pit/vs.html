@@ -679,10 +679,15 @@ function parsePetDragonResult(resultStr) {
   const parts = (resultStr || '').trim().split(/\s+/);
   const move = parts[0] || '0000';
   const evalTok = parts[1] || '0';
+  // Phase 27 (Session 89): third token, deepest completed ID iteration
+  // this call reached — see search_from_fen_with_eval's Rust-side doc
+  // comment. Absent from the "0000 0" no-legal-move edge case, hence the
+  // `|| null` fallback rather than defaulting to a misleading 0.
+  const depth = parts[2] !== undefined ? (parseInt(parts[2], 10) || 0) : null;
   let score;
   if (evalTok.startsWith('mate')) score = { type: 'mate', val: parseInt(evalTok.slice(4), 10) || 0 };
   else score = { type: 'cp', val: parseInt(evalTok, 10) || 0 };
-  return { move, score };
+  return { move, score, depth };
 }
 
 async function getMove(sideCfg, fen) {
@@ -902,6 +907,16 @@ function formatEvalToken(ev) {
   return (ev.val > 0 ? '+' : '') + ev.val;
 }
 
+// Phase 27 (Session 89): depth is only ever present for Pet Dragon
+// moves (search_from_fen_with_eval's third token) — Stockfish moves
+// carry `depth: undefined`, printed as a bare eval with no /d suffix
+// rather than a misleading "/0" or "/?" for an engine that was never
+// asked to report one.
+function formatMoveToken(m) {
+  const base = `${m.uci}(${formatEvalToken(m.eval)})`;
+  return (m.depth === null || m.depth === undefined) ? base : `${base}/d${m.depth}`;
+}
+
 function buildLogText() {
   const lines = [];
   lines.push('Engine Bench — match log');
@@ -919,7 +934,7 @@ function buildLogText() {
     // printed unconditionally for a simple, always-parseable log format —
     // both true is the production-default config.
     lines.push(`Pet Dragon diagnostics: LMPEnabled=${entry.dragonLmpEnabled}, SingularMultiCutEnabled=${entry.dragonMulticutEnabled}`);
-    lines.push(`Moves (${entry.moves.length} plies — each shown as move(eval); eval is White-relative centipawns after that move, or mateN/mate-N): ${entry.moves.map(m => `${m.uci}(${formatEvalToken(m.eval)})`).join(' ') || '(none)'}`);
+    lines.push(`Moves (${entry.moves.length} plies — each shown as move(eval)/dDEPTH; eval is White-relative centipawns after that move or mateN/mate-N; /dDEPTH is Pet Dragon's own deepest completed search iteration for that move, omitted for Stockfish moves which don't report one): ${entry.moves.map(formatMoveToken).join(' ') || '(none)'}`);
     lines.push(`Result: ${entry.result} — ${resultLabel} (${entry.reason})`);
     lines.push('-'.repeat(64));
   });
@@ -1161,7 +1176,7 @@ function recordMatchLogEntry(status) {
     // toWhiteRelativeEval/parsePetDragonResult — it just wasn't being
     // exported before). Lets a downloaded log show the engine's own
     // assessment leading into a collapse, not just the moves themselves.
-    moves: match.history.map(h => ({ uci: h.uci, eval: h.eval })),
+    moves: match.history.map(h => ({ uci: h.uci, eval: h.eval, depth: h.depth, engine: h.engine })),
     result: status.result,
     reason: status.reason,
     dragonLmpEnabled: meta.dragonLmpEnabled,
@@ -1273,6 +1288,9 @@ async function playOneMoveInner() {
     engine: sideCfg.engine,
     uci: result.move,
     eval: result.score,
+    // Phase 27 (Session 89): only meaningful for Pet Dragon moves —
+    // undefined/null for Stockfish, which doesn't report a depth here.
+    depth: result.depth,
   });
   const repKey = newFen.split(' ').slice(0,4).join(' ');
   match.positionCounts[repKey] = (match.positionCounts[repKey] || 0) + 1;
