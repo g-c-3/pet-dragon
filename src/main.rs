@@ -199,6 +199,11 @@ struct EngineState {
     /// reasoning as `lmp_enabled` above — see
     /// `SearchInfo::singular_multicut_enabled`'s doc comment.
     singular_multicut_enabled: bool,
+
+    /// UCI `ThreatDefusal` setting, default `false`. Phase 28 (Session 93)
+    /// TDSE — see `SearchInfo::threat_defusal`'s doc comment and
+    /// DECISIONS.md D98.
+    threat_defusal: bool,
 }
 
 impl EngineState {
@@ -235,6 +240,7 @@ impl EngineState {
             correction_extension_enabled: false,
             lmp_enabled: true,
             singular_multicut_enabled: true,
+            threat_defusal: false,
             limit_strength: false,
             elo: pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
         }
@@ -444,6 +450,10 @@ fn cmd_uci() {
     // investigation. See DECISIONS.md and ROADMAP.md Phase 27.
     println!("option name LMPEnabled type check default true");
     println!("option name SingularMultiCutEnabled type check default true");
+    // Phase 28 (Session 93): TDSE, default false — new/unproven technique,
+    // same rollout shape as NullMoveKingGuard (D75), not the D91/D92
+    // already-shipped-default-on pattern.
+    println!("option name ThreatDefusal type check default false");
     println!();
     println!("uciok");
 }
@@ -567,6 +577,12 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
         "singularmulticutenabled" => {
             // Phase 27 (Session 86): same pattern as lmpenabled.
             state.singular_multicut_enabled = value.eq_ignore_ascii_case("true");
+        }
+        "threatdefusal" => {
+            // Phase 28 (Session 93): same recorded-here/applied-in-cmd_go
+            // pattern as the others, default false — see
+            // SearchInfo::threat_defusal's doc comment and DECISIONS.md D98.
+            state.threat_defusal = value.eq_ignore_ascii_case("true");
         }
         "uci_elo" => {
             if let Ok(n) = value.parse::<i32>() {
@@ -803,6 +819,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let correction_extension_enabled = state.correction_extension_enabled;
     let lmp_enabled = state.lmp_enabled;
     let singular_multicut_enabled = state.singular_multicut_enabled;
+    let threat_defusal = state.threat_defusal;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -847,6 +864,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                 h_info.correction_extension_enabled = correction_extension_enabled;
                 h_info.lmp_enabled = lmp_enabled;
                 h_info.singular_multicut_enabled = singular_multicut_enabled;
+                h_info.threat_defusal = threat_defusal;
                 // Phase 23.2/D49: thread identity, consumed by
                 // lmr_thread_base() and thread_tie_break() to vary this
                 // helper's LMR aggressiveness and quiet-move tie-breaking
@@ -881,6 +899,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.correction_extension_enabled = correction_extension_enabled;
         main_info.lmp_enabled = lmp_enabled;
         main_info.singular_multicut_enabled = singular_multicut_enabled;
+        main_info.threat_defusal = threat_defusal;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -1498,6 +1517,40 @@ mod tests {
             "The SearchInfo actually used by the search thread must reflect \
              the configured SingularMultiCutEnabled value, not just \
              EngineState's own copy of it");
+    }
+
+    #[test]
+    fn test_threat_defusal_option_defaults_to_false() {
+        setup();
+        let state = EngineState::new();
+        assert!(!state.threat_defusal,
+            "ThreatDefusal should default to false — new/unproven technique, \
+             same rollout shape as NullMoveKingGuard (D75), not the \
+             already-shipped-default-on D91/D92 pattern (Phase 28, D98)");
+    }
+
+    #[test]
+    fn test_threat_defusal_option_parses_true_and_false() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name ThreatDefusal value true");
+        assert!(state.threat_defusal);
+        cmd_setoption(&mut state, "setoption name ThreatDefusal value false");
+        assert!(!state.threat_defusal);
+    }
+
+    #[test]
+    fn test_cmd_go_applies_threat_defusal_to_search() {
+        setup();
+        let mut state = EngineState::new();
+        state.threat_defusal = true;
+        cmd_go(&mut state, "go depth 4");
+        let returned = state.wait_for_search()
+            .expect("search should have produced a SearchInfo");
+        assert!(returned.threat_defusal,
+            "The SearchInfo actually used by the search thread must reflect \
+             the configured ThreatDefusal value, not just EngineState's own \
+             copy of it");
     }
 
     #[test]
