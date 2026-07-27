@@ -88,11 +88,23 @@ pub fn quiescence(
     info:      &mut SearchInfo,
     tt:        &TranspositionTable,
 ) -> i32 {
+    // Phase 27/D95 (Session 90): is_time_up() only ever *read* self.stop —
+    // nothing set it back to true when the elapsed-time branch fired, so a
+    // genuine mid-search timeout here silently returned this hardcoded 0
+    // (a real, meaningful "dead equal" evaluation, not a distinguishable
+    // "aborted, discard me" marker) straight into the caller's alpha-beta
+    // comparison, with no signal that anything was cut short. Every
+    // downstream `if info.stop { ... }` check in this file (including the
+    // one four lines below this comment) — plus TT-store/correction-
+    // history-update guards and iterative_deepening()'s own
+    // discard-this-depth logic — assumed this would already be true by
+    // the time they ran. It never was, for the single most common abort
+    // reason there is. See DECISIONS.md D95 for the full data trail that
+    // led here.
     if info.is_time_up() {
+        info.stop = true;
         return 0;
     }
-
-    info.nodes += 1;
 
     if ply >= MAX_PLY {
         return evaluate(pos);
@@ -292,7 +304,15 @@ fn alpha_beta_with_excluded(
     excluded:  Move,
 ) -> i32 {
     // ── Time check ────────────────────────────────────────────────────────────
+    // Phase 27/D95 (Session 90): same bug and same fix as quiescence()'s
+    // time check above — is_time_up() never latched into info.stop, so
+    // this returned a corrupted 0 with no abort signal on every real
+    // mid-search timeout. This is the main search function, so this is
+    // the higher-impact of the two sites: it's what feeds
+    // iterative_deepening()'s per-depth result and the TT/correction-
+    // history guards a few hundred lines below in this same file.
     if info.is_time_up() {
+        info.stop = true;
         return 0;
     }
 
@@ -1605,5 +1625,61 @@ mod tests {
         );
         assert_ne!(info.best_move, Move::NULL);
         assert!(score.abs() <= INFINITY);
+    }
+
+    // ── D95 (Session 90): is_time_up() must actually set info.stop ────────────
+    // The bug: both time-check sites in this file called info.is_time_up()
+    // and returned the corrupted 0 sentinel on true, but never wrote
+    // info.stop = true — so every downstream `if info.stop { ... }` guard
+    // in this file (TT-store, correction-history-update,
+    // iterative_deepening()'s discard-this-depth logic) silently never
+    // fired for a real elapsed-time timeout, only for an external
+    // stop_flag/ponder abort. is_time_up()'s own doc/test coverage in
+    // search/mod.rs already covered that the *read* side works given
+    // info.stop already true; these tests cover the *write* side that was
+    // missing — that reaching a real timeout from elapsed time alone
+    // actually sets it, at the two call sites that are supposed to.
+
+    #[test]
+    fn test_alpha_beta_sets_stop_on_real_timeout() {
+        setup();
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        // 0ms budget — is_time_up()'s elapsed-time branch fires on the
+        // very first check (nodes starts at 0, `0 & 255 == 0` is true,
+        // and elapsed_ms() >= 0 is trivially true), before any node-count
+        // gating could delay it.
+        info.time_allocated_ms = 0;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 5, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert!(info.stop,
+            "alpha_beta must set info.stop = true on a real elapsed-time \
+             timeout, not just return the 0 sentinel silently — see D95");
+        assert_eq!(score, 0,
+            "the 0 sentinel itself is unchanged by this fix — only whether \
+             info.stop gets set alongside it");
+    }
+
+    #[test]
+    fn test_quiescence_in_check_sets_stop_on_real_timeout() {
+        setup();
+        // Black king on e8, White rook on e1, clear e-file between them —
+        // genuinely in check, specifically to exercise quiescence()'s
+        // in-check evasion path (the other of the two D95 call sites).
+        // alpha_beta at depth<=0 against this position drops straight
+        // into quiescence with in_check = true.
+        let fen = "4k3/8/8/8/8/8/8/4R1K1 b - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        info.time_allocated_ms = 0;
+        let tt = TranspositionTable::new(16);
+        let _ = alpha_beta(
+            &mut pos, 0, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert!(info.stop,
+            "quiescence()'s time check must also set info.stop = true on a \
+             real elapsed-time timeout — see D95");
     }
 }
