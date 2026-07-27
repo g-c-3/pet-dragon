@@ -892,6 +892,101 @@ fn king_safe_square_count(pos: &Position, color: Color) -> u32 {
     count
 }
 
+/// Result of `extract_threat_move`'s one-ply-ahead opponent-reply probe.
+///
+/// Phase 28 (Session 93), TDSE, first diff — legality-only. Deliberately
+/// doesn't carry a SEE-before value yet: that's the SEE-degradation
+/// signal's own follow-up diff (not implemented in this first landing —
+/// see DECISIONS.md D98 for why signals are split rather than bundled).
+pub struct ThreatInfo {
+    threat_move: Option<Move>,
+}
+
+/// Probe the opponent's best reply one ply ahead, without touching shared
+/// search state (`info.pv`/`info.update_pv`) — see DECISIONS.md D98 for why
+/// reusing the null-move probe's own recursive search result was rejected:
+/// `alpha_beta_with_excluded()` returns only a score, and `info.pv`/
+/// `info.update_pv()` fire on *any* node whose local alpha improves, not
+/// just true PV nodes, so it isn't safe to read mid-search as "what this
+/// specific probe concluded."
+///
+/// Only called when `info.threat_defusal` is set (UCI `ThreatDefusal`,
+/// default `false`) — root-only, from `iterative_deepening()`'s
+/// end-of-search TDSE block (`search/iterative.rs`), not from inside the
+/// main move loop. `pub` (not private) because it's called cross-module
+/// from `iterative.rs` — same visibility as `alpha_beta()` itself, this
+/// codebase has no `pub(crate)` precedent to follow instead.
+pub fn extract_threat_move(
+    pos:   &mut Position,
+    info:  &mut SearchInfo,
+    tt:    &TranspositionTable,
+    depth: i32,
+) -> Option<ThreatInfo> {
+    if !has_non_pawn_material(pos, pos.side_to_move) {
+        return None;
+    }
+
+    // Same null-move flip as the real null-move probe above — see that
+    // block's own comments for why side-to-move flips and en passant
+    // clears this way.
+    pos.side_to_move = pos.side_to_move.flip();
+    pos.hash ^= crate::position::zobrist::side_key();
+    let old_ep = pos.en_passant;
+    pos.en_passant = None;
+
+    let shallow_depth = (depth - 2).max(4).min(6);
+    let tt_move = tt.probe(pos.hash).map(|e| e.mv).unwrap_or(Move::NULL);
+    let replies = generate_moves(pos);
+    let mut scored = score_moves(pos, &replies, info, tt_move, 0, Move::NULL);
+
+    let mut best_move  = Move::NULL;
+    let mut best_score = -INFINITY;
+    for i in 0..scored.len() {
+        let mv = match next_move(&mut scored, i) {
+            Some(m) => m,
+            None    => break,
+        };
+        pos.make_move_with_history(mv);
+        let s = -alpha_beta_with_excluded(
+            pos, shallow_depth - 1, -INFINITY, INFINITY,
+            1, false, info, tt, mv, Move::NULL,
+        );
+        pos.unmake_move_with_history(mv);
+        if s > best_score {
+            best_score = s;
+            best_move  = mv;
+        }
+    }
+
+    pos.side_to_move = pos.side_to_move.flip();
+    pos.hash ^= crate::position::zobrist::side_key();
+    pos.en_passant = old_ep;
+
+    if best_move == Move::NULL {
+        return None;
+    }
+    Some(ThreatInfo { threat_move: Some(best_move) })
+}
+
+/// Legality-only defusal signal — Phase 28 (Session 93) TDSE, first diff.
+/// Given a root candidate move and the opponent's probed threat, checks
+/// only whether the threat move is *still legal* after the candidate is
+/// played. Returns `true` (defuses the threat) if not.
+///
+/// Deliberately does not yet account for SEE degradation or square-control
+/// changes when the threat remains legal but gets materially worse or
+/// better-defended — those are separate, independently-validated follow-up
+/// diffs (DECISIONS.md D98), not bundled into this first landing per the
+/// same staged-rollout discipline Phase 26's correction-history sub-items
+/// (3a/3b/3c) already used.
+pub fn defuses_threat(pos: &mut Position, candidate: Move, threat: &ThreatInfo) -> bool {
+    let Some(threat_move) = threat.threat_move else { return false };
+    pos.make_move(candidate);
+    let still_legal = generate_moves(pos).iter().any(|m| *m == threat_move);
+    pos.unmake_move(candidate);
+    !still_legal
+}
+
 /// Quick check if a move gives check (used for pruning decisions)
 /// Not 100% accurate but fast — full legality already guaranteed
 #[inline]
@@ -1683,5 +1778,70 @@ mod tests {
         assert!(info.stop,
             "quiescence()'s time check must also set info.stop = true on a \
              real elapsed-time timeout — see D95");
+    }
+
+    // ── Phase 28 (Session 93): Threat-Defusal Search Extension (TDSE) ─────────
+
+    #[test]
+    fn test_threat_defusal_defaults_to_false() {
+        let info = SearchInfo::new();
+        assert!(!info.threat_defusal,
+            "threat_defusal must default to false — new/unproven technique \
+             (D98), same rollout shape as null_move_king_guard (D75)");
+    }
+
+    #[test]
+    fn test_extract_threat_move_finds_hanging_piece_capture() {
+        setup();
+        // White rook hangs undefended on d5; Black's queen on d8 can simply
+        // capture it down the open d-file — the only sane best reply in
+        // this constructed position, so extract_threat_move (which searches
+        // from Black's perspective via the same null-move flip the real
+        // null-move probe uses) should find exactly this move.
+        let fen = "3qk3/8/8/3R4/8/8/8/4K3 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt = TranspositionTable::new(16);
+        let threat = extract_threat_move(&mut pos, &mut info, &tt, 6)
+            .expect("a real threat (hanging rook) should be found");
+        let mv = threat.threat_move.expect("threat_move should be Some");
+        assert_eq!(mv.from, Square::D8);
+        assert_eq!(mv.to, Square::D5);
+        // Position must be restored exactly (side to move, hash, en
+        // passant) after the probe's internal flip/unflip.
+        assert_eq!(pos.side_to_move, Color::White);
+    }
+
+    #[test]
+    fn test_defuses_threat_true_when_threat_move_no_longer_legal() {
+        setup();
+        let fen = "3qk3/8/8/3R4/8/8/8/4K3 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt = TranspositionTable::new(16);
+        let threat = extract_threat_move(&mut pos, &mut info, &tt, 6).unwrap();
+        // Moving the hanging rook out of reach removes the exact capture
+        // the threat represents — no legal move afterward has the same
+        // from/to/captured shape as the original threat.
+        let defusing_move = Move::new(Square::D5, Square::D4, MoveKind::Quiet);
+        assert!(defuses_threat(&mut pos, defusing_move, &threat),
+            "moving the hanging rook away must defuse the exact capture \
+             threat");
+    }
+
+    #[test]
+    fn test_defuses_threat_false_when_threat_move_still_legal() {
+        setup();
+        let fen = "3qk3/8/8/3R4/8/8/8/4K3 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt = TranspositionTable::new(16);
+        let threat = extract_threat_move(&mut pos, &mut info, &tt, 6).unwrap();
+        // An unrelated king move doesn't touch the hanging rook at all —
+        // Black's exact capture is still fully legal afterward.
+        let unrelated_move = Move::new(Square::E1, Square::F1, MoveKind::Quiet);
+        assert!(!defuses_threat(&mut pos, unrelated_move, &threat),
+            "an unrelated move must not be reported as defusing a real \
+             threat that's still fully legal afterward");
     }
 }

@@ -23,7 +23,7 @@ use std::sync::atomic::Ordering;
 
 use crate::position::Position;
 use crate::search::{
-    alpha_beta::alpha_beta,
+    alpha_beta::{alpha_beta, extract_threat_move, defuses_threat},
     time::{allocate_time, TimeControl, TimeManager},
     SearchInfo, SearchResult, INFINITY, is_mate_score, mate_in,
 };
@@ -315,7 +315,82 @@ pub fn iterative_deepening(
         }
     }
 
-    // Remove root position from game history
+    // ── Phase 28 (Session 93): Threat-Defusal Search Extension (TDSE) ─────────
+    // Sibling block to the Skill Level noise block above, not a hook into
+    // alpha_beta()'s move loop — same "gather root candidates via MultiPV,
+    // then possibly override the final result" shape, reusing the same
+    // info.root_exclude mechanism. See DECISIONS.md D98 for the full design
+    // and why it follows this precedent rather than a new mechanism.
+    //
+    // Mutually exclusive with the skill-noise block above (skipped whenever
+    // window > 0): both blocks want to be the last one to override
+    // result.best_move, and both drive search_multipv_slot() through the
+    // same info.root_exclude state sequentially — running both back-to-back
+    // means the second one's probes happen against whatever killer/history
+    // state the first one already exercised at the root. Combining them is
+    // deliberately left as a later, separately-validated question, not
+    // assumed safe here.
+    //
+    // Legality-only signal for this first diff: prefers the first near-tied
+    // candidate (in the order MultiPV already found them, i.e. roughly by
+    // score) that makes the opponent's probed threat move illegal.
+    // SEE-degradation and square-control signals are deliberately not
+    // implemented yet — each is its own isolated diff, validated
+    // independently before being combined (D98).
+    if !info.stop
+        && info.threat_defusal
+        && crate::search::skill::skill_noise_window_cp(info.skill_level) == 0
+        && result.best_move != Move::NULL
+    {
+        const TDSE_MARGIN_CP: i32 = 20; // starting point, Texel-tunable later
+        const TDSE_CANDIDATES: usize = 4;
+
+        let legal = crate::movegen::generate_moves(pos);
+        let slot_count = TDSE_CANDIDATES.min(legal.len().max(1));
+        let mut candidates: Vec<(Move, i32)> = vec![(result.best_move, result.score)];
+        info.root_exclude.clear();
+        info.root_exclude.push(result.best_move);
+        for _ in 1..slot_count {
+            let slot_score = search_multipv_slot(pos, result.depth, info, tt);
+            if info.stop || info.best_move == Move::NULL {
+                break;
+            }
+            candidates.push((info.best_move, slot_score));
+            info.root_exclude.push(info.best_move);
+        }
+        info.root_exclude.clear();
+
+        let best = candidates[0].1;
+        let near_tied: Vec<(Move, i32)> = candidates.iter()
+            .filter(|(_, s)| best - s <= TDSE_MARGIN_CP)
+            .copied()
+            .collect();
+
+        if near_tied.len() > 1 {
+            if let Some(threat) = extract_threat_move(pos, info, tt, result.depth) {
+                let mut defusing_move: Option<Move> = None;
+                for &(mv, _) in &near_tied {
+                    if defuses_threat(pos, mv, &threat) {
+                        defusing_move = Some(mv);
+                        break;
+                    }
+                }
+                if let Some(defusing_move) = defusing_move {
+                    if defusing_move != result.best_move {
+                        result.best_move = defusing_move;
+                        if let Some(first) = result.pv.first_mut() {
+                            *first = defusing_move;
+                        } else {
+                            result.pv.push(defusing_move);
+                        }
+                        // Deliberately not touching result.score — TDSE
+                        // changes which near-equal move gets played, never
+                        // what the position is claimed to be worth.
+                    }
+                }
+            }
+        }
+    }
     pos.pop_game_history();
 
     // Age history tables for next move
@@ -828,5 +903,51 @@ mod tests {
             assert!(legal.iter().any(|&m| m == result.best_move),
                 "{label}: primary line's move must be legal");
         }
+    }
+
+    // ── Phase 28 (Session 93): Threat-Defusal Search Extension (TDSE) ─────────
+
+    #[test]
+    fn test_threat_defusal_default_off_matches_pre_tdse_behavior() {
+        setup();
+        // threat_defusal defaults to false, so the whole TDSE block is
+        // skipped — this must produce byte-identical output to a run where
+        // the block doesn't exist at all. Same "off means untouched"
+        // guarantee every prior D91/D92/D95 toggle in this codebase makes.
+        let mut pos1  = Position::start_pos().unwrap();
+        let mut info1 = SearchInfo::new();
+        let tt1       = TranspositionTable::new(16);
+        let result1   = iterative_deepening(&mut pos1, &fixed_depth_tc(6), &mut info1, &tt1);
+
+        let mut pos2  = Position::start_pos().unwrap();
+        let mut info2 = SearchInfo::new();
+        info2.threat_defusal = false; // explicit, still the default
+        let tt2       = TranspositionTable::new(16);
+        let result2   = iterative_deepening(&mut pos2, &fixed_depth_tc(6), &mut info2, &tt2);
+
+        assert_eq!(result1.best_move, result2.best_move,
+            "threat_defusal = false must be a strict no-op");
+        assert_eq!(result1.score, result2.score,
+            "threat_defusal = false must not change the reported score");
+    }
+
+    #[test]
+    fn test_threat_defusal_enabled_still_returns_legal_move() {
+        setup();
+        // Enabling TDSE on a normal position must not panic and must still
+        // return a real legal move — the correctness bar every other
+        // "_on_still_searches_safely"-style test in this codebase uses
+        // (see alpha_beta.rs's test_lmp_disabled_still_searches_safely for
+        // the same pattern applied to a different toggle).
+        let mut pos  = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.threat_defusal = true;
+        let tt = TranspositionTable::new(16);
+        let result = iterative_deepening(&mut pos, &fixed_depth_tc(6), &mut info, &tt);
+
+        assert_ne!(result.best_move, Move::NULL, "should find a move");
+        let legal = crate::movegen::generate_moves(&pos);
+        assert!(legal.iter().any(|&m| m == result.best_move),
+            "TDSE must never hand back an illegal move as the final result");
     }
 }

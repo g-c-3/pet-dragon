@@ -371,6 +371,22 @@ pub struct SearchInfo {
     /// had never landed); when `true` (the default), behavior is
     /// unchanged from before this option existed.
     pub singular_multicut_enabled: bool,
+
+    // ── Phase 28 (Session 93) — Threat-Defusal Search Extension (TDSE) ────────
+    /// UCI `ThreatDefusal` setting, default `false` — same rollout shape as
+    /// D75's `null_move_king_guard`: a new, unproven technique shipped off,
+    /// zero extra computation and byte-identical behavior when disabled.
+    /// When `true`, after the main iterative-deepening loop finds a set of
+    /// near-tied root candidates, prefers whichever one best defuses the
+    /// opponent's strongest reply (probed via a one-ply lookahead, see
+    /// `alpha_beta::extract_threat_move`) — see DECISIONS.md D98 for the
+    /// full design and its precedent (D75/D91/D92's rollout discipline).
+    /// First landed with a legality-only defusal signal only; SEE-degradation
+    /// and control-delta signals are deliberately not implemented yet — each
+    /// is its own isolated diff, validated independently, same reasoning
+    /// ROADMAP already gives for why Phase 26's correction-history sub-items
+    /// were split into 3a/3b/3c rather than bundled.
+    pub threat_defusal: bool,
 }
 
 impl SearchInfo {
@@ -414,6 +430,7 @@ impl SearchInfo {
             thread_id: 0,
             lmp_enabled: true,
             singular_multicut_enabled: true,
+            threat_defusal: false,
         }
     }
 
