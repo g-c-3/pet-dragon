@@ -224,7 +224,8 @@ pub fn search_from_fen(fen: &str, movetime_ms: u32, skill_level: u8) -> String {
 /// never had access to an actual search score, since this function's
 /// sibling above only ever returned the bare move).
 ///
-/// Returns a two-token, space-separated string: `"<uci_move> <eval>"`.
+/// Returns a three-token, space-separated string:
+/// `"<uci_move> <eval> <depth>"`.
 /// `<eval>` is one of:
 /// - a plain signed integer, in centipawns, **from White's perspective**
 ///   (positive = White is better) — deliberately NOT the UCI/negamax
@@ -233,10 +234,22 @@ pub fn search_from_fen(fen: &str, movetime_ms: u32, skill_level: u8) -> String {
 ///   whose turn it is.
 /// - `"mateN"` / `"mate-N"` for a forced mate, same White-relative sign:
 ///   positive = White delivers mate in N, negative = Black does.
+/// `<depth>` is the deepest fully-completed iterative-deepening
+/// iteration this call reached (`SearchResult::depth`) — added in
+/// Session 89 (Phase 27) purely as a diagnostic: `vs.html`'s exported
+/// bench log previously gave no way to tell a shallow, time-starved
+/// search apart from a normal-depth search that simply returned a wrong
+/// score, and that ambiguity was blocking the investigation. This is a
+/// strictly additive third token — both existing callers
+/// (`web/index.html`'s `raw.indexOf(' ')`-based split, `vs.html`'s
+/// `split(/\s+/)`-based one) already tolerate trailing content after the
+/// eval token without any change on their end, verified by reading both
+/// before adding this.
 ///
-/// Returns `"0000 0"` if the position is illegal or has no legal moves —
-/// callers should check for the `"0000"` move token first, same as
-/// `search_from_fen`, before reading the eval token.
+/// Returns `"0000 0"` (still two tokens) if the position is illegal or
+/// has no legal moves — callers should check for the `"0000"` move
+/// token first, same as `search_from_fen`, before reading the eval or
+/// depth token.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn search_from_fen_with_eval(fen: &str, movetime_ms: u32, skill_level: u8) -> String {
@@ -300,7 +313,7 @@ pub fn search_from_fen_with_eval(fen: &str, movetime_ms: u32, skill_level: u8) -
         score_from_white.to_string()
     };
 
-    format!("{} {}", result.best_move.to_uci(), eval_token)
+    format!("{} {} {}", result.best_move.to_uci(), eval_token, result.depth)
 }
 
 /// Return all legal moves from a FEN position as a space-separated UCI string.
