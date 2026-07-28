@@ -1871,7 +1871,12 @@ mod tests {
         // must return None, not attempt the probe, and must leave pos
         // completely untouched (verified by re-checking king_sq for both
         // colors doesn't panic and the FEN round-trips unchanged).
-        let fen = "4r3/8/8/8/8/8/8/4K3 w - - 0 1";
+        // Black king on h8 (out of the way), rook on e8 giving check down
+        // a clear e-file to White's king on e1. The original version of
+        // this test only placed a White king and forgot Black's entirely —
+        // from_fen() correctly rejects that (KingNotFound(Black)), caught
+        // by CI. Fixed here; not a defect in the D101 guard itself.
+        let fen = "4r2k/8/8/8/8/8/8/4K3 w - - 0 1";
         let mut pos = Position::from_fen(fen).unwrap();
         assert!(pos.in_check(Color::White), "setup: White must be in check");
         let mut info = SearchInfo::new();
@@ -1886,6 +1891,6 @@ mod tests {
         // same side to move, no corruption from a partially-applied flip.
         assert_eq!(pos.side_to_move, Color::White);
         assert_eq!(pos.king_sq(Color::White), Square::E1);
-        assert_eq!(pos.king_sq(Color::Black), Square::E8);
+        assert_eq!(pos.king_sq(Color::Black), Square::H8);
     }
 }
