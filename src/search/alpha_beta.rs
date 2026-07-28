@@ -922,6 +922,22 @@ pub fn extract_threat_move(
     tt:    &TranspositionTable,
     depth: i32,
 ) -> Option<ThreatInfo> {
+    // D101 (Session 96): the real null-move block this function mirrors
+    // guards on `!in_check` (alpha_beta_with_excluded's `can_null_move`,
+    // a few hundred lines above in this same file) — flipping side to
+    // move while the current side is in check produces a position where
+    // "whose king is actually under attack" and "whose turn it is" no
+    // longer agree, and searching that with the normal move-generation/
+    // check-evasion machinery is undefined territory this function has
+    // no business exploring. This guard was missing from the first
+    // landing (D98) and is the confirmed cause of a real crash found by
+    // the D100 harness fix's captured panic message
+    // (`position::king_sq`'s "King must always be on the board", 14
+    // games into a 200-game run with ThreatDefusal=true) — see D101 for
+    // the full trail.
+    if pos.in_check(pos.side_to_move) {
+        return None;
+    }
     if !has_non_pawn_material(pos, pos.side_to_move) {
         return None;
     }
@@ -1843,5 +1859,33 @@ mod tests {
         assert!(!defuses_threat(&mut pos, unrelated_move, &threat),
             "an unrelated move must not be reported as defusing a real \
              threat that's still fully legal afterward");
+    }
+
+    #[test]
+    fn test_extract_threat_move_returns_none_when_in_check() {
+        setup();
+        // D101 (Session 96) regression test. White king on e1 is in check
+        // from Black's rook on e8 down a clear e-file. Flipping side to
+        // move here (as if White's check simply doesn't exist) is exactly
+        // the invalid state that led to the real crash this guard fixes —
+        // must return None, not attempt the probe, and must leave pos
+        // completely untouched (verified by re-checking king_sq for both
+        // colors doesn't panic and the FEN round-trips unchanged).
+        let fen = "4r3/8/8/8/8/8/8/4K3 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        assert!(pos.in_check(Color::White), "setup: White must be in check");
+        let mut info = SearchInfo::new();
+        let tt = TranspositionTable::new(16);
+
+        let result = extract_threat_move(&mut pos, &mut info, &tt, 6);
+
+        assert!(result.is_none(),
+            "extract_threat_move must return None when in check, not \
+             attempt the null-move-style flip — see D101");
+        // Position must be completely untouched — same king squares,
+        // same side to move, no corruption from a partially-applied flip.
+        assert_eq!(pos.side_to_move, Color::White);
+        assert_eq!(pos.king_sq(Color::White), Square::E1);
+        assert_eq!(pos.king_sq(Color::Black), Square::E8);
     }
 }
