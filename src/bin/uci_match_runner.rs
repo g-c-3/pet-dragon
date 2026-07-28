@@ -97,16 +97,35 @@ struct EngineProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<std::process::ChildStdout>,
+    /// Phase 28 follow-up (Session 95): purely for panic-message context —
+    /// see `wait_for_line_starting_with`'s doc comment for why this was
+    /// added.
+    name: String,
 }
 
 impl EngineProcess {
     /// Spawn `path` as a child process with piped stdin/stdout and perform
     /// the standard `uci` -> `uciok`, `isready` -> `readyok` handshake.
-    fn spawn(path: &str) -> Self {
+    /// `name` is purely for diagnostics (panic messages, not protocol) —
+    /// pass the same label used in the match summary (`label_a`/`label_b`)
+    /// so a crash mid-match says which engine died, not just that one did.
+    fn spawn(path: &str, name: &str) -> Self {
         let mut child = Command::new(path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            // Phase 28 follow-up (Session 95): was Stdio::null(), which
+            // silently discarded a crashed engine's own panic message —
+            // exactly the one piece of information needed to diagnose a
+            // real crash (as opposed to a protocol violation this harness
+            // itself detects). Stdio::inherit() sends the child's stderr
+            // straight to this harness's own stderr, which GitHub Actions
+            // already captures in the step log — no new capture mechanism
+            // needed, just stop throwing the existing one away. A crashed
+            // engine's own "thread 'main' panicked at src/...:LINE:COL"
+            // message will now appear in the CI log directly above this
+            // harness's own "engine process closed stdout" panic, instead
+            // of nowhere.
+            .stderr(Stdio::inherit())
             .spawn()
             .unwrap_or_else(|e| panic!("failed to spawn engine at '{path}': {e}"));
 
@@ -117,6 +136,7 @@ impl EngineProcess {
             child,
             stdin,
             stdout,
+            name: name.to_string(),
         };
 
         engine.send("uci");
@@ -134,6 +154,14 @@ impl EngineProcess {
 
     /// Block reading lines from the child's stdout until one starts with
     /// `prefix`, returning that full line.
+    ///
+    /// Phase 28 follow-up (Session 95): the panic message here now names
+    /// which engine (`self.name`) closed its stdout, since the actual
+    /// crash — if any — will already be visible just above this in the
+    /// CI log once stderr is inherited (see `spawn`'s doc comment) rather
+    /// than silently discarded, but "which of the two child processes"
+    /// wasn't previously stated at all and had to be inferred from
+    /// context.
     fn wait_for_line_starting_with(&mut self, prefix: &str) -> String {
         let mut line = String::new();
         loop {
@@ -143,7 +171,13 @@ impl EngineProcess {
                 .read_line(&mut line)
                 .expect("failed to read from engine stdout");
             if n == 0 {
-                panic!("engine process closed stdout while waiting for '{prefix}'");
+                panic!(
+                    "{} process closed stdout while waiting for '{prefix}' — \
+                     check just above this panic for that engine's own \
+                     stderr output (panic message/location), now inherited \
+                     instead of discarded",
+                    self.name,
+                );
             }
             if line.trim_start().starts_with(prefix) {
                 return line.trim().to_string();
@@ -279,8 +313,8 @@ fn main() {
     let engine_b_uci_options = args.get(10).cloned().unwrap_or_default();
     let min_score_pct: Option<f64> = args.get(11).and_then(|s| s.parse().ok());
 
-    let mut engine_a = EngineProcess::spawn(engine_a_path);
-    let mut engine_b = EngineProcess::spawn(engine_b_path);
+    let mut engine_a = EngineProcess::spawn(engine_a_path, &label_a);
+    let mut engine_b = EngineProcess::spawn(engine_b_path, &label_b);
     engine_a.configure(&engine_a_uci_options);
     engine_b.configure(&engine_b_uci_options);
 
