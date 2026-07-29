@@ -51,6 +51,51 @@ use crate::search::DRAW_SCORE;
 use crate::tt::{Bound, TranspositionTable};
 use crate::types::{Color, Move, MoveKind, PieceKind, Square};
 
+// ── Null-move flip helper (D108) ────────────────────────────────────────────
+//
+// Both the real null-move probe below and `extract_threat_move()`'s
+// one-ply-ahead opponent-reply probe need to "pass the turn": flip side to
+// move, clear en passant, and keep `pos.hash` consistent with both changes.
+// This used to be duplicated inline in both places, and when the real
+// probe's en-passant/hash desync bug (F-2 / D108) was fixed, the duplicate
+// copy in `extract_threat_move` still had to be found and fixed
+// separately — exactly the failure mode D98's own "reused block" note
+// warned about without naming it. Factoring this into one pair of
+// functions means it can now only be fixed, or reintroduced, in one place.
+//
+// Not named `make_move`/`unmake_move` — those already mean something very
+// different (a real move) elsewhere in this codebase; `null_move` in the
+// name is deliberate.
+
+/// Make a "null move": flip side to move, clear en passant, keep `pos.hash`
+/// consistent with both changes. Returns the en-passant square that was
+/// active before the flip (or `None`), which must be passed to
+/// [`unmake_null_move`] to restore state exactly.
+#[inline]
+fn make_null_move(pos: &mut Position) -> Option<Square> {
+    pos.side_to_move = pos.side_to_move.flip();
+    pos.hash ^= crate::position::zobrist::side_key();
+    let old_ep = pos.en_passant;
+    if let Some(ep) = old_ep {
+        pos.hash ^= crate::position::zobrist::ep_key(ep.file());
+    }
+    pos.en_passant = None;
+    old_ep
+}
+
+/// Undo [`make_null_move`]: flip side to move back, restore en passant, and
+/// restore the hash to exactly what it was before the null move — `old_ep`
+/// must be the value that call returned.
+#[inline]
+fn unmake_null_move(pos: &mut Position, old_ep: Option<Square>) {
+    pos.side_to_move = pos.side_to_move.flip();
+    pos.hash ^= crate::position::zobrist::side_key();
+    pos.en_passant = old_ep;
+    if let Some(ep) = old_ep {
+        pos.hash ^= crate::position::zobrist::ep_key(ep.file());
+    }
+}
+
 // ── Quiescence search ─────────────────────────────────────────────────────────
 
 /// Piece values for per-capture delta pruning in quiescence search.
@@ -496,11 +541,9 @@ fn alpha_beta_with_excluded(
             }
         }
 
-        // Make null move (just flip side to move)
-        pos.side_to_move = pos.side_to_move.flip();
-        pos.hash ^= crate::position::zobrist::side_key();
-        let old_ep = pos.en_passant;
-        pos.en_passant = None;
+        // Make null move (just flip side to move); D108: shared helper
+        // keeps hash consistent with the en-passant clear.
+        let old_ep = make_null_move(pos);
 
         let null_score = -alpha_beta_with_excluded(
             pos, depth - r - 1, -beta, -beta + 1,
@@ -508,9 +551,7 @@ fn alpha_beta_with_excluded(
         );
 
         // Unmake null move
-        pos.side_to_move = pos.side_to_move.flip();
-        pos.hash ^= crate::position::zobrist::side_key();
-        pos.en_passant = old_ep;
+        unmake_null_move(pos, old_ep);
 
         if null_score >= beta {
             // Null move cutoff — but don't return mate scores
@@ -948,13 +989,12 @@ pub fn extract_threat_move(
         return None;
     }
 
-    // Same null-move flip as the real null-move probe above — see that
-    // block's own comments for why side-to-move flips and en passant
-    // clears this way.
-    pos.side_to_move = pos.side_to_move.flip();
-    pos.hash ^= crate::position::zobrist::side_key();
-    let old_ep = pos.en_passant;
-    pos.en_passant = None;
+    // Same null-move flip as the real null-move probe above, via the
+    // shared D108 helper — this duplicate copy had the same F-2
+    // hash/state desync bug the real probe did, since it was copied
+    // before D108's helper existed. Sharing the helper means that class
+    // of bug can now only be fixed, or reintroduced, in one place.
+    let old_ep = make_null_move(pos);
 
     let shallow_depth = (depth - 2).max(4).min(6);
     let tt_move = tt.probe(pos.hash).map(|e| e.mv).unwrap_or(Move::NULL);
@@ -981,9 +1021,7 @@ pub fn extract_threat_move(
     }
 
     if best_move == Move::NULL {
-        pos.side_to_move = pos.side_to_move.flip();
-        pos.hash ^= crate::position::zobrist::side_key();
-        pos.en_passant = old_ep;
+        unmake_null_move(pos, old_ep);
         return None;
     }
 
@@ -999,9 +1037,7 @@ pub fn extract_threat_move(
     // before trusting the proposal's ordering.
     let threat_see_before = see_value_of(pos, best_move);
 
-    pos.side_to_move = pos.side_to_move.flip();
-    pos.hash ^= crate::position::zobrist::side_key();
-    pos.en_passant = old_ep;
+    unmake_null_move(pos, old_ep);
 
     Some(ThreatInfo { threat_move: Some(best_move), threat_see_before })
 }
@@ -1164,6 +1200,74 @@ mod tests {
             0, true, &mut info, &tt, Move::NULL,
         );
         (info.best_move, score)
+    }
+
+    /// Regression test for F-2 (D108): the real null-move probe and
+    /// `extract_threat_move()` used to clear `en_passant` without XOR-ing
+    /// the en-passant key out of `pos.hash`, so `pos.hash` and
+    /// `pos.en_passant` disagreed for the rest of that subtree. This
+    /// builds a position with an active en-passant square, calls the
+    /// shared `make_null_move`/`unmake_null_move` helper directly, and
+    /// checks the incremental hash against `Position::compute_hash()`
+    /// (a full from-scratch recompute) at every stage — exactly the
+    /// general "recompute and compare" check the Documentation Review
+    /// recommended, applied to this specific bug.
+    #[test]
+    fn test_null_move_helper_keeps_hash_consistent_with_recompute() {
+        setup();
+        // White to move, en passant available on d6 (Black just played
+        // ...d7-d5 past White's pawn on e5). Plenty of non-pawn material
+        // for both sides so this isn't a degenerate king-only position.
+        let fen = "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3";
+        let mut pos = Position::from_fen(fen).unwrap();
+        assert_eq!(pos.en_passant, Some(Square::D6),
+            "test setup: en passant should be active on d6");
+
+        let hash_before = pos.hash;
+        assert_eq!(hash_before, pos.compute_hash(),
+            "sanity: incremental hash must match recompute before any null move");
+
+        // Make the null move: en_passant clears, hash must still match a
+        // full recompute of the resulting (no-ep) position — this is
+        // exactly the check that fails under the pre-D108 bug, since the
+        // old code left the stale ep bit XORed into the hash.
+        let old_ep = make_null_move(&mut pos);
+        assert_eq!(old_ep, Some(Square::D6));
+        assert_eq!(pos.en_passant, None,
+            "en passant should be cleared after the null move");
+        assert_eq!(pos.hash, pos.compute_hash(),
+            "F-2 regression: pos.hash must match a from-scratch recompute \
+             immediately after the null move clears en passant");
+
+        // Unmake: both en_passant and hash must be restored exactly.
+        unmake_null_move(&mut pos, old_ep);
+        assert_eq!(pos.en_passant, Some(Square::D6),
+            "en passant should be restored after unmaking the null move");
+        assert_eq!(pos.hash, hash_before,
+            "F-2 regression: hash must round-trip back to its exact \
+             pre-null-move value");
+        assert_eq!(pos.hash, pos.compute_hash(),
+            "hash must also match a from-scratch recompute after the round trip");
+    }
+
+    /// Same check as above but for a position with no en passant square —
+    /// confirms the D108 fix's `if let Some(ep) = ...` guard is a true
+    /// no-op when there's nothing to XOR, not just untested.
+    #[test]
+    fn test_null_move_helper_hash_consistent_without_en_passant() {
+        setup();
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        assert_eq!(pos.en_passant, None);
+
+        let hash_before = pos.hash;
+        let old_ep = make_null_move(&mut pos);
+        assert_eq!(old_ep, None);
+        assert_eq!(pos.hash, pos.compute_hash());
+
+        unmake_null_move(&mut pos, old_ep);
+        assert_eq!(pos.hash, hash_before);
+        assert_eq!(pos.hash, pos.compute_hash());
     }
 
     #[test]
