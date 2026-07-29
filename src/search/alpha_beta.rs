@@ -40,7 +40,7 @@ use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
     pruning::{continuation_hash, lmr_thread_base, nonpawn_hash, pawn_hash, should_apply_lmp, should_try_probcut, singular_margin_reduction, try_probcut},
-    see::see,
+    see::{see, see_value_of},
     SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
     MIN_DEPTH_NULL_MOVE, MIN_DEPTH_RAZORING, MIN_DEPTH_SINGULAR,
@@ -900,6 +900,12 @@ fn king_safe_square_count(pos: &Position, color: Color) -> u32 {
 /// see DECISIONS.md D98 for why signals are split rather than bundled).
 pub struct ThreatInfo {
     threat_move: Option<Move>,
+    /// SEE value of `threat_move` at the moment it was found (computed
+    /// while `pos.side_to_move` still equals the opponent — see
+    /// `extract_threat_move`'s doc comment on why this has to happen
+    /// before the flip-back, not after, unlike the original TDSE
+    /// proposal's ordering — DECISIONS.md D104).
+    threat_see_before: i32,
 }
 
 /// Probe the opponent's best reply one ply ahead, without touching shared
@@ -974,14 +980,117 @@ pub fn extract_threat_move(
         }
     }
 
+    if best_move == Move::NULL {
+        pos.side_to_move = pos.side_to_move.flip();
+        pos.hash ^= crate::position::zobrist::side_key();
+        pos.en_passant = old_ep;
+        return None;
+    }
+
+    // D104 (Session 99): see_value_of(pos, mv) reads pos.side_to_move to
+    // find "our" piece on mv.from — it MUST be called while pos.side_to_
+    // move still equals best_move's actual mover (the opponent, from the
+    // flip above), not after restoring it back to our own side. The
+    // original TDSE proposal computed this after the restore below,
+    // which would have made see_value_of look for our own piece on the
+    // opponent's from-square, find nothing, and silently return 0 every
+    // time — always reporting "no SEE value," not a real bug that fails
+    // loudly. Caught by reading see_value_of's actual implementation
+    // before trusting the proposal's ordering.
+    let threat_see_before = see_value_of(pos, best_move);
+
     pos.side_to_move = pos.side_to_move.flip();
     pos.hash ^= crate::position::zobrist::side_key();
     pos.en_passant = old_ep;
 
-    if best_move == Move::NULL {
-        return None;
-    }
-    Some(ThreatInfo { threat_move: Some(best_move) })
+    Some(ThreatInfo { threat_move: Some(best_move), threat_see_before })
+}
+
+/// Count attackers of color `by_color` on `sq`, using the same raw
+/// bitboard attack primitives `king_safe_square_count` above already
+/// uses (D75's precedent) — knights, bishops, rooks, queens. Phase 28
+/// (Session 99), TDSE SEE-degradation signal.
+///
+/// Deliberately doesn't count pawns or the king as attackers here — this
+/// is a coarse, cheap signal for "how contested is this square," not a
+/// full SEE-grade exchange simulation (that's what `see_value_of` above
+/// is for). Matches the original TDSE proposal's own scope for this
+/// helper exactly (it didn't count pawns/king either).
+fn attacker_count_on(pos: &Position, sq: Square, by_color: Color) -> u32 {
+    use crate::bitboard::masks::knight_attacks;
+    use crate::bitboard::magic::{bishop_attacks, rook_attacks, queen_attacks};
+
+    let occ = pos.all_pieces();
+    let mut count = 0u32;
+    count += (knight_attacks(sq) & pos.piece_bb(by_color, PieceKind::Knight)).count();
+    count += (bishop_attacks(sq, occ) & pos.piece_bb(by_color, PieceKind::Bishop)).count();
+    count += (rook_attacks(sq, occ) & pos.piece_bb(by_color, PieceKind::Rook)).count();
+    count += (queen_attacks(sq, occ) & pos.piece_bb(by_color, PieceKind::Queen)).count();
+    count
+}
+
+/// Attacker-count delta on `threat_move`'s destination square: positive
+/// means the threat's owner still has more attackers there than the
+/// defender does, negative means the defender now has the edge.
+///
+/// D104 (Session 99) fix: the original TDSE proposal computed
+/// `mover_color` as `pos.side_to_move.flip()` here — backwards. This is
+/// called from `defusal_score` *after* the root candidate move has
+/// already been applied via `pos.make_move(candidate)`, at which point
+/// `pos.side_to_move` already correctly equals the threat's owner (the
+/// opponent, since it's genuinely their turn next) with no flip needed;
+/// flipping it would have pointed `mover_color` at our own side instead,
+/// silently inverting the whole signal (reporting our own defensive
+/// strength as if it were the threat's attacking strength, and vice
+/// versa) rather than failing loudly.
+///
+/// Also fixes the original proposal's `threat_move.to_square()` — that
+/// method doesn't exist anywhere in this codebase (`Move` has a plain
+/// public `to: Square` field, caught independently during D98's
+/// verification pass and documented there).
+fn control_delta_on_threat_squares(pos: &Position, threat_move: Move) -> i32 {
+    let target = threat_move.to;
+    let mover_color = pos.side_to_move;
+    let defenders = attacker_count_on(pos, target, mover_color.flip());
+    let attackers = attacker_count_on(pos, target, mover_color);
+    (attackers as i32) - (defenders as i32)
+}
+
+/// SEE-degradation + square-control defusal signal — Phase 28
+/// (Session 99), TDSE's second isolated diff, built on top of D98's
+/// legality-only `defuses_threat` (kept below, still independently
+/// tested — this function doesn't call it, to avoid a second redundant
+/// make/unmake pair, but computes the same legality check plus two more
+/// signals in one pass).
+///
+/// `WEIGHT_ILLEGAL`/`WEIGHT_SEE`/`WEIGHT_CONTROL` are starting-point
+/// constants, not yet Texel-tuned — per the original proposal's own
+/// explicit note, tuning comes after the mechanism is validated, not
+/// before (same order D63/D68 already established for HCE terms).
+pub fn defusal_score(pos: &mut Position, candidate: Move, threat: &ThreatInfo) -> i32 {
+    const WEIGHT_ILLEGAL: i32 = 1000;
+    const WEIGHT_SEE:     i32 = 4;
+    const WEIGHT_CONTROL: i32 = 15;
+
+    let Some(threat_move) = threat.threat_move else { return 0 };
+
+    pos.make_move(candidate);
+
+    let still_legal = generate_moves(pos).iter().any(|m| *m == threat_move);
+    let illegality_bonus = if still_legal { 0 } else { WEIGHT_ILLEGAL };
+
+    // pos.side_to_move is correctly the threat's owner here (a normal
+    // make_move just happened, it's genuinely their turn) — see_value_of
+    // needs exactly this, same requirement D104 fixed in
+    // extract_threat_move above.
+    let see_after = if still_legal { see_value_of(pos, threat_move) } else { 0 };
+    let see_drop = (threat.threat_see_before - see_after).max(0);
+
+    let control_delta = control_delta_on_threat_squares(pos, threat_move);
+
+    pos.unmake_move(candidate);
+
+    illegality_bonus + WEIGHT_SEE * see_drop + WEIGHT_CONTROL * control_delta
 }
 
 /// Legality-only defusal signal — Phase 28 (Session 93) TDSE, first diff.
@@ -1892,5 +2001,65 @@ mod tests {
         assert_eq!(pos.side_to_move, Color::White);
         assert_eq!(pos.king_sq(Color::White), Square::E1);
         assert_eq!(pos.king_sq(Color::Black), Square::H8);
+    }
+
+    // ── Phase 28 (Session 99): SEE-degradation signal (D104) ──────────────────
+
+    #[test]
+    fn test_extract_threat_move_computes_correct_see_before() {
+        setup();
+        // Same hanging-rook FEN as D98's tests. Black's queen on d8 can
+        // capture White's undefended rook on d5 cleanly — nothing
+        // recaptures, so the SEE value of that exact capture is exactly
+        // the rook's value (500, SEE_VALUES[Rook]). This test would have
+        // directly caught D104's original ordering bug: computing
+        // threat_see_before *after* restoring pos.side_to_move made
+        // see_value_of look for White's piece on d8 (there is none — d8
+        // is Black's queen), silently returning 0 instead of 500.
+        let fen = "3qk3/8/8/3R4/8/8/8/4K3 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt = TranspositionTable::new(16);
+        let threat = extract_threat_move(&mut pos, &mut info, &tt, 6)
+            .expect("a real threat (hanging rook) should be found");
+        assert_eq!(threat.threat_see_before, 500,
+            "SEE value of Black capturing White's undefended rook must be \
+             exactly the rook's value — see D104");
+    }
+
+    #[test]
+    fn test_defusal_score_ranks_illegal_threat_above_unrelated_move() {
+        setup();
+        let fen = "3qk3/8/8/3R4/8/8/8/4K3 w - - 0 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt = TranspositionTable::new(16);
+        let threat = extract_threat_move(&mut pos, &mut info, &tt, 6).unwrap();
+
+        // Moving the rook away makes the exact capture illegal — should
+        // dominate via the illegality bonus.
+        let defusing_move = Move::new(Square::D5, Square::D4, MoveKind::Quiet);
+        let defusing_score = defusal_score(&mut pos, defusing_move, &threat);
+
+        // An unrelated king move leaves the capture fully legal and its
+        // SEE value unchanged.
+        let unrelated_move = Move::new(Square::E1, Square::F1, MoveKind::Quiet);
+        let unrelated_score = defusal_score(&mut pos, unrelated_move, &threat);
+
+        assert!(defusing_score > unrelated_score,
+            "a move that makes the real capture illegal ({defusing_score}) \
+             must score higher than one that doesn't affect it at all \
+             ({unrelated_score})");
+    }
+
+    #[test]
+    fn test_attacker_count_on_counts_only_the_requested_color() {
+        setup();
+        // Two White knights both attack d5 (c3 and e3); no Black piece
+        // attacks it at all.
+        let fen = "4k3/8/8/8/8/2N1N3/8/4K3 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        assert_eq!(attacker_count_on(&pos, Square::D5, Color::White), 2);
+        assert_eq!(attacker_count_on(&pos, Square::D5, Color::Black), 0);
     }
 }

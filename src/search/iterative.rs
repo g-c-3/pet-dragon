@@ -23,7 +23,7 @@ use std::sync::atomic::Ordering;
 
 use crate::position::Position;
 use crate::search::{
-    alpha_beta::{alpha_beta, extract_threat_move, defuses_threat},
+    alpha_beta::{alpha_beta, extract_threat_move, defusal_score},
     time::{allocate_time, TimeControl, TimeManager},
     SearchInfo, SearchResult, INFINITY, is_mate_score, mate_in,
 };
@@ -368,14 +368,21 @@ pub fn iterative_deepening(
 
         if near_tied.len() > 1 {
             if let Some(threat) = extract_threat_move(pos, info, tt, result.depth) {
-                let mut defusing_move: Option<Move> = None;
+                // Phase 28 (Session 99): defusal_score replaces D98's
+                // legality-only defuses_threat here — picks the
+                // highest-scoring candidate (illegality bonus + SEE-drop +
+                // control-delta) rather than the first one that merely
+                // makes the threat illegal. defuses_threat itself is kept
+                // and still independently tested (D98), just no longer
+                // called from production code — see DECISIONS.md D104.
+                let mut best_defusal: Option<(Move, i32)> = None;
                 for &(mv, _) in &near_tied {
-                    if defuses_threat(pos, mv, &threat) {
-                        defusing_move = Some(mv);
-                        break;
+                    let d = defusal_score(pos, mv, &threat);
+                    if best_defusal.map_or(true, |(_, best)| d > best) {
+                        best_defusal = Some((mv, d));
                     }
                 }
-                if let Some(defusing_move) = defusing_move {
+                if let Some((defusing_move, _)) = best_defusal {
                     if defusing_move != result.best_move {
                         result.best_move = defusing_move;
                         if let Some(first) = result.pv.first_mut() {
