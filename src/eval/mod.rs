@@ -38,6 +38,7 @@ pub mod pawns;
 pub mod king_safety;
 pub mod open_lines;
 pub mod threats;
+pub mod style;
 
 use crate::position::Position;
 use material::{evaluate_material, game_phase};
@@ -130,6 +131,23 @@ pub fn evaluate_blended(pos: &Position) -> i32 {
     let nnue = crate::nnue::inference::evaluate_nnue(pos);
     let blended = (1.0 - weight) * hce as f32 + weight * nnue as f32;
     blended.round() as i32
+}
+
+/// Evaluate a position via `evaluate_blended()`, plus an additive
+/// `PlayStyle` bonus (D111, `style` module) selected at runtime via the
+/// UCI `PlayStyle` spin option (0-4: Balanced/Killer/Tactical/
+/// Positional/Endgame). Search itself is completely untouched — only the
+/// leaf evaluation is biased.
+///
+/// This is the function actually wired into search (via
+/// `search::alpha_beta::evaluate()`) as of D111; `evaluate_blended()` and
+/// `evaluate()` are both still called directly by their own test suites,
+/// unaffected by PlayStyle. Balanced (the default) makes this
+/// byte-identical to `evaluate_blended()` — `style::evaluate_style()`
+/// returns exactly 0 for Balanced, by construction.
+pub fn evaluate_styled(pos: &Position) -> i32 {
+    let phase = game_phase(pos);
+    evaluate_blended(pos) + style::evaluate_style(pos, phase)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -264,5 +282,30 @@ mod tests {
         // King safety contributes 0 at phase 0 — all other terms near zero
         assert!(score.abs() < 100,
             "Phase 0 evaluate should be near zero: {}", score);
+    }
+
+    /// Regression test (D111): `evaluate_styled()` must be byte-identical
+    /// to `evaluate_blended()` when `PlayStyle` is left at its default
+    /// (Balanced) — the whole point of the additive-bonus design is that
+    /// this change is a guaranteed no-op unless a non-Balanced style is
+    /// explicitly selected via `setoption`.
+    #[test]
+    fn test_evaluate_styled_matches_blended_at_balanced_default() {
+        setup();
+        style::set_play_style(style::BALANCED);
+
+        let positions = [
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "4k3/8/8/8/8/8/8/4KQ2 w - - 0 1",
+            "4k1r1/8/8/8/8/8/8/4K3 w - - 0 1",
+        ];
+        for fen in positions {
+            let pos = Position::from_fen(fen).unwrap();
+            assert_eq!(
+                evaluate_styled(&pos),
+                evaluate_blended(&pos),
+                "evaluate_styled must equal evaluate_blended at Balanced default for {fen}"
+            );
+        }
     }
 }
