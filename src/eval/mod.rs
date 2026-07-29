@@ -110,7 +110,10 @@ pub fn nnue_weight() -> f32 {
 /// Evaluate a position blending the full HCE (`evaluate()`) with the
 /// trained Pet Dragon NNUE (Phase 16.6), both already in centipawns from
 /// the side-to-move's perspective. Blend weight is runtime-configurable
-/// (D23 default 25%, see `set_nnue_weight_pct`).
+/// (see `set_nnue_weight_pct`) and defaults to **0% (pure HCE)** — D23's
+/// original 0.25 constant was dropped to 0% by D25, and NNUE was shelved
+/// for the future by D61; the `NNUEWeight` UCI option (0-100) still works
+/// if a nonzero blend is explicitly requested via `setoption`.
 ///
 /// This is the function actually wired into search (via
 /// `search::alpha_beta::evaluate()`); `evaluate()` itself stays pure-HCE
