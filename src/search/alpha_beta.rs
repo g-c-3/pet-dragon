@@ -49,7 +49,7 @@ use crate::search::{
 #[cfg(test)]
 use crate::search::DRAW_SCORE;
 use crate::tt::{Bound, TranspositionTable};
-use crate::types::{Color, Move, MoveKind, PieceKind};
+use crate::types::{Color, Move, MoveKind, PieceKind, Square};
 
 // ── Quiescence search ─────────────────────────────────────────────────────────
 
