@@ -511,8 +511,15 @@ impl Move {
         captured: None,
     };
 
-    /// UCI string representation (e.g. "e2e4", "e1g1", "a7a8q")
+    /// UCI string representation (e.g. "e2e4", "e1g1", "a7a8q").
+    /// `Move::NULL` (from==to==A1, used as an internal search sentinel —
+    /// see `is_null()`) is special-cased to the standard UCI null-move
+    /// string "0000" rather than printing "a1a1". No real move ever has
+    /// from==to, so this can't collide with a legitimate A1-to-A1 move.
     pub fn to_uci(self) -> String {
+        if self.is_null() {
+            return "0000".to_string();
+        }
         let promo = match self.kind.promotion_piece() {
             Some(PieceKind::Knight) => "n",
             Some(PieceKind::Bishop) => "b",
@@ -762,6 +769,20 @@ mod tests {
 
         let promo = Move::new(Square::A7, Square::A8, MoveKind::PromoQueen);
         assert_eq!(promo.to_uci(), "a7a8q");
+    }
+
+    /// Regression test (Performance Review §4.4): `Move::NULL` used to
+    /// print as "a1a1" (its literal from/to squares) because `to_uci()`
+    /// had no special case for it, which most UCI tooling/GUIs don't
+    /// recognize as "no legal move" — they expect the standard "0000"
+    /// sentinel. A real, playable move can never have from==to, so this
+    /// special-case can't misfire on legitimate output.
+    #[test]
+    fn test_move_null_uci_is_standard_sentinel() {
+        assert_eq!(Move::NULL.to_uci(), "0000",
+            "Move::NULL should print the standard UCI null-move sentinel, \
+             not its literal a1a1 from/to squares");
+        assert!(Move::NULL.is_null());
     }
 
     #[test]
