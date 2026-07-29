@@ -50,6 +50,7 @@ use pet_dragon_lib::position::Position;
 use pet_dragon_lib::position::fen::STANDARD_START_FEN;
 use pet_dragon_lib::position::zobrist::init_zobrist;
 use pet_dragon_lib::eval::set_nnue_weight_pct;
+use pet_dragon_lib::eval::style::set_play_style;
 use pet_dragon_lib::search::{
     iterative::iterative_deepening, SearchInfo,
 };
@@ -382,9 +383,17 @@ fn cmd_uci() {
     // Phase 15: Syzygy tablebase path (native only; WASM builds ignore this)
     println!("option name SyzygyPath type string default <empty>");
     // Phase 17: NNUE/HCE blend weight as a percentage — 0 = pure HCE,
-    // 100 = pure NNUE. Default matches D23's fixed constant (25%), now
-    // runtime-adjustable for Elo A/B testing from one binary.
+    // 100 = pure NNUE. D23's original fixed constant was 25%, dropped to
+    // 0% by D25 (NNUE shelved for the future by D61) — the declared
+    // `default 0` below is the actual current default, not D23's
+    // superseded figure (see DECISIONS.md D110, same staleness pattern
+    // caught in eval/mod.rs's doc comment, fixed here too while this
+    // block was already open for PlayStyle below).
     println!("option name NNUEWeight type spin default 0 min 0 max 100");
+    // D111: five-mode style bonus layered additively on top of the tuned
+    // eval (search itself untouched) — 0=Balanced (default, no-op),
+    // 1=Killer, 2=Tactical, 3=Positional, 4=Endgame. See eval/style.rs.
+    println!("option name PlayStyle type spin default 0 min 0 max 4");
     // Phase 19: standard UCI options for analysis GUIs. Neither affects
     // playing strength — MultiPV reports extra candidate lines, Move
     // Overhead just tunes the safety buffer for slow/laggy connections.
@@ -504,6 +513,14 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
         "nnueweight" => {
             if let Ok(pct) = value.parse::<u32>() {
                 set_nnue_weight_pct(pct);
+            }
+        }
+        "playstyle" => {
+            // D111: same pattern as nnueweight above — direct global set
+            // at parse time, no EngineState field. PlayStyle only affects
+            // the leaf eval, so there's nothing for cmd_go to apply later.
+            if let Ok(n) = value.parse::<u32>() {
+                set_play_style(n);
             }
         }
         "move overhead" => {
@@ -1071,6 +1088,7 @@ fn perft_bulk(pos: &Position, depth: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pet_dragon_lib::eval::style::play_style;
 
     fn setup() {
         init_masks();
@@ -1684,6 +1702,26 @@ mod tests {
         cmd_setoption(&mut state, "setoption name Ponder value true");
         assert_eq!(state.skill_level, 12,
             "Ponder setoption must not disturb unrelated state");
+    }
+
+    /// D111: PlayStyle follows the NNUEWeight pattern — direct global
+    /// set, no EngineState field. Resets to Balanced (0) at the end since
+    /// `eval::style::PLAY_STYLE` is a process-global atomic shared across
+    /// parallel test threads (same reasoning as eval/mod.rs's NNUE weight
+    /// test).
+    #[test]
+    fn test_playstyle_setoption_sets_and_clamps() {
+        setup();
+        let mut state = EngineState::new();
+
+        cmd_setoption(&mut state, "setoption name PlayStyle value 2");
+        assert_eq!(play_style(), 2, "PlayStyle should update the global style selector");
+
+        cmd_setoption(&mut state, "setoption name PlayStyle value 99");
+        assert_eq!(play_style(), 4, "out-of-range PlayStyle should clamp to max (4)");
+
+        cmd_setoption(&mut state, "setoption name PlayStyle value 0");
+        assert_eq!(play_style(), 0, "restore Balanced default");
     }
 
     #[test]
