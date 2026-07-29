@@ -1163,11 +1163,12 @@ fn move_gives_check(pos: &Position, mv: Move) -> bool {
 }
 
 /// Evaluate a position using HCE blended with the trained Pet Dragon NNUE
-/// (Phase 16.6, D23). Delegates to crate::eval::evaluate_blended() — the
-/// pure-HCE crate::eval::evaluate() is still used directly by eval/mod.rs's
-/// own test suite and is otherwise unchanged.
+/// (Phase 16.6, D23), plus the runtime-selectable PlayStyle bonus (D111).
+/// Delegates to crate::eval::evaluate_styled() — the pure-HCE
+/// crate::eval::evaluate() is still used directly by eval/mod.rs's own
+/// test suite and is otherwise unchanged.
 pub fn evaluate(pos: &Position) -> i32 {
-    crate::eval::evaluate_blended(pos)
+    crate::eval::evaluate_styled(pos)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
