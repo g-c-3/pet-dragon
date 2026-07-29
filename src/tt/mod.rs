@@ -115,7 +115,19 @@ impl TranspositionTable {
     pub fn new(size_mb: usize) -> Self {
         let bytes         = size_mb * 1024 * 1024;
         let entry_size    = std::mem::size_of::<TTEntry>();
-        let num_entries   = (bytes / entry_size).next_power_of_two() / 2;
+        let raw_entries   = bytes / entry_size;
+        // Floor to the largest power of two <= raw_entries directly.
+        // (The previous `next_power_of_two() / 2` rounded UP then halved,
+        // which is a no-op-then-discard-half whenever raw_entries was
+        // already an exact power of two — true at every standard Hash
+        // size a UCI GUI would ever send: 16/32/64/128/256 MB. That
+        // silently gave the engine half its requested TT at its own
+        // default setting. See DECISIONS.md D107.)
+        let num_entries   = if raw_entries == 0 {
+            1
+        } else {
+            1usize << (usize::BITS - 1 - raw_entries.leading_zeros())
+        };
         let num_entries   = num_entries.max(1024); // minimum 1024 entries
 
         TranspositionTable {
@@ -471,6 +483,58 @@ mod tests {
         assert!(tt.capacity() > 0);
         assert!(tt.size_mb() <= 64,
             "TT should not exceed requested size");
+    }
+
+    /// Regression test for F-1 (D107): at Hash sizes whose byte count is
+    /// already an exact power of two — every standard Hash value a UCI
+    /// GUI would ever send (16/32/64/128/256 MB) — the old
+    /// `next_power_of_two() / 2` formula silently discarded half the
+    /// requested capacity. This asserts the *exact* expected entry count,
+    /// not just an inequality, so that class of bug can't regress silently.
+    #[test]
+    fn test_tt_size_exact_power_of_two_not_halved() {
+        let entry_size = std::mem::size_of::<TTEntry>();
+
+        for &size_mb in &[16usize, 32, 64, 128, 256] {
+            let bytes = size_mb * 1024 * 1024;
+            let expected_entries = bytes / entry_size; // already a power of two
+            assert!(
+                expected_entries.is_power_of_two(),
+                "test assumption violated: {size_mb} MB / {entry_size} B entry \
+                 is not an exact power of two on this build"
+            );
+
+            let tt = TranspositionTable::new(size_mb);
+            assert_eq!(
+                tt.capacity(),
+                expected_entries,
+                "TT::new({size_mb}) should allocate the full floored power-of-two \
+                 entry count, not half of it"
+            );
+        }
+    }
+
+    /// Non-power-of-two byte counts should still floor correctly (largest
+    /// power of two <= raw_entries), unaffected by the F-1 fix.
+    #[test]
+    fn test_tt_size_non_power_of_two_floors_correctly() {
+        let entry_size = std::mem::size_of::<TTEntry>();
+        let size_mb = 100; // 100 MB / entry_size is not a power of two
+                           // for any plausible TTEntry layout
+        let bytes = size_mb * 1024 * 1024;
+        let raw_entries = bytes / entry_size;
+        assert!(
+            !raw_entries.is_power_of_two(),
+            "test assumption violated: {size_mb} MB / {entry_size} B entry \
+             is an exact power of two on this build"
+        );
+        // Largest power of two <= raw_entries, computed independently of
+        // the implementation under test.
+        let expected_entries =
+            1usize << (usize::BITS - 1 - raw_entries.leading_zeros());
+
+        let tt = TranspositionTable::new(size_mb);
+        assert_eq!(tt.capacity(), expected_entries.max(1024));
     }
 
     #[test]
