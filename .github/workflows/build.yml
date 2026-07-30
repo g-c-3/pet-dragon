@@ -33,6 +33,14 @@ jobs:
       - name: Run all tests
         run: cargo test --verbose
 
+      - name: Run uci-wasm feature tests
+        # src/uci_wasm.rs's tests (Phase 30) are gated behind the
+        # uci-wasm feature, which is not part of `default = []` — the
+        # step above never compiles or runs them. Runs against the
+        # native host target (not wasm32); wasm-bindgen supports this
+        # directly, so no wasm-bindgen-test-runner/browser setup needed.
+        run: cargo test --verbose --features uci-wasm
+
   # ── Build native binaries for all platforms ──────────────────────────
   build:
     name: Build — ${{ matrix.target }}

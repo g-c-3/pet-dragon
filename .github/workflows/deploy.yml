@@ -31,10 +31,10 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Create web folder
-        run: mkdir -p web/pkg
+      - name: Create web folders
+        run: mkdir -p web/pkg web/pkg-uci
 
-      - name: Build WebAssembly
+      - name: Build WebAssembly (browser gameplay API — web/index.html, web/pit/vs.html)
         run: |
           wasm-pack build \
             --target web \
@@ -43,10 +43,21 @@ jobs:
             --out-name pet_dragon \
             -- --features wasm
 
+      - name: Build WebAssembly (real UCI protocol — uci_command export)
+        run: |
+          wasm-pack build \
+            --target web \
+            --release \
+            --out-dir web/pkg-uci \
+            --out-name pet_dragon_uci \
+            -- --features uci-wasm
+
       - name: Verify build output
         run: |
-          echo "WASM package contents:"
+          echo "Browser-API WASM package contents:"
           ls -la web/pkg/
+          echo "UCI-protocol WASM package contents:"
+          ls -la web/pkg-uci/
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v4
