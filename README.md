@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/pet-dragon-logo.png" alt="Pet Dragon logo" width="160">
+  <img src="assets/pet-dragon-logo-dark-chip.png" alt="Pet Dragon logo" width="160">
 </p>
 
 # Pet Dragon
