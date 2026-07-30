@@ -1210,6 +1210,22 @@
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     font-size: calc(1rem * var(--s));
+    position: relative;
+  }
+
+  .player-bar.active .avatar {
+    animation: avatarGlow 2.4s ease-in-out infinite;
+  }
+
+  @keyframes avatarGlow {
+    0%, 100% {
+      box-shadow: 0 0 calc(4px * var(--s)) calc(1px * var(--s)) rgba(245,166,35,0.25),
+                  0 0 0 1px rgba(245,166,35,0.15);
+    }
+    50% {
+      box-shadow: 0 0 calc(14px * var(--s)) calc(4px * var(--s)) rgba(245,166,35,0.65),
+                  0 0 0 1px rgba(245,166,35,0.4);
+    }
   }
 
   .player-name {
@@ -3026,7 +3042,7 @@
        1. A main-thread instance (window.PetDragon) for fast, synchronous
           calls — only used for the eval-bar mobility heuristic.
        2. A Worker-hosted instance (window.petDragonSearch) for the actual
-          move search, which can take up to ~30s at high difficulty. Running
+          move search, which can take up to ~3s at high difficulty. Running
           it in a Worker keeps this page's UI (clock, buttons, animations)
           responsive while it thinks, and lets us hard-cancel a search by
           terminating the worker (see window.petDragonAbortSearch below).
@@ -3248,7 +3264,7 @@ let blunderChance = 0;
 // (0-20) is the sole difficulty control, using whatever internal timing it
 // applies for that skill. This constant is just a generous outer cap so a
 // search can't hang forever, not a per-difficulty throttle.
-const ENGINE_MOVE_TIME_MS = 30000;
+const ENGINE_MOVE_TIME_MS = 3000;
 let engineMoveTime = ENGINE_MOVE_TIME_MS;  // ms think-time given to Pet Dragon per move
 let engineSkillLevel = 9;  // Pet Dragon's Skill Level (0-20, 20 = full strength)
 
@@ -3632,7 +3648,7 @@ async function engineMove() {
     // Runs in a Worker (see the module bootstrap at the top of the page), so
     // this awaits a postMessage round-trip rather than blocking the main
     // thread — the UI, clock, and Abort/Resign buttons all stay responsive
-    // even during a 30-second "Hardest" think.
+    // even during a 3-second "Hardest" think.
     // Game Rigger: if this move is being made FOR the human (autoplay is on
     // and it's the player's turn), use the independent playerEngineSkillLevel
     // instead of the real opponent's engineSkillLevel. The badge only ever
