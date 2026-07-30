@@ -26,8 +26,12 @@
 //   Native builds call these from main() instead.
 // ============================================================================
 
-// wasm-bindgen only available when the "wasm" feature is enabled
-#[cfg(feature = "wasm")]
+// wasm-bindgen only available when either WASM build feature is enabled.
+// Widened from `feature = "wasm"` alone: wasm_main() below (which uses the
+// #[wasm_bindgen(start)] attribute macro) now also compiles under
+// `uci-wasm` alone, and needs this import present in that case too — a
+// uci-wasm-only build would otherwise fail to resolve `wasm_bindgen` here.
+#[cfg(any(feature = "wasm", feature = "uci-wasm"))]
 use wasm_bindgen::prelude::*;
 
 // ── Phase 27 diagnostic toggles (Session 87) ────────────────────────────────
@@ -87,15 +91,30 @@ pub mod opening_stats;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod syzygy;
 
+// Real UCI-text-protocol WASM build target — a second, independent surface
+// from the "wasm"-gated direct-function-call exports below (search_from_fen
+// et al., used by web/index.html and web/pit/vs.html). Only compiled when
+// building with `--features uci-wasm`, never as part of the existing
+// `--features wasm` browser build — see Cargo.toml's feature doc comment
+// and deploy.yml for how the two builds stay separate.
+#[cfg(feature = "uci-wasm")]
+pub mod uci_wasm;
+
 // ── WASM entry point ──────────────────────────────────────────────────────────
 
 /// Called automatically when the WASM module loads in the browser.
 /// Runs the mandatory engine startup sequence once.
-#[cfg(feature = "wasm")]
+///
+/// Gated on `any(wasm, uci-wasm)` rather than `wasm` alone (as of the
+/// uci-wasm feature's introduction) — both are independent WASM build
+/// targets (see Cargo.toml) and both need the same mandatory
+/// `init_masks() → init_magic() → init_zobrist()` sequence + panic-hook
+/// setup; only one of the two features is ever active in a given
+/// wasm-pack invocation, so this never double-runs anything.
+#[cfg(any(feature = "wasm", feature = "uci-wasm"))]
 #[wasm_bindgen(start)]
 pub fn wasm_main() {
     // Propagate Rust panics to browser console for debugging
-    #[cfg(feature = "wasm")]
     console_error_panic_hook_setup();
 
     // Mandatory startup — identical to main() on native
@@ -108,7 +127,9 @@ pub fn wasm_main() {
 /// the browser console instead of an unreported WASM trap. This was the
 /// reason the original Instant::now() bug hung the UI with zero visible
 /// error (Session 25) — any future wasm-side panic will now be diagnosable.
-#[cfg(feature = "wasm")]
+/// Same `any(wasm, uci-wasm)` gate as `wasm_main` above — see its doc
+/// comment.
+#[cfg(any(feature = "wasm", feature = "uci-wasm"))]
 fn console_error_panic_hook_setup() {
     console_error_panic_hook::set_once();
 }
