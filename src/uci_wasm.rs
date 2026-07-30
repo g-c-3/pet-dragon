@@ -462,7 +462,11 @@ mod tests {
     fn test_position_startpos_sets_standard_position() {
         let mut session = fresh_session();
         handle_line(&mut session, "position startpos");
-        assert_eq!(session.pos.to_fen(), STANDARD_START_FEN);
+        // to_fen() always appends the Pet Dragon pawn-start extension
+        // (Position::to_fen's own doc comment) — to_standard_fen() is the
+        // extension-free method the codebase provides specifically for
+        // comparisons like this one.
+        assert_eq!(session.pos.to_standard_fen(), STANDARD_START_FEN);
     }
 
     #[test]
@@ -472,7 +476,7 @@ mod tests {
         // Two plies played — side to move should be White again, and the
         // position should differ from the starting FEN.
         assert_eq!(session.pos.side_to_move, Color::White);
-        assert_ne!(session.pos.to_fen(), STANDARD_START_FEN);
+        assert_ne!(session.pos.to_standard_fen(), STANDARD_START_FEN);
     }
 
     #[test]
@@ -489,7 +493,7 @@ mod tests {
         let mut session = fresh_session();
         let fen = STANDARD_START_FEN;
         handle_line(&mut session, &format!("position fen {}", fen));
-        assert_eq!(session.pos.to_fen(), fen);
+        assert_eq!(session.pos.to_standard_fen(), fen);
     }
 
     #[test]
@@ -541,9 +545,9 @@ mod tests {
     fn test_ucinewgame_resets_position_and_clears_tt() {
         let mut session = fresh_session();
         handle_line(&mut session, "position startpos moves e2e4");
-        assert_ne!(session.pos.to_fen(), STANDARD_START_FEN);
+        assert_ne!(session.pos.to_standard_fen(), STANDARD_START_FEN);
         handle_line(&mut session, "ucinewgame");
-        assert_eq!(session.pos.to_fen(), STANDARD_START_FEN);
+        assert_eq!(session.pos.to_standard_fen(), STANDARD_START_FEN);
     }
 
     #[test]
