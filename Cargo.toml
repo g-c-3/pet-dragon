@@ -100,6 +100,23 @@ wasm = [
     "console_error_panic_hook",
 ]
 
+# uci-wasm: a second, independent WASM build target producing a real
+# UCI-text-protocol surface (src/uci_wasm.rs's single `uci_command(line)`
+# export) instead of the "wasm" feature's direct-function-call API
+# (search_from_fen, new_game, etc. — used by web/index.html and
+# web/pit/vs.html, completely untouched by this feature). Same underlying
+# dependencies as "wasm" (wasm-bindgen, panic hook, getrandom/js) — this is
+# a second build target, not an extension of the existing one, so the two
+# are never both active in the same wasm-pack invocation; see deploy.yml's
+# second `wasm-pack build ... --features uci-wasm` step, producing a
+# separate web/pkg-uci/ output alongside the existing web/pkg/.
+uci-wasm = [
+    "wasm-bindgen",
+    "js-sys",
+    "getrandom/js",
+    "console_error_panic_hook",
+]
+
 # Phase 16.4b: enables src/bin/lichess_sample.rs. Not part of "wasm" and not
 # a default feature — completely inert unless explicitly requested via
 # `cargo build --release --features lichess-sample --bin lichess_sample`.
