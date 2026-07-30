@@ -1,4 +1,8 @@
-# 🐉 Pet Dragon
+<p align="center">
+  <img src="assets/pet-dragon-logo.png" alt="Pet Dragon logo" width="160">
+</p>
+
+# Pet Dragon
 
 > *The world's first original chess variant engine built natively in Rust*
 
