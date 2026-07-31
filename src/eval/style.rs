@@ -84,8 +84,32 @@ static PLAY_STYLE: AtomicU32 = AtomicU32::new(BALANCED);
 /// touching the same global, which is exactly what happened here. A
 /// real `Mutex`, acquired by every test that touches `PLAY_STYLE`
 /// (`pub(crate)` so `texel/predict.rs` can share this exact lock, not a
-/// second one that wouldn't actually provide mutual exclusion), is the
-/// complete fix — every test below now takes `_guard` as its first line.
+/// second one that wouldn't actually provide mutual exclusion), stops
+/// these specific tests from racing EACH OTHER.
+///
+/// **That turned out not to be the whole fix.** `eval::evaluate_styled()`
+/// — which `search::alpha_beta`'s leaf eval calls UNCONDITIONALLY, on
+/// every node, in every search, run by any test anywhere in the ~500-test
+/// suite — reads this same global on every call. A test that has never
+/// heard of PlayStyle (e.g. `search::iterative`'s ThreatDefusal test,
+/// which is what actually flaked in CI) can still have its search
+/// results corrupted by one of the tests below mutating `PLAY_STYLE`
+/// concurrently on another thread, because it never takes this lock —
+/// it has no reason to. A lock only excludes other lock-holders; it does
+/// nothing for threads that never try to acquire it. Confirmed by
+/// testing, not assumed: adding this Mutex measurably reduced but did
+/// NOT eliminate the flake (still ~2/20 stress runs failed after this
+/// fix alone).
+///
+/// The actual complete fix: every test below is `#[ignore]`d and run in
+/// its own dedicated, fully serial CI step (`cargo test -- --ignored
+/// --test-threads=1`, in `build.yml`) — the same pattern this project
+/// already uses for `node_count`'s benchmark-style tests. At
+/// `--test-threads=1`, nothing else in the entire binary can be running
+/// concurrently, which is the actual correctness requirement here — not
+/// "don't race each other," but "don't race ANYTHING." This Mutex is
+/// kept anyway as cheap defense-in-depth (free when nothing contends for
+/// it) in case these tests are ever run un-ignored by mistake.
 #[cfg(test)]
 pub(crate) static PLAY_STYLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -389,6 +413,7 @@ mod tests {
         set_play_style(BALANCED);
     }
 
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite parallelism — see PLAY_STYLE_TEST_LOCK's doc comment above and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_balanced_is_always_zero() {
         setup();
@@ -413,6 +438,7 @@ mod tests {
         reset_to_balanced();
     }
 
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite parallelism — see PLAY_STYLE_TEST_LOCK's doc comment above and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_out_of_range_play_style_treated_as_no_op() {
         setup();
@@ -428,6 +454,7 @@ mod tests {
         reset_to_balanced();
     }
 
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite parallelism — see PLAY_STYLE_TEST_LOCK's doc comment above and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_set_play_style_clamps_out_of_range() {
         setup();
@@ -438,6 +465,7 @@ mod tests {
         assert_eq!(play_style(), BALANCED);
     }
 
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite parallelism — see PLAY_STYLE_TEST_LOCK's doc comment above and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_killer_mode_rewards_pieces_massed_near_enemy_king() {
         setup();
@@ -467,6 +495,7 @@ mod tests {
         reset_to_balanced();
     }
 
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite parallelism — see PLAY_STYLE_TEST_LOCK's doc comment above and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_tactical_mode_rewards_enemy_camp_presence() {
         setup();
@@ -493,6 +522,7 @@ mod tests {
         reset_to_balanced();
     }
 
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite parallelism — see PLAY_STYLE_TEST_LOCK's doc comment above and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_positional_mode_rewards_central_control() {
         setup();
@@ -519,6 +549,7 @@ mod tests {
         reset_to_balanced();
     }
 
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite parallelism — see PLAY_STYLE_TEST_LOCK's doc comment above and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_endgame_mode_rewards_king_centralization() {
         setup();
@@ -547,6 +578,7 @@ mod tests {
         reset_to_balanced();
     }
 
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite parallelism — see PLAY_STYLE_TEST_LOCK's doc comment above and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_endgame_mode_zero_weight_at_full_middlegame_phase() {
         setup();
