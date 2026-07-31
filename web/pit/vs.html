@@ -130,6 +130,11 @@
   .turn-indicator{ color:var(--paper); }
 
   .controls-row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .nav-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .nav-position{
+    font-family:var(--font-mono); font-size:11px; color:var(--muted);
+    min-width:118px; text-align:center;
+  }
   button{
     font-family:var(--font-ui); font-size:12.5px; letter-spacing:0.02em; cursor:pointer;
     background:var(--panel2); color:var(--paper); border:1px solid var(--line); border-radius:4px;
@@ -156,6 +161,19 @@
   .player-card[data-side="b"] .card-title::before{ content:'●'; color:var(--piece-black); text-shadow:0 0 2px var(--paper); }
   .think-led{ width:7px; height:7px; border-radius:50%; background:var(--line); }
   .think-led.on{ background:var(--amber); box-shadow:0 0 6px var(--amber); }
+
+  .captured-row{
+    display:flex; align-items:center; flex-wrap:wrap; gap:1px;
+    min-height:22px; margin-bottom:10px; padding-bottom:9px; border-bottom:1px solid var(--line);
+  }
+  .captured-row .cap-piece{ font-size:17px; line-height:1; }
+  .captured-row .cap-piece.w{
+    color:var(--piece-white); text-shadow:0 0 2px rgba(0,0,0,.9), 0 1px 1px rgba(0,0,0,.7);
+    -webkit-text-stroke:0.5px rgba(0,0,0,.55);
+  }
+  .captured-row .cap-piece.b{ color:var(--piece-black); -webkit-text-stroke:0.5px rgba(0,0,0,.55); }
+  .captured-row .cap-empty{ font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+  .captured-row .cap-adv{ font-family:var(--font-mono); font-size:11px; color:var(--teal); margin-left:auto; padding-left:6px; }
 
   .field-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px; }
   .field-row label{ font-size:12px; color:var(--muted); }
@@ -200,6 +218,9 @@
   }
   .history-row{ display:grid; grid-template-columns:28px 1fr 1fr; gap:6px; padding:2px 0; border-bottom:1px solid var(--line); }
   .history-row .num{ color:var(--muted); }
+  .nav-move{ cursor:pointer; }
+  .nav-move:hover{ text-decoration:underline; }
+  .nav-move.viewing{ text-decoration:underline; box-shadow:inset 0 -2px 0 var(--amber-dim); }
   .move-eng-stockfish{ color:var(--amber); }
   .move-eng-pet_dragon{ color:var(--teal); }
   .history-eval{ color:var(--muted); font-size:10.5px; margin-left:4px; }
@@ -252,6 +273,13 @@
         <button class="small" id="btnToggleLog">Toggle log</button>
         <button class="small" id="btnDownloadLog" disabled>Download log (0)</button>
       </div>
+      <div class="nav-row" id="navRow">
+        <button class="small" id="btnNavFirst" title="Jump to start position">⏮ Start</button>
+        <button class="small" id="btnNavPrev" title="Previous move">◀ Prev</button>
+        <span class="nav-position" id="navPosition">Start position</span>
+        <button class="small" id="btnNavNext" title="Next move">Next ▶</button>
+        <button class="small" id="btnNavLast" title="Jump to latest position">Live ⏭</button>
+      </div>
     </section>
 
     <section class="side-col">
@@ -260,6 +288,7 @@
           <div class="card-title">White</div>
           <div class="think-led" id="ledW"></div>
         </div>
+        <div class="captured-row" id="capturedW"></div>
         <div class="field-row">
           <label>Engine</label>
           <select id="engineW">
@@ -284,6 +313,7 @@
           <div class="card-title">Black</div>
           <div class="think-led" id="ledB"></div>
         </div>
+        <div class="captured-row" id="capturedB"></div>
         <div class="field-row">
           <label>Engine</label>
           <select id="engineB">
@@ -563,9 +593,12 @@ const $ = id => document.getElementById(id);
 const boardEl = $('board');
 const evalFill = $('evalFill'), evalLabel = $('evalLabel');
 const turnIndicator = $('turnIndicator'), resultText = $('resultText');
+const capturedW = $('capturedW'), capturedB = $('capturedB');
 const statusChip = $('statusChip'), subtitle = $('subtitle'), bootLed = $('bootLed');
 const btnStart = $('btnStart'), btnPause = $('btnPause'), btnStep = $('btnStep'), btnReset = $('btnReset');
 const btnFlip = $('btnFlip'), btnToggleLog = $('btnToggleLog'), btnSwapNow = $('btnSwapNow');
+const btnNavFirst = $('btnNavFirst'), btnNavPrev = $('btnNavPrev'), btnNavNext = $('btnNavNext'), btnNavLast = $('btnNavLast');
+const navPosition = $('navPosition');
 const btnDownloadLog = $('btnDownloadLog');
 const logPanel = $('logPanel');
 const historyList = $('historyList');
@@ -719,6 +752,7 @@ const players = {
 
 const match = {
   fen: START_FEN,
+  startFen: START_FEN,
   history: [],
   positionCounts: {},
   running: false,
@@ -726,6 +760,11 @@ const match = {
   gameNum: 1,
   scoreboard: {},
   currentGameMeta: null,
+  // null/undefined = following the live position; -1 = viewing the game's
+  // start position; 0..history.length-1 = viewing the position right after
+  // that ply. Lets the nav buttons/history clicks browse without disturbing
+  // the actual running match.
+  viewIndex: null,
 };
 
 const matchLog = []; // accumulates one record per finished match, kept until explicitly downloaded
@@ -813,11 +852,100 @@ function buildBoardDOM() {
 }
 buildBoardDOM();
 
+function isLiveView() {
+  return match.viewIndex === null || match.viewIndex === undefined;
+}
+
+function getViewFen() {
+  if (isLiveView()) return match.fen;
+  if (match.viewIndex === -1) return match.startFen || START_FEN;
+  const h = match.history[match.viewIndex];
+  return h ? h.fen : match.fen;
+}
+
+function getViewLastMove() {
+  if (isLiveView()) return match.history[match.history.length - 1];
+  if (match.viewIndex === -1) return null;
+  return match.history[match.viewIndex];
+}
+
+function updateNavButtons() {
+  const total = match.history.length;
+  const live = isLiveView();
+  const idx = live ? total - 1 : match.viewIndex;
+  btnNavFirst.disabled = idx <= -1;
+  btnNavPrev.disabled = idx <= -1;
+  btnNavNext.disabled = live || idx >= total - 1;
+  btnNavLast.disabled = live;
+  if (total === 0) {
+    navPosition.textContent = 'Start position';
+  } else if (live) {
+    navPosition.textContent = `Move ${total} / ${total} · live`;
+  } else if (idx === -1) {
+    navPosition.textContent = `Start position`;
+  } else {
+    navPosition.textContent = `Move ${idx + 1} / ${total}`;
+  }
+}
+
+const PIECE_VALUE = { p:1, n:3, b:3, r:5, q:9 };
+const CAPTURE_ORDER = ['p','n','b','r','q']; // low to high value, pawns first — conventional display order
+
+function computeCaptured(fen) {
+  const state = fenToState(fen);
+  const onBoard = { P:0,N:0,B:0,R:0,Q:0, p:0,n:0,b:0,r:0,q:0 };
+  Object.values(state.board).forEach(pc => { if (pc in onBoard) onBoard[pc]++; });
+  const FULL = { p:8, n:2, b:2, r:2, q:1 };
+  const capturedByWhite = []; // black pieces missing from the board — White captured these
+  const capturedByBlack = []; // white pieces missing from the board — Black captured these
+  CAPTURE_ORDER.forEach(t => {
+    const missingBlack = FULL[t] - (onBoard[t] || 0);
+    for (let i = 0; i < missingBlack; i++) capturedByWhite.push(t);
+    const T = t.toUpperCase();
+    const missingWhite = FULL[t] - (onBoard[T] || 0);
+    for (let i = 0; i < missingWhite; i++) capturedByBlack.push(T);
+  });
+  const materialWhite = capturedByWhite.reduce((s, t) => s + PIECE_VALUE[t], 0);
+  const materialBlack = capturedByBlack.reduce((s, t) => s + PIECE_VALUE[t.toLowerCase()], 0);
+  return { capturedByWhite, capturedByBlack, diff: materialWhite - materialBlack };
+}
+
+function renderCapturedBox(el, pieces, pieceColorClass, advantage) {
+  el.innerHTML = '';
+  if (!pieces.length) {
+    const span = document.createElement('span');
+    span.className = 'cap-empty';
+    span.textContent = 'No captures';
+    el.appendChild(span);
+  } else {
+    pieces.forEach(t => {
+      const span = document.createElement('span');
+      span.className = 'cap-piece ' + pieceColorClass;
+      span.textContent = PIECE_GLYPH[t];
+      el.appendChild(span);
+    });
+  }
+  if (advantage > 0) {
+    const adv = document.createElement('span');
+    adv.className = 'cap-adv';
+    adv.textContent = '+' + advantage;
+    el.appendChild(adv);
+  }
+}
+
+function renderCaptured(fen) {
+  const { capturedByWhite, capturedByBlack, diff } = computeCaptured(fen);
+  renderCapturedBox(capturedW, capturedByWhite, 'b', diff > 0 ? diff : 0);
+  renderCapturedBox(capturedB, capturedByBlack, 'w', diff < 0 ? -diff : 0);
+}
+
 function renderBoard() {
-  const state = fenToState(match.fen);
-  const chk = isInCheck(match.fen);
+  const live = isLiveView();
+  const viewFen = getViewFen();
+  const state = fenToState(viewFen);
+  const chk = isInCheck(viewFen);
   const kingSq = chk ? findKing(state.board, state.active) : null;
-  const last = match.history[match.history.length - 1];
+  const last = getViewLastMove();
   boardEl.querySelectorAll('.sq').forEach(sqEl => {
     const sq = sqEl.dataset.sq;
     const piece = state.board[sq];
@@ -834,7 +962,9 @@ function renderBoard() {
     sqEl.classList.toggle('last-to', !!(last && last.uci.slice(2,4) === sq));
     sqEl.classList.toggle('king-check', sq === kingSq);
   });
-  turnIndicator.textContent = (state.active === 'w' ? 'White' : 'Black') + ' to move' + (chk ? ' — in check' : '');
+  turnIndicator.textContent = (state.active === 'w' ? 'White' : 'Black') + ' to move' + (chk ? ' — in check' : '') + (live ? '' : ' · reviewing history');
+  renderCaptured(viewFen);
+  updateNavButtons();
 }
 
 function renderEval(score) {
@@ -854,21 +984,32 @@ function renderEval(score) {
 function renderHistory() {
   historyList.innerHTML = '';
   const byMove = {};
-  for (const h of match.history) {
+  match.history.forEach((h, idx) => {
     byMove[h.moveNumber] = byMove[h.moveNumber] || {};
-    byMove[h.moveNumber][h.side] = h;
-  }
+    byMove[h.moveNumber][h.side] = { ...h, idx };
+  });
+  const liveIdx = isLiveView() ? match.history.length - 1 : match.viewIndex;
   Object.keys(byMove).sort((a,b) => a - b).forEach(num => {
     const row = document.createElement('div');
     row.className = 'history-row';
     const w = byMove[num].w, b = byMove[num].b;
     row.innerHTML = `<span class="num">${num}.</span>` +
-      `<span>${w ? `<span class="move-eng-${w.engine}">${w.uci}</span>` : ''}</span>` +
-      `<span>${b ? `<span class="move-eng-${b.engine}">${b.uci}</span>` : ''}</span>`;
+      `<span>${w ? `<span class="move-eng-${w.engine} nav-move${w.idx === liveIdx ? ' viewing' : ''}" data-idx="${w.idx}">${w.uci}</span>` : ''}</span>` +
+      `<span>${b ? `<span class="move-eng-${b.engine} nav-move${b.idx === liveIdx ? ' viewing' : ''}" data-idx="${b.idx}">${b.uci}</span>` : ''}</span>`;
     historyList.appendChild(row);
   });
-  historyList.scrollTop = historyList.scrollHeight;
+  if (isLiveView()) historyList.scrollTop = historyList.scrollHeight;
 }
+
+// Single delegated listener survives renderHistory() rebuilding the rows.
+historyList.addEventListener('click', (e) => {
+  const el = e.target.closest('.nav-move');
+  if (!el) return;
+  const idx = Number(el.dataset.idx);
+  match.viewIndex = idx >= match.history.length - 1 ? null : idx;
+  renderBoard();
+  renderHistory();
+});
 
 function renderScoreboard() {
   scoreBody.innerHTML = '';
@@ -992,6 +1133,8 @@ function getSelectedStartFen() {
 
 function resetGame(fen) {
   match.fen = fen;
+  match.startFen = fen;
+  match.viewIndex = null;
   match.history = [];
   match.positionCounts = {};
   match.positionCounts[fen.split(' ').slice(0,4).join(' ')] = 1;
@@ -1291,6 +1434,7 @@ async function playOneMoveInner() {
     // Phase 27 (Session 89): only meaningful for Pet Dragon moves —
     // undefined/null for Stockfish, which doesn't report a depth here.
     depth: result.depth,
+    fen: newFen,
   });
   const repKey = newFen.split(' ').slice(0,4).join(' ');
   match.positionCounts[repKey] = (match.positionCounts[repKey] || 0) + 1;
@@ -1345,6 +1489,29 @@ btnReset.addEventListener('click', () => {
   updateAutoplayDashboard();
 });
 btnFlip.addEventListener('click', () => boardEl.classList.toggle('flipped'));
+btnNavFirst.addEventListener('click', () => {
+  match.viewIndex = -1;
+  renderBoard();
+  renderHistory();
+});
+btnNavPrev.addEventListener('click', () => {
+  const idx = isLiveView() ? match.history.length - 1 : match.viewIndex;
+  match.viewIndex = Math.max(-1, idx - 1);
+  renderBoard();
+  renderHistory();
+});
+btnNavNext.addEventListener('click', () => {
+  if (isLiveView()) return;
+  const nextIdx = match.viewIndex + 1;
+  match.viewIndex = nextIdx >= match.history.length - 1 ? null : nextIdx;
+  renderBoard();
+  renderHistory();
+});
+btnNavLast.addEventListener('click', () => {
+  match.viewIndex = null;
+  renderBoard();
+  renderHistory();
+});
 btnToggleLog.addEventListener('click', () => {
   logPanel.style.display = logPanel.style.display === 'none' ? 'block' : 'none';
 });
