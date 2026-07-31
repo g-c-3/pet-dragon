@@ -63,6 +63,32 @@ pub const MAX_PLAY_STYLE: u32 = ENDGAME;
 /// for NNUEWeight applies here too.
 static PLAY_STYLE: AtomicU32 = AtomicU32::new(BALANCED);
 
+/// Serializes every test — in this file AND in `texel/predict.rs` — that
+/// reads or mutates the process-global `PLAY_STYLE` atomic above.
+///
+/// Session 111: CI caught a REAL race, not a theoretical one.
+/// `texel::predict::tests::test_predict_style_matches_evaluate_styled_
+/// all_modes` iterates 100 seeds with a mode held fixed via
+/// `set_play_style()` — a wide enough window that a concurrently-
+/// scheduled test IN THIS FILE (which also calls `set_play_style()`,
+/// e.g. `test_out_of_range_play_style_treated_as_no_op`) flipped the
+/// global mid-loop on a GitHub Actions runner with enough cores to
+/// actually interleave them. It didn't reproduce locally — cargo test's
+/// default thread-per-test-function parallelism means this was always
+/// racy, just not always OBSERVABLE, depending on scheduling luck.
+///
+/// eval/mod.rs's existing "one test function, not several" convention
+/// (see `test_nnue_weight_setter_getter_and_blend_at_zero`'s doc
+/// comment) only protects against races WITHIN one file's tests calling
+/// each other — it doesn't cover two different files' test modules both
+/// touching the same global, which is exactly what happened here. A
+/// real `Mutex`, acquired by every test that touches `PLAY_STYLE`
+/// (`pub(crate)` so `texel/predict.rs` can share this exact lock, not a
+/// second one that wouldn't actually provide mutual exclusion), is the
+/// complete fix — every test below now takes `_guard` as its first line.
+#[cfg(test)]
+pub(crate) static PLAY_STYLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Set the active PlayStyle (0-4). Out-of-range values are clamped rather
 /// than rejected, matching the existing `Hash`/`NNUEWeight`/`Threads` UCI
 /// option pattern in `main.rs`. Called from `setoption name PlayStyle
@@ -366,6 +392,7 @@ mod tests {
     #[test]
     fn test_balanced_is_always_zero() {
         setup();
+        let _guard = PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_to_balanced();
         assert_eq!(play_style(), BALANCED);
 
@@ -389,6 +416,7 @@ mod tests {
     #[test]
     fn test_out_of_range_play_style_treated_as_no_op() {
         setup();
+        let _guard = PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Defensive default in evaluate_style's match — even though
         // set_play_style() itself clamps, a value that somehow bypassed
         // the setter should still fall through to 0, not panic or index
@@ -403,6 +431,7 @@ mod tests {
     #[test]
     fn test_set_play_style_clamps_out_of_range() {
         setup();
+        let _guard = PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_play_style(999);
         assert_eq!(play_style(), MAX_PLAY_STYLE, "should clamp to max (4)");
         reset_to_balanced();
@@ -412,6 +441,7 @@ mod tests {
     #[test]
     fn test_killer_mode_rewards_pieces_massed_near_enemy_king() {
         setup();
+        let _guard = PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_to_balanced();
         // White queen and rook both bearing down on the black king's
         // zone (attacking f8 and h7, adjacent to the g8 king — not the
@@ -440,6 +470,7 @@ mod tests {
     #[test]
     fn test_tactical_mode_rewards_enemy_camp_presence() {
         setup();
+        let _guard = PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_to_balanced();
         set_play_style(TACTICAL);
         // White knight deep in Black's camp vs a knight still at home.
@@ -465,6 +496,7 @@ mod tests {
     #[test]
     fn test_positional_mode_rewards_central_control() {
         setup();
+        let _guard = PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_to_balanced();
         set_play_style(POSITIONAL);
         // White knight on d4 (central) vs a knight on a1 (rim).
@@ -490,6 +522,7 @@ mod tests {
     #[test]
     fn test_endgame_mode_rewards_king_centralization() {
         setup();
+        let _guard = PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_to_balanced();
         set_play_style(ENDGAME);
         // White king centralized (e4) vs cornered (a1); black king fixed
@@ -517,6 +550,7 @@ mod tests {
     #[test]
     fn test_endgame_mode_zero_weight_at_full_middlegame_phase() {
         setup();
+        let _guard = PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_to_balanced();
         set_play_style(ENDGAME);
         // Phase 24 (full material) — (24 - phase) = 0, so the bonus must
