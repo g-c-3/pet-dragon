@@ -41,6 +41,22 @@ jobs:
         # directly, so no wasm-bindgen-test-runner/browser setup needed.
         run: cargo test --verbose --features uci-wasm
 
+      - name: Run PlayStyle tests (serial, isolated from the rest of the suite)
+        # Session 111: these 10 tests (8 in eval/style.rs, 2 in
+        # texel/predict.rs) mutate the process-global PLAY_STYLE atomic,
+        # which search::alpha_beta's leaf eval reads UNCONDITIONALLY on
+        # every node of every search — including searches run by totally
+        # unrelated tests (search::iterative's ThreatDefusal test flaked
+        # in CI this way: a concurrently-scheduled PlayStyle test flipped
+        # the global mid-search on another thread). `#[ignore]`d above so
+        # the "Run all tests" step doesn't run them concurrently with
+        # anything, and re-run here at --test-threads=1 — nothing else in
+        # the binary can be executing at the same time, which is the
+        # actual requirement (not "don't race each other," but "don't
+        # race anything"). Same pattern this project already uses for
+        # node_count's benchmark-style tests, just above.
+        run: cargo test --lib -- --ignored --test-threads=1 eval::style::tests:: texel::predict::tests::
+
   # ── Build native binaries for all platforms ──────────────────────────
   build:
     name: Build — ${{ matrix.target }}
