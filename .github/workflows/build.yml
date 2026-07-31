@@ -55,7 +55,8 @@ jobs:
         # actual requirement (not "don't race each other," but "don't
         # race anything"). Same pattern this project already uses for
         # node_count's benchmark-style tests, just above.
-        run: cargo test --lib -- --ignored --test-threads=1 eval::style::tests:: texel::predict::tests::
+        run: |
+          cargo test --lib -- --ignored --test-threads=1 eval::style::tests:: texel::predict::tests::
 
   # ── Build native binaries for all platforms ──────────────────────────
   build:
