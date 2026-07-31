@@ -119,12 +119,18 @@ const BISHOP_MAGIC_NUMBERS: [u64; 64] = [
 // ── Initialisation ────────────────────────────────────────────────────────────
 
 /// Initialise magic bitboard tables for Rook and Bishop.
-/// Called once at engine startup from init_masks().
+/// Called once at engine startup, right after init_masks().
+///
+/// Session 111: same `Once`-guard rationale as `init_masks` in
+/// `masks.rs` — see that function's doc comment. Every test's `setup()`
+/// helper calls this too, under `cargo test`'s default parallelism.
+static INIT_MAGIC: std::sync::Once = std::sync::Once::new();
+
 pub fn init_magic() {
-    unsafe {
-        init_slider_magic(true);   // Rooks
-        init_slider_magic(false);  // Bishops
-    }
+    INIT_MAGIC.call_once(|| unsafe {
+        init_slider_magic(true); // Rooks
+        init_slider_magic(false); // Bishops
+    });
 }
 
 unsafe fn init_slider_magic(is_rook: bool) {

@@ -69,7 +69,24 @@ pub static mut PAWN_DOUBLE_PUSH_MASK: [[Bitboard; 64]; 2] =
 /// Initialise all precomputed tables.
 /// MUST be called once before any move generation.
 /// Called from main() and wasm_main() at engine startup.
+///
+/// Session 111: also called by every single test's `setup()` helper
+/// (500+ call sites) — under `cargo test`'s default parallelism, many
+/// of these run concurrently. The actual table-computation logic below
+/// writes to `static mut` globals via unsynchronized `unsafe` writes,
+/// which is undefined behavior under concurrent execution regardless of
+/// whether the computed values happen to be deterministic. `Once`
+/// guarantees the real work runs exactly once, with every concurrent
+/// caller blocking until it's done — the safe, standard fix, and it
+/// requires no change to any of the ~500 existing call sites since the
+/// public signature is unchanged.
+static INIT_MASKS: std::sync::Once = std::sync::Once::new();
+
 pub fn init_masks() {
+    INIT_MASKS.call_once(init_masks_impl);
+}
+
+fn init_masks_impl() {
     for sq_idx in 0u8..64 {
         let sq = Square::from_index(sq_idx).unwrap();
         let bb = Bitboard::from_square(sq);
