@@ -135,6 +135,15 @@ pub struct TunableWeightsF64 {
     pub threat_by_minor: S,
 
     pub tempo: f64,
+
+    /// PlayStyle (Phase 30, ROADMAP 29.7) — f64 mirror of
+    /// `TunableWeights::killer_attacker_bonus`/etc. Flat, not `S`, same
+    /// reasoning as the struct field's own doc comment in weights.rs.
+    pub killer_attacker_bonus: [f64; 8],
+    pub killer_storm_bonus_per_pawn: f64,
+    pub tactical_bonus_per_square: f64,
+    pub positional_bonus_per_square: f64,
+    pub endgame_bonus_per_unit: f64,
 }
 
 impl TunableWeightsF64 {
@@ -178,6 +187,11 @@ impl TunableWeightsF64 {
             undefended_queen: S::zero(),
             threat_by_minor: S::zero(),
             tempo: 0.0,
+            killer_attacker_bonus: [0.0; 8],
+            killer_storm_bonus_per_pawn: 0.0,
+            tactical_bonus_per_square: 0.0,
+            positional_bonus_per_square: 0.0,
+            endgame_bonus_per_unit: 0.0,
         }
     }
 
@@ -221,6 +235,11 @@ impl TunableWeightsF64 {
             undefended_queen: self.undefended_queen.to_packed(),
             threat_by_minor: self.threat_by_minor.to_packed(),
             tempo: self.tempo.round() as i32,
+            killer_attacker_bonus: self.killer_attacker_bonus.map(|v| v.round() as i32),
+            killer_storm_bonus_per_pawn: self.killer_storm_bonus_per_pawn.round() as i32,
+            tactical_bonus_per_square: self.tactical_bonus_per_square.round() as i32,
+            positional_bonus_per_square: self.positional_bonus_per_square.round() as i32,
+            endgame_bonus_per_unit: self.endgame_bonus_per_unit.round() as i32,
         }
     }
 
@@ -238,7 +257,8 @@ impl TunableWeightsF64 {
         + 2             // D63 item 3: knight_near_own_king + bishop_near_own_king
         + 9 * 2         // open lines
         + 5 * 2         // Phase 24 item 4 (D68): threats — 5 S-typed terms
-        + 1; // tempo
+        + 1             // tempo
+        + 8 + 1 + 1 + 1 + 1; // Phase 30 (ROADMAP 29.7): PlayStyle — killer_attacker_bonus[8] + 4 scalars
 
     /// Flatten into a fixed-order `Vec<f64>` — order must exactly match
     /// `unflatten`'s read order (see the round-trip test below).
@@ -324,6 +344,13 @@ impl TunableWeightsF64 {
         v.push(self.threat_by_minor.mg);
         v.push(self.threat_by_minor.eg);
         v.push(self.tempo);
+        for w in &self.killer_attacker_bonus {
+            v.push(*w);
+        }
+        v.push(self.killer_storm_bonus_per_pawn);
+        v.push(self.tactical_bonus_per_square);
+        v.push(self.positional_bonus_per_square);
+        v.push(self.endgame_bonus_per_unit);
         debug_assert_eq!(v.len(), Self::PARAM_COUNT);
         v
     }
@@ -412,6 +439,15 @@ impl TunableWeightsF64 {
 
         let tempo = next();
 
+        let mut killer_attacker_bonus = [0.0f64; 8];
+        for slot in killer_attacker_bonus.iter_mut() {
+            *slot = next();
+        }
+        let killer_storm_bonus_per_pawn = next();
+        let tactical_bonus_per_square = next();
+        let positional_bonus_per_square = next();
+        let endgame_bonus_per_unit = next();
+
         debug_assert_eq!(i, Self::PARAM_COUNT);
 
         TunableWeightsF64 {
@@ -450,6 +486,11 @@ impl TunableWeightsF64 {
             undefended_queen,
             threat_by_minor,
             tempo,
+            killer_attacker_bonus,
+            killer_storm_bonus_per_pawn,
+            tactical_bonus_per_square,
+            positional_bonus_per_square,
+            endgame_bonus_per_unit,
         }
     }
 }
@@ -492,6 +533,11 @@ impl From<&TunableWeights> for TunableWeightsF64 {
             undefended_queen: S::from(w.undefended_queen),
             threat_by_minor: S::from(w.threat_by_minor),
             tempo: w.tempo as f64,
+            killer_attacker_bonus: w.killer_attacker_bonus.map(|x| x as f64),
+            killer_storm_bonus_per_pawn: w.killer_storm_bonus_per_pawn as f64,
+            tactical_bonus_per_square: w.tactical_bonus_per_square as f64,
+            positional_bonus_per_square: w.positional_bonus_per_square as f64,
+            endgame_bonus_per_unit: w.endgame_bonus_per_unit as f64,
         }
     }
 }
@@ -554,5 +600,19 @@ mod tests {
         assert_eq!(back_to_int.undefended_queen, default_weights.undefended_queen);
         assert_eq!(back_to_int.threat_by_minor, default_weights.threat_by_minor);
         assert_eq!(back_to_int.tempo, default_weights.tempo);
+        assert_eq!(back_to_int.killer_attacker_bonus, default_weights.killer_attacker_bonus);
+        assert_eq!(
+            back_to_int.killer_storm_bonus_per_pawn,
+            default_weights.killer_storm_bonus_per_pawn
+        );
+        assert_eq!(
+            back_to_int.tactical_bonus_per_square,
+            default_weights.tactical_bonus_per_square
+        );
+        assert_eq!(
+            back_to_int.positional_bonus_per_square,
+            default_weights.positional_bonus_per_square
+        );
+        assert_eq!(back_to_int.endgame_bonus_per_unit, default_weights.endgame_bonus_per_unit);
     }
 }

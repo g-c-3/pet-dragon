@@ -26,6 +26,7 @@
 // one deliberate departure from "gradient = feature value" in this file.
 // ============================================================================
 
+use crate::eval::style::{ENDGAME, KILLER, POSITIONAL, TACTICAL};
 use crate::texel::features::TexelFeatures;
 use crate::texel::weights::MAX_KING_DANGER;
 use crate::texel::weights_f64::{TunableWeightsF64, S};
@@ -137,12 +138,90 @@ pub fn predict_f64(f: &TexelFeatures, w: &TunableWeightsF64) -> f64 {
         + open_lines_score
         + threats_score
         + w.tempo
+        + style_score_f64(f, w, phase)
 }
 
 #[inline]
 fn accum_only(acc: S, weight: S, diff: i32) -> S {
     let d = diff as f64;
     S::new(acc.mg + weight.mg * d, acc.eg + weight.eg * d)
+}
+
+/// f64 mirror of `predict.rs::style_score` — same term-for-term match on
+/// `f.style.mode`, no clamps or nonlinearities (see this file's module
+/// doc comment: the only nonlinearity anywhere in this file is king
+/// safety's clamp, and PlayStyle has none), so this is a straight port,
+/// not an approximation.
+fn style_score_f64(f: &TexelFeatures, w: &TunableWeightsF64, phase: i32) -> f64 {
+    let Some(style) = &f.style else {
+        return 0.0;
+    };
+    let phase = phase as f64;
+    match style.mode {
+        KILLER => {
+            let raw = w.killer_attacker_bonus[style.killer_attacker_idx]
+                + style.killer_storm_pawns as f64 * w.killer_storm_bonus_per_pawn;
+            raw * phase / 24.0
+        }
+        TACTICAL => {
+            (style.tactical_net_squares as f64 * w.tactical_bonus_per_square) * phase / 24.0
+        }
+        POSITIONAL => style.positional_net_squares as f64 * w.positional_bonus_per_square,
+        ENDGAME => {
+            (style.endgame_net_units as f64 * w.endgame_bonus_per_unit) * (24.0 - phase) / 24.0
+        }
+        _ => 0.0, // BALANCED, or any future/invalid value — no-op, mirrors evaluate_style()
+    }
+}
+
+/// Gradient-accumulation counterpart to `style_score_f64`, called from
+/// `predict_and_accumulate_grad` exactly where `grad.tempo += error_signal`
+/// sits for the other flat (non-`S`) weight. Every PlayStyle term is a
+/// plain product of one weight and one position-derived, weight-
+/// independent feature count (no clamps — see this file's module doc
+/// comment) — so, same as `grad.tempo`, each gradient here is just
+/// `error_signal * (that feature's coefficient in the forward formula)`,
+/// term for term against `style_score_f64` above.
+fn style_score_and_grad_f64(
+    f: &TexelFeatures,
+    w: &TunableWeightsF64,
+    error_signal: f64,
+    phase: i32,
+    grad: &mut TunableWeightsF64,
+) -> f64 {
+    let Some(style) = &f.style else {
+        return 0.0;
+    };
+    let phase_f = phase as f64;
+    match style.mode {
+        KILLER => {
+            let factor = phase_f / 24.0;
+            grad.killer_attacker_bonus[style.killer_attacker_idx] += error_signal * factor;
+            grad.killer_storm_bonus_per_pawn +=
+                error_signal * factor * style.killer_storm_pawns as f64;
+            let raw = w.killer_attacker_bonus[style.killer_attacker_idx]
+                + style.killer_storm_pawns as f64 * w.killer_storm_bonus_per_pawn;
+            raw * factor
+        }
+        TACTICAL => {
+            let factor = phase_f / 24.0;
+            let net = style.tactical_net_squares as f64;
+            grad.tactical_bonus_per_square += error_signal * factor * net;
+            (net * w.tactical_bonus_per_square) * factor
+        }
+        POSITIONAL => {
+            let net = style.positional_net_squares as f64;
+            grad.positional_bonus_per_square += error_signal * net;
+            net * w.positional_bonus_per_square
+        }
+        ENDGAME => {
+            let factor = (24.0 - phase_f) / 24.0;
+            let net = style.endgame_net_units as f64;
+            grad.endgame_bonus_per_unit += error_signal * factor * net;
+            (net * w.endgame_bonus_per_unit) * factor
+        }
+        _ => 0.0, // BALANCED, or any future/invalid value — no-op, no gradient
+    }
 }
 
 fn king_safety_side_f64(
@@ -508,6 +587,7 @@ pub fn predict_and_accumulate_grad(
         + open_lines_score
         + threats_score
         + w.tempo
+        + style_score_and_grad_f64(f, w, error_signal, phase, grad)
 }
 
 /// Accumulates one tapered term's forward value AND its gradient
@@ -690,6 +770,141 @@ mod tests {
                 seed,
                 expected,
                 actual
+            );
+        }
+    }
+
+    /// PlayStyle (Phase 30, ROADMAP 29.7): same forward-consistency
+    /// requirement as `test_grad_forward_matches_predict_f64_pet_dragon_
+    /// positions` above, but with `f.style` populated for each of the 4
+    /// non-Balanced modes — `predict_and_accumulate_grad`'s returned
+    /// score must still equal plain `predict_f64`'s, gradient bookkeeping
+    /// must never perturb the forward value.
+    #[test]
+    fn test_style_grad_forward_matches_predict_f64_all_modes() {
+        setup();
+        let default_weights = TunableWeights::default();
+        let w = TunableWeightsF64::from(&default_weights);
+        let modes = [KILLER, TACTICAL, POSITIONAL, ENDGAME];
+
+        for &mode in &modes {
+            for seed in 0..50u64 {
+                let pos = Position::generate_with_seed(seed);
+                let mut features = extract_features(&pos);
+                features.style =
+                    Some(crate::texel::features::extract_style_features(&pos, mode));
+
+                let plain_score = predict_f64(&features, &w);
+                let mut grad = TunableWeightsF64::zero();
+                let grad_score = predict_and_accumulate_grad(&features, &w, 1.0, &mut grad);
+
+                assert!(
+                    (plain_score - grad_score).abs() < 1e-6,
+                    "mode {} seed {}: {} vs {}",
+                    mode,
+                    seed,
+                    plain_score,
+                    grad_score
+                );
+            }
+        }
+    }
+
+    /// Direct numerical-gradient check (finite differences) — proves the
+    /// accumulated `grad.killer_attacker_bonus[idx]` etc. are actually
+    /// correct, not merely internally self-consistent with the forward
+    /// pass (the test above could pass even if both functions shared the
+    /// same wrong formula). Perturbs each PlayStyle weight by a small
+    /// `eps`, compares `(f(w+eps) - f(w-eps)) / (2*eps)` against the
+    /// analytically accumulated gradient — the standard way to catch a
+    /// sign error or a missing `phase` factor that a pure consistency
+    /// check cannot.
+    #[test]
+    fn test_style_gradient_matches_finite_difference_all_modes() {
+        setup();
+        let default_weights = TunableWeights::default();
+        let base_w = TunableWeightsF64::from(&default_weights);
+        let modes = [KILLER, TACTICAL, POSITIONAL, ENDGAME];
+        let eps = 1e-4;
+        let error_signal = 1.0;
+
+        for &mode in &modes {
+            // Seed 3 gives nonzero counts for every mode's features on
+            // the default Pet Dragon arrangement pool used elsewhere in
+            // this file's tests.
+            let pos = Position::generate_with_seed(3);
+            let mut features = extract_features(&pos);
+            features.style = Some(crate::texel::features::extract_style_features(&pos, mode));
+
+            let mut analytic_grad = TunableWeightsF64::zero();
+            predict_and_accumulate_grad(&features, &base_w, error_signal, &mut analytic_grad);
+
+            // Perturb exactly the weight(s) relevant to this mode and
+            // compare against the matching analytic gradient slot.
+            let (analytic, perturb_and_eval): (f64, Box<dyn Fn(f64) -> f64>) = match mode {
+                KILLER => {
+                    let idx = features.style.as_ref().unwrap().killer_attacker_idx;
+                    let a = analytic_grad.killer_attacker_bonus[idx];
+                    let base = base_w.clone();
+                    let f = features.clone();
+                    (
+                        a,
+                        Box::new(move |delta| {
+                            let mut w2 = base.clone();
+                            w2.killer_attacker_bonus[idx] += delta;
+                            error_signal * predict_f64(&f, &w2)
+                        }),
+                    )
+                }
+                TACTICAL => {
+                    let a = analytic_grad.tactical_bonus_per_square;
+                    let base = base_w.clone();
+                    let f = features.clone();
+                    (
+                        a,
+                        Box::new(move |delta| {
+                            let mut w2 = base.clone();
+                            w2.tactical_bonus_per_square += delta;
+                            error_signal * predict_f64(&f, &w2)
+                        }),
+                    )
+                }
+                POSITIONAL => {
+                    let a = analytic_grad.positional_bonus_per_square;
+                    let base = base_w.clone();
+                    let f = features.clone();
+                    (
+                        a,
+                        Box::new(move |delta| {
+                            let mut w2 = base.clone();
+                            w2.positional_bonus_per_square += delta;
+                            error_signal * predict_f64(&f, &w2)
+                        }),
+                    )
+                }
+                ENDGAME => {
+                    let a = analytic_grad.endgame_bonus_per_unit;
+                    let base = base_w.clone();
+                    let f = features.clone();
+                    (
+                        a,
+                        Box::new(move |delta| {
+                            let mut w2 = base.clone();
+                            w2.endgame_bonus_per_unit += delta;
+                            error_signal * predict_f64(&f, &w2)
+                        }),
+                    )
+                }
+                _ => unreachable!(),
+            };
+
+            let numeric = (perturb_and_eval(eps) - perturb_and_eval(-eps)) / (2.0 * eps);
+            assert!(
+                (analytic - numeric).abs() < 1e-3,
+                "mode {}: analytic grad {} vs finite-difference {}",
+                mode,
+                analytic,
+                numeric
             );
         }
     }

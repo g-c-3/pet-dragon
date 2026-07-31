@@ -26,12 +26,22 @@
 //   - King safety: the two kings are independent, phase-scaled, and each
 //     side's "danger" term is separately clamped (D35's one nonlinearity)
 //     — so raw per-side components are kept instead of a diff.
+//
+// PlayStyle (Phase 30, ROADMAP 29.7): `style` is a NEW, separate field,
+// always `None` from `extract_features()` itself — that function and its
+// self-consistency test (predict.rs, proving bit-exact agreement with
+// `crate::eval::evaluate()`, the UNSTYLED core) are completely untouched
+// by this addition. Only `src/bin/texel_tune.rs`'s data loading calls the
+// new `extract_style_features()` below, for samples whose data line
+// carries a PlayStyle mode tag — see that file and predict.rs/
+// predict_f64.rs's own style-bonus additions for the rest of the picture.
 // ============================================================================
 
 use crate::bitboard::{bishop_attacks, rook_attacks, queen_attacks};
 use crate::bitboard::masks::{knight_attacks, king_attacks, pawn_attacks};
 use crate::bitboard::Bitboard;
 use crate::eval::material::game_phase;
+use crate::eval::style::{BALANCED, KILLER, TACTICAL, POSITIONAL, ENDGAME};
 use crate::position::Position;
 use crate::types::{Color, PieceKind, Square};
 
@@ -119,6 +129,12 @@ pub struct TexelFeatures {
     /// Count of our knight/bishop attacks landing on an enemy rook or
     /// queen, minus theirs. A fork counts twice, naturally.
     pub threat_by_minor_diff: i32,
+
+    /// PlayStyle bonus features (Phase 30, ROADMAP 29.7) — `None` unless
+    /// populated separately via `extract_style_features()` below (never
+    /// set by `extract_features()` itself). See this file's module doc
+    /// comment.
+    pub style: Option<StyleFeatures>,
 }
 
 /// Extract the full feature summary for a position, from the side-to-move's
@@ -185,6 +201,7 @@ pub fn extract_features(pos: &Position) -> TexelFeatures {
         undefended_rook_diff: th.2,
         undefended_queen_diff: th.3,
         threat_by_minor_diff: th.4,
+        style: None, // populated separately by extract_style_features(), never here
     }
 }
 
@@ -925,4 +942,228 @@ fn are_rooks_connected(sq1: Square, sq2: Square, occupancy: Bitboard, own_rooks:
     }
 
     false
+}
+
+// ── PlayStyle (Phase 30, ROADMAP 29.7) ──────────────────────────────────────
+//
+// Raw feature counts for exactly one active PlayStyle mode — mirrors
+// `eval::style.rs`'s four bonus functions term-for-term, but stops short of
+// applying the tunable weight (that's predict.rs/predict_f64.rs's job, same
+// split as every other feature category in this file). Deliberately
+// duplicates style.rs's small amount of king-zone/center-box/distance
+// logic rather than importing it, matching style.rs's own stated
+// precedent ("deliberately duplicated rather than imported... fully
+// decoupled from the tuned core") for exactly the same reason.
+
+/// Raw per-mode feature counts. Only the fields relevant to `mode` are
+/// ever computed by `extract_style_features` — the rest are left at 0,
+/// matching `eval::style::evaluate_style`'s own single-mode dispatch.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct StyleFeatures {
+    pub mode: u32,
+    /// Index into `TunableWeights::killer_attacker_bonus` (0..=7) — mirrors
+    /// `killer_bonus`'s `attacker_count.min(7)`. Only meaningful when
+    /// `mode == KILLER`.
+    pub killer_attacker_idx: usize,
+    /// Mirrors `killer_bonus`'s `storm_pawns` count.
+    pub killer_storm_pawns: i32,
+    /// Mirrors `tactical_bonus`'s `net` (our enemy-territory-control
+    /// squares minus theirs).
+    pub tactical_net_squares: i32,
+    /// Mirrors `positional_bonus`'s `net` (our center-box control minus
+    /// theirs).
+    pub positional_net_squares: i32,
+    /// Mirrors `endgame_bonus`'s `net` (their king's distance-to-center
+    /// minus ours).
+    pub endgame_net_units: i32,
+}
+
+/// Extract `StyleFeatures` for one specific `mode` (BALANCED..=ENDGAME,
+/// from `eval::style`) — called separately from `extract_features()`,
+/// only by `src/bin/texel_tune.rs`'s data loading, for samples whose data
+/// line carries a PlayStyle mode tag. Returns raw, weight-independent
+/// counts only — no `phase` parameter needed here, since the phase-based
+/// scaling ((phase/24) or ((24-phase)/24), matching `eval::style`'s own
+/// functions) is applied later, once, in `predict.rs`/`predict_f64.rs`'s
+/// `style_score`/`style_score_f64`, using `TexelFeatures.phase`.
+pub fn extract_style_features(pos: &Position, mode: u32) -> StyleFeatures {
+    match mode {
+        KILLER => {
+            let (killer_attacker_idx, killer_storm_pawns) = extract_killer(pos);
+            StyleFeatures { mode, killer_attacker_idx, killer_storm_pawns, ..Default::default() }
+        }
+        TACTICAL => {
+            let tactical_net_squares = extract_tactical(pos);
+            StyleFeatures { mode, tactical_net_squares, ..Default::default() }
+        }
+        POSITIONAL => {
+            let positional_net_squares = extract_positional(pos);
+            StyleFeatures { mode, positional_net_squares, ..Default::default() }
+        }
+        ENDGAME => {
+            let endgame_net_units = extract_endgame(pos);
+            StyleFeatures { mode, endgame_net_units, ..Default::default() }
+        }
+        _ => StyleFeatures { mode: BALANCED, ..Default::default() }, // no-op, mirrors evaluate_style()
+    }
+}
+
+/// Mirrors `eval::style::killer_bonus`'s feature-gathering half exactly.
+fn extract_killer(pos: &Position) -> (usize, i32) {
+    let us = pos.side_to_move;
+    let them = us.flip();
+    let their_king_sq = pos.king_sq(them);
+    let all_occ = pos.all_pieces();
+
+    let king_zone = king_attacks(their_king_sq) | Bitboard::from_square(their_king_sq);
+
+    let mut attacker_count = 0usize;
+    let mut knights = pos.piece_bb(us, PieceKind::Knight);
+    while let Some(sq) = knights.pop_lsb() {
+        if (knight_attacks(sq) & king_zone).is_not_empty() {
+            attacker_count += 1;
+        }
+    }
+    let mut bishops = pos.piece_bb(us, PieceKind::Bishop);
+    while let Some(sq) = bishops.pop_lsb() {
+        if (bishop_attacks(sq, all_occ) & king_zone).is_not_empty() {
+            attacker_count += 1;
+        }
+    }
+    let mut rooks = pos.piece_bb(us, PieceKind::Rook);
+    while let Some(sq) = rooks.pop_lsb() {
+        if (rook_attacks(sq, all_occ) & king_zone).is_not_empty() {
+            attacker_count += 1;
+        }
+    }
+    let mut queens = pos.piece_bb(us, PieceKind::Queen);
+    while let Some(sq) = queens.pop_lsb() {
+        if (queen_attacks(sq, all_occ) & king_zone).is_not_empty() {
+            attacker_count += 1;
+        }
+    }
+
+    let their_king_file = their_king_sq.file() as i32;
+    let mut storm_pawns = 0i32;
+    let mut our_pawns = pos.piece_bb(us, PieceKind::Pawn);
+    while let Some(sq) = our_pawns.pop_lsb() {
+        let file_diff = (sq.file() as i32 - their_king_file).abs();
+        if file_diff > 1 {
+            continue;
+        }
+        let advanced = if us == Color::White { sq.rank() >= 4 } else { sq.rank() <= 3 };
+        if advanced {
+            storm_pawns += 1;
+        }
+    }
+
+    (attacker_count.min(7), storm_pawns)
+}
+
+/// Mirrors `eval::style::tactical_bonus`'s feature-gathering half exactly.
+fn extract_tactical(pos: &Position) -> i32 {
+    let us = pos.side_to_move;
+    let them = us.flip();
+    let occ = pos.all_pieces();
+
+    let (our_target_half, their_target_half) = if us == Color::White {
+        (
+            Bitboard::RANK_5 | Bitboard::RANK_6 | Bitboard::RANK_7 | Bitboard::RANK_8,
+            Bitboard::RANK_1 | Bitboard::RANK_2 | Bitboard::RANK_3 | Bitboard::RANK_4,
+        )
+    } else {
+        (
+            Bitboard::RANK_1 | Bitboard::RANK_2 | Bitboard::RANK_3 | Bitboard::RANK_4,
+            Bitboard::RANK_5 | Bitboard::RANK_6 | Bitboard::RANK_7 | Bitboard::RANK_8,
+        )
+    };
+
+    let our_count = (all_piece_attacks(pos, us, occ) & our_target_half).count() as i32;
+    let their_count = (all_piece_attacks(pos, them, occ) & their_target_half).count() as i32;
+    our_count - their_count
+}
+
+/// Mirrors `eval::style::positional_bonus`'s feature-gathering half exactly.
+fn extract_positional(pos: &Position) -> i32 {
+    let us = pos.side_to_move;
+    let them = us.flip();
+    let occ = pos.all_pieces();
+
+    let center_box = (Bitboard::FILE_C | Bitboard::FILE_D | Bitboard::FILE_E | Bitboard::FILE_F)
+        & (Bitboard::RANK_3 | Bitboard::RANK_4 | Bitboard::RANK_5 | Bitboard::RANK_6);
+
+    let our_count = (pawn_and_minor_attacks(pos, us, occ) & center_box).count() as i32;
+    let their_count = (pawn_and_minor_attacks(pos, them, occ) & center_box).count() as i32;
+    our_count - their_count
+}
+
+/// Mirrors `eval::style::endgame_bonus`'s feature-gathering half exactly.
+fn extract_endgame(pos: &Position) -> i32 {
+    let us = pos.side_to_move;
+    let them = us.flip();
+    let our_dist = distance_to_center(pos.king_sq(us));
+    let their_dist = distance_to_center(pos.king_sq(them));
+    their_dist - our_dist
+}
+
+const CENTER_SQUARES: [Square; 4] = [Square::D4, Square::D5, Square::E4, Square::E5];
+
+// chebyshev_distance() already exists in this file (used by the
+// passed-pawn king-distance feature above) — reused here rather than
+// redefined; see that definition's own doc comment.
+
+fn distance_to_center(sq: Square) -> i32 {
+    CENTER_SQUARES.iter().map(|&c| chebyshev_distance(sq, c)).min().unwrap_or(0)
+}
+
+/// Union of every square attacked by any of `color`'s pieces. Mirrors
+/// `eval::style::all_piece_attacks` exactly.
+fn all_piece_attacks(pos: &Position, color: Color, occ: Bitboard) -> Bitboard {
+    let mut attacks = Bitboard::EMPTY;
+
+    let mut pawns = pos.piece_bb(color, PieceKind::Pawn);
+    while let Some(sq) = pawns.pop_lsb() {
+        attacks |= pawn_attacks(color, sq);
+    }
+    let mut knights = pos.piece_bb(color, PieceKind::Knight);
+    while let Some(sq) = knights.pop_lsb() {
+        attacks |= knight_attacks(sq);
+    }
+    let mut bishops = pos.piece_bb(color, PieceKind::Bishop);
+    while let Some(sq) = bishops.pop_lsb() {
+        attacks |= bishop_attacks(sq, occ);
+    }
+    let mut rooks = pos.piece_bb(color, PieceKind::Rook);
+    while let Some(sq) = rooks.pop_lsb() {
+        attacks |= rook_attacks(sq, occ);
+    }
+    let mut queens = pos.piece_bb(color, PieceKind::Queen);
+    while let Some(sq) = queens.pop_lsb() {
+        attacks |= queen_attacks(sq, occ);
+    }
+    let king_sq = pos.king_sq(color);
+    attacks |= king_attacks(king_sq);
+
+    attacks
+}
+
+/// Pawn + knight + bishop attacks only (no rooks/queens/king) — mirrors
+/// `eval::style::pawn_and_minor_attacks` exactly.
+fn pawn_and_minor_attacks(pos: &Position, color: Color, occ: Bitboard) -> Bitboard {
+    let mut attacks = Bitboard::EMPTY;
+
+    let mut pawns = pos.piece_bb(color, PieceKind::Pawn);
+    while let Some(sq) = pawns.pop_lsb() {
+        attacks |= pawn_attacks(color, sq);
+    }
+    let mut knights = pos.piece_bb(color, PieceKind::Knight);
+    while let Some(sq) = knights.pop_lsb() {
+        attacks |= knight_attacks(sq);
+    }
+    let mut bishops = pos.piece_bb(color, PieceKind::Bishop);
+    while let Some(sq) = bishops.pop_lsb() {
+        attacks |= bishop_attacks(sq, occ);
+    }
+
+    attacks
 }

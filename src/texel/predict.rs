@@ -22,6 +22,7 @@
 // ============================================================================
 
 use crate::eval::material::{s, taper};
+use crate::eval::style::{ENDGAME, KILLER, POSITIONAL, TACTICAL};
 use crate::texel::features::TexelFeatures;
 use crate::texel::weights::{TunableWeights, MAX_KING_DANGER};
 
@@ -139,6 +140,30 @@ pub fn predict(f: &TexelFeatures, w: &TunableWeights) -> i32 {
     let threats = taper(th, phase);
 
     material + tables + mobility + pawns + king_safety + open_lines + threats + w.tempo
+        + style_score(f, w, phase)
+}
+
+/// PlayStyle bonus (Phase 30, ROADMAP 29.7) — mirrors
+/// `eval::style::evaluate_style`'s four bonus functions' final arithmetic
+/// exactly, term-for-term, using `f.style`'s pre-extracted counts instead
+/// of re-walking the board. Returns 0 whenever `f.style` is `None` —
+/// i.e. for every caller/test that predates this addition, `predict()`'s
+/// behavior is completely unchanged.
+fn style_score(f: &TexelFeatures, w: &TunableWeights, phase: i32) -> i32 {
+    let Some(style) = &f.style else {
+        return 0;
+    };
+    match style.mode {
+        KILLER => {
+            let raw = w.killer_attacker_bonus[style.killer_attacker_idx]
+                + style.killer_storm_pawns * w.killer_storm_bonus_per_pawn;
+            raw * phase / 24
+        }
+        TACTICAL => (style.tactical_net_squares * w.tactical_bonus_per_square) * phase / 24,
+        POSITIONAL => style.positional_net_squares * w.positional_bonus_per_square,
+        ENDGAME => (style.endgame_net_units * w.endgame_bonus_per_unit) * (24 - phase) / 24,
+        _ => 0, // BALANCED, or any future/invalid value — no-op, mirrors evaluate_style()
+    }
 }
 
 /// One king's safety contribution — mirrors
@@ -268,5 +293,72 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// PlayStyle self-consistency (Phase 30, ROADMAP 29.7) — same load-
+    /// bearing role as `test_predict_matches_evaluate_default_weights`
+    /// above, applied to `style_score`: proves `predict()` with a
+    /// populated `f.style` matches `evaluate(pos) + evaluate_style(pos,
+    /// phase)` (i.e. `evaluate_styled()`'s actual composition) bit-exact,
+    /// for every non-Balanced mode, across a sweep of Pet Dragon
+    /// positions — not assumed from the code mirroring the same shape.
+    #[test]
+    fn test_predict_style_matches_evaluate_styled_all_modes() {
+        setup();
+        let weights = TunableWeights::default();
+        let modes = [
+            crate::eval::style::KILLER,
+            crate::eval::style::TACTICAL,
+            crate::eval::style::POSITIONAL,
+            crate::eval::style::ENDGAME,
+        ];
+        for &mode in &modes {
+            crate::eval::style::set_play_style(mode);
+            for seed in 0..100u64 {
+                let pos = Position::generate_with_seed(seed);
+                let phase = crate::eval::material::game_phase(&pos);
+                let expected_core = crate::eval::evaluate(&pos);
+                let expected_style = crate::eval::style::evaluate_style(&pos, phase);
+                let mut features = extract_features(&pos);
+                features.style = Some(crate::texel::features::extract_style_features(&pos, mode));
+                let actual = predict(&features, &weights);
+                assert_eq!(
+                    actual,
+                    expected_core + expected_style,
+                    "mode {} seed {}: predict={} evaluate+style={} (core={}, style={})",
+                    mode, seed, actual, expected_core + expected_style, expected_core, expected_style
+                );
+            }
+        }
+        // Restore the default so this test doesn't leak global state into
+        // whichever test runs next in the same process (tests share the
+        // PLAY_STYLE atomic — cargo test's default parallelism means test
+        // order isn't guaranteed, but resetting here is cheap insurance).
+        crate::eval::style::set_play_style(crate::eval::style::BALANCED);
+    }
+
+    /// With `f.style` left `None` (the default `extract_features()`
+    /// always produces), `predict()` must be completely unaffected by
+    /// which PlayStyle mode happens to be globally active — proves
+    /// `style_score`'s early return, not just asserts it by reading the
+    /// code.
+    #[test]
+    fn test_predict_without_style_features_ignores_global_play_style() {
+        setup();
+        let weights = TunableWeights::default();
+        let pos = Position::generate_with_seed(7);
+        let features = extract_features(&pos); // features.style is None
+
+        crate::eval::style::set_play_style(crate::eval::style::BALANCED);
+        let balanced_result = predict(&features, &weights);
+
+        crate::eval::style::set_play_style(crate::eval::style::KILLER);
+        let killer_result = predict(&features, &weights);
+
+        crate::eval::style::set_play_style(crate::eval::style::BALANCED); // reset
+        assert_eq!(
+            balanced_result, killer_result,
+            "predict() must ignore the global PlayStyle mode entirely when f.style is None"
+        );
     }
 }

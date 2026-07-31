@@ -100,6 +100,16 @@ pub struct TunableWeights {
 
     // ── Tempo ─────────────────────────────────────────────────────────────
     pub tempo: i32,
+
+    // ── PlayStyle (Phase 30, ROADMAP 29.7) — flat, not S(mg,eg): each
+    // already gets its own phase (or 24-phase) scaling directly in
+    // predict.rs/predict_f64.rs, mirroring eval/style.rs exactly, so
+    // wrapping these in the mg/eg taper would double-apply phase scaling.
+    pub killer_attacker_bonus: [i32; 8],
+    pub killer_storm_bonus_per_pawn: i32,
+    pub tactical_bonus_per_square: i32,
+    pub positional_bonus_per_square: i32,
+    pub endgame_bonus_per_unit: i32,
 }
 
 impl Default for TunableWeights {
@@ -217,6 +227,18 @@ impl Default for TunableWeights {
 
             // eval/mod.rs
             tempo: 24,
+
+            // eval/style.rs — copied verbatim from KILLER_ATTACKER_BONUS /
+            // KILLER_STORM_BONUS_PER_PAWN / TACTICAL_BONUS_PER_SQUARE /
+            // POSITIONAL_BONUS_PER_SQUARE / ENDGAME_BONUS_PER_UNIT. All
+            // hand-picked starting points, not yet Texel-tuned — same
+            // "not yet tuned" status eval/threats.rs's terms had before
+            // this default block was written. See ROADMAP 29.7.
+            killer_attacker_bonus: [0, 20, 55, 95, 130, 150, 160, 165],
+            killer_storm_bonus_per_pawn: 15,
+            tactical_bonus_per_square: 3,
+            positional_bonus_per_square: 4,
+            endgame_bonus_per_unit: 6,
         }
     }
 }
