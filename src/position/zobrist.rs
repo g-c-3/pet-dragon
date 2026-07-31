@@ -86,7 +86,20 @@ impl Rng {
 
 /// Initialise all Zobrist random number tables.
 /// Must be called once at engine startup before any position is created.
+///
+/// Session 111: same `Once`-guard rationale as `init_masks`
+/// (`bitboard/masks.rs`) — this function is what actually turned out to
+/// matter most for the `search::iterative` test flake that led here:
+/// every test's `setup()` helper calls this, under `cargo test`'s
+/// default parallelism, and the writes below are unsynchronized
+/// `unsafe` writes to `static mut` globals.
+static INIT_ZOBRIST: std::sync::Once = std::sync::Once::new();
+
 pub fn init_zobrist() {
+    INIT_ZOBRIST.call_once(init_zobrist_impl);
+}
+
+fn init_zobrist_impl() {
     let mut rng = Rng::new();
 
     unsafe {
