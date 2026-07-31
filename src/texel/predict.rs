@@ -305,6 +305,13 @@ mod tests {
     #[test]
     fn test_predict_style_matches_evaluate_styled_all_modes() {
         setup();
+        // Session 111: this exact test is what surfaced the real race —
+        // see eval::style::PLAY_STYLE_TEST_LOCK's doc comment for the
+        // full story. Without this guard, a concurrently-scheduled test
+        // in eval/style.rs's own test module (a DIFFERENT file, sharing
+        // the same PLAY_STYLE global) can flip the mode mid-loop.
+        let _guard =
+            crate::eval::style::PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let weights = TunableWeights::default();
         let modes = [
             crate::eval::style::KILLER,
@@ -330,10 +337,9 @@ mod tests {
                 );
             }
         }
-        // Restore the default so this test doesn't leak global state into
-        // whichever test runs next in the same process (tests share the
-        // PLAY_STYLE atomic — cargo test's default parallelism means test
-        // order isn't guaranteed, but resetting here is cheap insurance).
+        // _guard is still held here — the reset below is itself covered
+        // by the lock, so no other PLAY_STYLE-touching test can observe
+        // an intermediate state before this reset completes.
         crate::eval::style::set_play_style(crate::eval::style::BALANCED);
     }
 
@@ -345,6 +351,10 @@ mod tests {
     #[test]
     fn test_predict_without_style_features_ignores_global_play_style() {
         setup();
+        // Same PLAY_STYLE_TEST_LOCK requirement as the test above — see
+        // its doc comment.
+        let _guard =
+            crate::eval::style::PLAY_STYLE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let weights = TunableWeights::default();
         let pos = Position::generate_with_seed(7);
         let features = extract_features(&pos); // features.style is None
