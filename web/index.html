@@ -2684,6 +2684,7 @@
       </div>
       <div class="console-actions">
         <button class="console-fen-btn" onclick="_consoleDownloadFen()" title="Download current position + game history as .txt, for diagnosing engine issues">📋 FEN</button>
+        <button class="console-fen-btn" onclick="downloadFullMoveLog()" title="Download the full move log for every game played this session — moves, depth &amp; eval for engine moves, (user) tag for your own moves, and skill-level change markers">📜 Log</button>
         <button class="console-clear-btn" onclick="_consoleClear()">🧹 Clear</button>
       </div>
     </div>
@@ -3114,12 +3115,15 @@ onmessage = (e) => {
     // skill: 0-20 (20 = full/uncapped strength). Default to 20 if the caller
     // didn't specify one, matching search_from_fen's own pre-Skill-Level behaviour.
     const raw = _searchFromFenWithEval(fen, ms, typeof skill === 'number' ? skill : 20);
-    // raw is "<uci_move> <eval>" — eval is either a plain signed centipawn
-    // integer or "mateN"/"mate-N", always from White's perspective (see
-    // search_from_fen_with_eval's doc comment on the Rust side).
-    const spaceIdx = raw.indexOf(' ');
-    const bestmove = spaceIdx === -1 ? raw : raw.slice(0, spaceIdx);
-    const evalToken = spaceIdx === -1 ? '0' : raw.slice(spaceIdx + 1);
+    // raw is "<uci_move> <eval> [<depth>]" — eval is either a plain signed
+    // centipawn integer or "mateN"/"mate-N", always from White's perspective
+    // (see search_from_fen_with_eval's doc comment on the Rust side). The
+    // optional 3rd token is the deepest completed iterative-deepening pass
+    // this search reached — used for the full move log's "depth" field.
+    const parts = raw.trim().split(/[ \t]+/);
+    const bestmove = parts[0] || '0000';
+    const evalToken = parts.length > 1 ? parts[1] : '0';
+    const depth = parts.length > 2 ? (parseInt(parts[2], 10) || 0) : null;
     let evalCp = null, isMate = false, mateIn = 0;
     if (evalToken.startsWith('mate')) {
       isMate = true;
@@ -3127,7 +3131,7 @@ onmessage = (e) => {
     } else {
       evalCp = parseInt(evalToken, 10) || 0;
     }
-    postMessage({ type: 'result', reqId, bestmove, evalCp, isMate, mateIn });
+    postMessage({ type: 'result', reqId, bestmove, evalCp, isMate, mateIn, depth });
   } catch (err) {
     postMessage({ type: 'result', reqId, error: String((err && err.message) || err) });
   }
@@ -3160,6 +3164,7 @@ onmessage = (e) => {
               evalCp:   msg.evalCp,
               isMate:   msg.isMate,
               mateIn:   msg.mateIn,
+              depth:    (typeof msg.depth === 'number') ? msg.depth : null,
             });
           }
         }
@@ -3172,11 +3177,14 @@ onmessage = (e) => {
   _dragon = _spawnDragonWorker();
   window.petDragonWorkerReadyPromise = _dragon.readyPromise;
 
-  // Returns a Promise<{bestmove, evalCp, isMate, mateIn}>. evalCp is a
+  // Returns a Promise<{bestmove, evalCp, isMate, mateIn, depth}>. evalCp is a
   // signed centipawn integer from White's perspective (null when isMate is
   // true); mateIn is signed moves-to-mate from White's perspective (0 when
-  // isMate is false). See search_from_fen_with_eval's Rust-side doc comment
-  // for the full sign convention.
+  // isMate is false). depth is the deepest completed iterative-deepening
+  // pass the search reached (null if the engine didn't report one) — used
+  // only for the full move log's "depth" field. See
+  // search_from_fen_with_eval's Rust-side doc comment for the full sign
+  // convention.
   // skill: 0-20 (Pet Dragon's own Skill Level; 20 = full/uncapped strength).
   window.petDragonSearch = function(fen, ms, skill) {
     return new Promise((resolve, reject) => {
@@ -3656,7 +3664,7 @@ async function engineMove() {
     const movingForPlayer = (customTurn === playerColor);
     const moveSkill = movingForPlayer ? playerEngineSkillLevel : engineSkillLevel;
     const moveTime  = movingForPlayer ? playerEngineMoveTime  : engineMoveTime;
-    const { bestmove, evalCp, isMate, mateIn } =
+    const { bestmove, evalCp, isMate, mateIn, depth } =
       await window.petDragonSearch(currentFen, moveTime, moveSkill);
 
     _stopEvalThinkingAnimation();
@@ -3672,7 +3680,7 @@ async function engineMove() {
       return;
     }
 
-    applyEngineMove(bestmove); // handles its own autoplay continuation internally
+    applyEngineMove(bestmove, { evalCp, isMate, mateIn, depth, moveSkill, movingForPlayer }); // handles its own autoplay continuation internally
 
     // Real engine evaluation from the search that just completed — called
     // AFTER applyEngineMove (not before) so it overrides that move's own
@@ -3695,15 +3703,19 @@ async function engineMove() {
   }
 }
 
-function applyEngineMove(uciMove) {
+function applyEngineMove(uciMove, meta) {
+  meta = meta || {};
   // ── Blunder injection ─────────────────────────────────────────────────────
   // If blunderChance > 0, roll a random number; on a hit, replace the engine's
   // chosen move with a random legal move (simulates a human mistake).
+  const _engineChoiceUci = uciMove; // preserved for the log even if a blunder swaps it below
+  let _wasBlunder = false;
   if (blunderChance > 0 && Math.random() * 100 < blunderChance) {
     const blunderLegal = getCustomMoves(customBoard, customTurn, false);
     if (blunderLegal.length > 0) {
       const blunderMv = blunderLegal[Math.floor(Math.random() * blunderLegal.length)];
       uciMove = _mvToUci(blunderMv);
+      _wasBlunder = (uciMove !== _engineChoiceUci);
     }
   }
 
@@ -3733,6 +3745,21 @@ function applyEngineMove(uciMove) {
   const san = applyCustomMove(from, to, promo);
   lastMove = { from, to };
   moveHistory.push(san);
+  _logMove({
+    moveNumber: fullmoveNumber,
+    side: customTurn,
+    by: 'engine',
+    san,
+    uci: uciMove,
+    eval: (typeof meta.evalCp === 'number' || meta.isMate)
+      ? (meta.isMate ? { mate: meta.mateIn } : { cp: meta.evalCp })
+      : null,
+    depth: (typeof meta.depth === 'number') ? meta.depth : null,
+    skill: (typeof meta.moveSkill === 'number') ? meta.moveSkill : null,
+    forPlayerSide: !!meta.movingForPlayer,
+    blunder: _wasBlunder,
+    engineChoiceUci: _wasBlunder ? _engineChoiceUci : null,
+  });
   if (customTurn === 'b') fullmoveNumber++;
   customTurn = customTurn === 'w' ? 'b' : 'w';
   recordPosition(); // record position with correct post-move turn for threefold detection
@@ -3898,6 +3925,7 @@ function handleTap(sq) {
     const san = applyCustomMove(selectedSq, sq, null);
     lastMove = { from: selectedSq, to: sq };
     moveHistory.push(san);
+    _logMove({ moveNumber: fullmoveNumber, side: customTurn, by: 'user', san, uci: _tapUci, eval: null, depth: null });
     if (customTurn === 'b') fullmoveNumber++;
     customTurn = customTurn === 'w' ? 'b' : 'w';
     recordPosition(); // record position with correct post-move turn for threefold detection
@@ -4115,6 +4143,7 @@ function handleDrop(toSq) {
   const san = applyCustomMove(selectedSq, toSq, null);
   lastMove = { from: selectedSq, to: toSq };
   moveHistory.push(san);
+  _logMove({ moveNumber: fullmoveNumber, side: customTurn, by: 'user', san, uci: _dropUci, eval: null, depth: null });
   if (customTurn === 'b') fullmoveNumber++;
   customTurn = customTurn === 'w' ? 'b' : 'w';
   recordPosition(); // record position with correct post-move turn for threefold detection
@@ -4157,6 +4186,7 @@ function doPromotion(piece) {
   const san = applyCustomMove(pendingPromo.from, pendingPromo.to, piece);
   lastMove = { from: pendingPromo.from, to: pendingPromo.to };
   moveHistory.push(san);
+  _logMove({ moveNumber: fullmoveNumber, side: customTurn, by: 'user', san, uci: _promoUci, eval: null, depth: null });
   pendingPromo = null;
   if (customTurn === 'b') fullmoveNumber++;
   customTurn = customTurn === 'w' ? 'b' : 'w';
@@ -4426,6 +4456,7 @@ function _checkGameOverInner() {
 function checkGameOver() {
   const wasOver = customGameOver;
   const result  = _checkGameOverInner();
+  if (!wasOver && customGameOver) _finalizeCurrentGameLog();
   return result;
 }
 
@@ -4715,6 +4746,155 @@ const DIFFICULTY_PRESETS = [
 
 let selectedDifficulty = 8; // default Medium I
 
+// ─── Full move log (system) ─────────────────────────────────────────────────
+// A diagnostic/record-keeping feature only — never shown on-screen, only
+// downloadable as a plain-text file from the Console Dashboard ("📜 Log"
+// button). One record per game, accumulated for the whole browser session
+// (never cleared on New Game — only a full page reload starts over).
+//
+// Each game record: {
+//   gameNumber, startedAt, finishedAt, startFen, playerColor,
+//   entries: [
+//     { kind:'skill', text }                                              — a
+//       skill-level marker: either the game-opening skill levels, or a note
+//       whenever the Game Rigger changes a skill level mid-game.
+//     { kind:'move', moveNumber, side, by:'user'|'engine', san, uci,
+//       eval, depth, skill, forPlayerSide, blunder, engineChoiceUci }      — a
+//       single half-move. Human-played moves are marked (user) with no
+//       eval/depth (nothing was searched for them). Engine-played moves —
+//       whether the real opponent or the Game Rigger's "AI-assist" playing
+//       the human's side under Autoplay — carry the eval/depth/skill the
+//       search actually used.
+//   ],
+//   gameOver, winner, reason
+// }
+let fullGameLog = [];
+let _curGameLogRec = null; // the in-progress game's record (last element of fullGameLog while a game is live)
+
+function _skillLabel(level) {
+  const p = DIFFICULTY_PRESETS[level];
+  return p ? (p.emoji + ' ' + p.name + ' (Skill ' + p.skill + ')') : ('Skill level ' + level);
+}
+
+// Push a skill-level / informational marker in between moves.
+function _logNote(text) {
+  if (!_curGameLogRec) return;
+  _curGameLogRec.entries.push({ kind: 'skill', text });
+}
+
+// Push a single played half-move (human or engine).
+function _logMove(entry) {
+  if (!_curGameLogRec) return;
+  _curGameLogRec.entries.push(Object.assign({ kind: 'move' }, entry));
+}
+
+// Close out the current game's record with its final result, if not already closed.
+function _finalizeCurrentGameLog() {
+  if (!_curGameLogRec || _curGameLogRec.finishedAt) return;
+  _curGameLogRec.finishedAt = new Date();
+  _curGameLogRec.gameOver = customGameOver;
+  _curGameLogRec.winner = gameOverWinner;
+  _curGameLogRec.reason = gameOverReasonText || (customGameOver ? 'Unknown' : 'Interrupted (new game started)');
+}
+
+// Open a fresh game record — called at the very top of startGame(), while
+// selectedDifficulty/riggerPlayerDifficulty/playerColor from the just-completed
+// setupStart() still describe the game that's about to begin.
+function _startNewGameLog() {
+  _finalizeCurrentGameLog(); // close out whatever game was previously open, if any
+  _curGameLogRec = {
+    gameNumber: fullGameLog.length + 1,
+    startedAt: new Date(),
+    finishedAt: null,
+    startFen: '', // filled in by startGame() once the chaos start position is known
+    playerColor,
+    entries: [],
+    gameOver: false, winner: null, reason: '',
+  };
+  fullGameLog.push(_curGameLogRec);
+  // Per spec: every game's log opens with its starting skill level(s), before any moves.
+  _logNote('Game start — Player is playing: ' + (playerColor === 'w' ? 'White' : 'Black'));
+  _logNote('Game start — Opponent (Engine) is playing: ' + (playerColor === 'w' ? 'Black' : 'White'));
+  _logNote('Game start — Opponent (Engine) skill: ' + _skillLabel(selectedDifficulty));
+  _logNote('Game start — Player-side AI skill (used only if AI-assist/Autoplay is turned on): ' + _skillLabel(riggerPlayerDifficulty));
+}
+
+function _formatLogEval(entry) {
+  if (!entry.eval) return null;
+  if (typeof entry.eval.mate === 'number') return 'mate ' + (entry.eval.mate > 0 ? '+' : '') + entry.eval.mate;
+  if (typeof entry.eval.cp === 'number') return (entry.eval.cp > 0 ? '+' : '') + (entry.eval.cp / 100).toFixed(2);
+  return null;
+}
+
+function _formatLogMoveLine(e) {
+  const moveNo = e.side === 'w' ? (e.moveNumber + '.') : (e.moveNumber + '...');
+  let tag;
+  if (e.by === 'user') {
+    tag = '(user)';
+  } else {
+    const bits = [];
+    const ev = _formatLogEval(e);
+    if (ev !== null) bits.push('eval ' + ev);
+    if (typeof e.depth === 'number') bits.push('depth ' + e.depth);
+    if (typeof e.skill === 'number') bits.push('skill ' + e.skill);
+    tag = '(engine' + (e.forPlayerSide ? ', AI-assist' : '') + (bits.length ? ' — ' + bits.join(', ') : '') + ')';
+  }
+  let line = moveNo + ' ' + e.san + '  ' + tag;
+  if (e.blunder) line += '  ⚠ BLUNDER — engine\'s actual best move here was ' + e.engineChoiceUci;
+  return line;
+}
+
+function _buildFullMoveLogText() {
+  const lines = [];
+  lines.push('Pet Dragon — full move log (this browser session)');
+  lines.push('Generated: ' + new Date().toString());
+  lines.push('Total games recorded: ' + fullGameLog.length);
+  lines.push('Eval values are signed centipawn scores (e.g. +1.25) or mate-in-N, always from White\'s perspective.');
+  lines.push('='.repeat(78));
+  fullGameLog.forEach(function (game) {
+    lines.push('');
+    lines.push('Game ' + game.gameNumber + ' — started ' + game.startedAt.toString() +
+      (game.finishedAt ? (', finished ' + game.finishedAt.toString()) : ' (in progress / interrupted)'));
+    lines.push('Player is playing: ' + (game.playerColor === 'w' ? 'White' : 'Black') +
+      '   |   Opponent (Engine) is playing: ' + (game.playerColor === 'w' ? 'Black' : 'White'));
+    if (game.startFen) lines.push('Starting FEN: ' + game.startFen);
+    lines.push('-'.repeat(78));
+    game.entries.forEach(function (e) {
+      if (e.kind === 'skill') lines.push('  \u00bb ' + e.text);
+      else lines.push('  ' + _formatLogMoveLine(e));
+    });
+    if (game.finishedAt) {
+      let resultLabel;
+      if (game.reason === 'Aborted') {
+        resultLabel = 'Aborted — no result';
+      } else if (game.winner === null) {
+        resultLabel = 'Draw';
+      } else {
+        const winnerColorLabel = game.winner === 'w' ? 'White' : 'Black';
+        const winnerIsPlayer = game.winner === game.playerColor;
+        resultLabel = winnerColorLabel + ' wins (' + (winnerIsPlayer ? 'Player' : 'Opponent/Engine') + ')';
+      }
+      lines.push('-'.repeat(78));
+      lines.push('Result: ' + resultLabel + ' — ' + (game.reason || 'unknown'));
+    }
+  });
+  return lines.join('\n');
+}
+
+function downloadFullMoveLog() {
+  const text = _buildFullMoveLogText();
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  a.href = url;
+  a.download = 'pet-dragon-move-log-' + ts + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
 // ── Difficulty tier picker ────────────────────────────────────────────────────
 // Tier colours: dark green → lime → amber → orange-red → bright red
 const TIER_COLORS = ['#39FF14','#7CFC00','#FFD700','#FFA500','#FF0040'];
@@ -4937,18 +5117,22 @@ function _riggerPickLevel(side, level) {
     // Engine's Side IS the real opponent — route through the same state the
     // normal setup picker uses, so the badge, engineSkillLevel/engineMoveTime
     // and blunder chance all update exactly as if picked at game setup.
+    const _changed = level !== selectedDifficulty;
     selectedDifficulty = level;
     engineSkillLevel = preset.skill;
     engineMoveTime   = ENGINE_MOVE_TIME_MS;
     blunderChance    = preset.blunder;
     const badge = document.getElementById('difficulty-badge');
     if (badge) badge.textContent = 'Level: ' + preset.emoji + ' ' + preset.name;
+    if (_changed) _logNote('Skill level changed mid-game — Opponent (Engine): now ' + _skillLabel(level));
   } else {
     // Player's Side — only ever consulted when autoplay is making a move for
     // the human. Never touches the badge or blunder chance.
+    const _changed = level !== riggerPlayerDifficulty;
     riggerPlayerDifficulty = level;
     playerEngineSkillLevel = preset.skill;
     playerEngineMoveTime   = ENGINE_MOVE_TIME_MS;
+    if (_changed) _logNote('Skill level changed mid-game — Player-side AI (AI-assist/Autoplay): now ' + _skillLabel(level));
   }
   _riggerRenderPicker(side, level);
 }
@@ -5108,6 +5292,7 @@ function handleAbort() {
 
   gameOverWinner = null;
   gameOverReasonText = 'Aborted';
+  _finalizeCurrentGameLog();
 
   if (window.petDragonAbortSearch) window.petDragonAbortSearch();
   engineThinking = false;
@@ -5157,6 +5342,7 @@ function confirmResign() {
 
   gameOverWinner = playerColor === 'w' ? 'b' : 'w';
   gameOverReasonText = 'Resignation';
+  _finalizeCurrentGameLog();
 
   const el = document.getElementById('game-msg');
   el.textContent = '🏳 You resigned — AI Engine wins';
@@ -5653,6 +5839,10 @@ function recordPosition() {
 }
 
 function startGame() {
+  // Full move log: close out the previous game (if any) and open a new
+  // record — playerColor/selectedDifficulty/riggerPlayerDifficulty were all
+  // just set by setupStart(), so this correctly describes the game starting now.
+  _startNewGameLog();
   // Reset autoplay FIRST so _updateBarNames sees the correct false state
   autoPlayEnabled = false;
   const apBtn = document.getElementById('autoplay-btn');
@@ -5696,6 +5886,7 @@ function startGame() {
   uciMoveHistory = [];
   // Capture the chaos starting position with full castling rights computed.
   gameStartFen = boardStateToFen(customBoard, 'w');
+  if (_curGameLogRec) _curGameLogRec.startFen = gameStartFen;
   boardSnapshots.push(customBoard.map(p => p ? Object.assign({}, p) : null)); // snapshot index 0 = start
   snapshotMoves.push(null);  // index 0 = start position, no move
   snapshotChecks.push({ inCheck: false, turn: 'w' }); // index 0 = start, no check
@@ -7086,6 +7277,7 @@ function handleClockTimeout(who) {
   playSound('gameOver');
   launchConfetti();
   updateGameActionBtns();
+  _finalizeCurrentGameLog();
 }
 
 // ─── Customise Dashboard ──────────────────────────────────────────────────────
