@@ -302,6 +302,9 @@ mod tests {
     /// phase)` (i.e. `evaluate_styled()`'s actual composition) bit-exact,
     /// for every non-Balanced mode, across a sweep of Pet Dragon
     /// positions — not assumed from the code mirroring the same shape.
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite \
+                parallelism — see eval::style::PLAY_STYLE_TEST_LOCK's doc \
+                comment and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_predict_style_matches_evaluate_styled_all_modes() {
         setup();
@@ -348,6 +351,9 @@ mod tests {
     /// which PlayStyle mode happens to be globally active — proves
     /// `style_score`'s early return, not just asserts it by reading the
     /// code.
+    #[ignore = "Session 111: mutates PLAY_STYLE, unsafe under full test-suite \
+                parallelism — see eval::style::PLAY_STYLE_TEST_LOCK's doc \
+                comment and build.yml's dedicated --ignored --test-threads=1 step"]
     #[test]
     fn test_predict_without_style_features_ignores_global_play_style() {
         setup();
