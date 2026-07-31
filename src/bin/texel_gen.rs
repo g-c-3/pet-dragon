@@ -71,11 +71,19 @@ const SKIP_OPENING_PLIES: usize = 12;
 const SAMPLE_STRIDE: usize = 4;
 
 /// One recorded position: FEN known immediately, `game_result` filled in
-/// once the game that produced it has finished.
+/// once the game that produced it has finished. `play_style_mode` (Phase
+/// 30, ROADMAP 29.7) records which PlayStyle mode was active for the
+/// WHOLE game this sample came from — set once per run via `main()`'s new
+/// CLI arg, never changes mid-game, but stored per-sample (not just
+/// written once at the top of the file) so `texel_tune.rs`'s data loader
+/// doesn't need any file-level convention beyond "every line is self-
+/// describing," matching the existing `<FEN>|<result>` format's own
+/// philosophy.
 struct Sample {
     fen: String,
     stm_color: Color,
     game_result: f32, // placeholder until backfilled after the game ends
+    play_style_mode: u32,
 }
 
 fn main() {
@@ -87,21 +95,34 @@ fn main() {
     let num_games: u64 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(10);
     let output_path = args.get(2).cloned().unwrap_or_else(|| "texel_data.txt".to_string());
     let seed_start: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+    // Phase 30, ROADMAP 29.7 — which PlayStyle mode to play THIS ENTIRE
+    // RUN under (0=Balanced default, matching pre-Phase-30 behavior
+    // exactly when omitted). One run = one mode; run this binary again
+    // with a different value (and a different output_path) to generate
+    // data for another mode. Clamped, not rejected, matching
+    // eval::style::set_play_style's own out-of-range handling.
+    let play_style_mode: u32 = args
+        .get(4)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(pet_dragon_lib::eval::style::BALANCED)
+        .min(pet_dragon_lib::eval::style::MAX_PLAY_STYLE);
+    pet_dragon_lib::eval::style::set_play_style(play_style_mode);
 
     let file = File::create(&output_path).expect("failed to create output file");
     let mut writer = BufWriter::new(file);
 
     for game_idx in 0..num_games {
         let seed = seed_start + game_idx;
-        let samples = play_one_game(seed);
+        let samples = play_one_game(seed, play_style_mode);
         for sample in &samples {
             write_sample(&mut writer, sample);
         }
         eprintln!(
-            "game {}/{} (seed {}): {} samples written",
+            "game {}/{} (seed {}, mode {}): {} samples written",
             game_idx + 1,
             num_games,
             seed,
+            play_style_mode,
             samples.len()
         );
     }
@@ -112,8 +133,9 @@ fn main() {
 /// Play one game from a random Pet Dragon starting position (seeded for
 /// reproducibility) and return every ELIGIBLE position visited (post-
 /// opening, quiet, on-stride) as a tuning sample with the final game
-/// result filled in.
-fn play_one_game(seed: u64) -> Vec<Sample> {
+/// result filled in. `play_style_mode` is stamped onto every sample —
+/// see `Sample`'s doc comment.
+fn play_one_game(seed: u64, play_style_mode: u32) -> Vec<Sample> {
     let mut pos = Position::generate_with_seed(seed);
     let mut pending: Vec<Sample> = Vec::new();
 
@@ -147,6 +169,7 @@ fn play_one_game(seed: u64) -> Vec<Sample> {
                 fen: pos.to_fen(),
                 stm_color: pos.side_to_move,
                 game_result: 0.0, // backfilled below once result_for_white is known
+                play_style_mode,
             });
             since_last_sample = 0;
         } else {
@@ -179,9 +202,14 @@ fn play_one_game(seed: u64) -> Vec<Sample> {
     pending
 }
 
-/// Write one line: `<FEN>|<game_result>` (result already oriented to the
-/// FEN's own side-to-move perspective, matching selfplay.rs's convention).
+/// Write one line: `<FEN>|<game_result>|<play_style_mode>` (result already
+/// oriented to the FEN's own side-to-move perspective, matching
+/// selfplay.rs's convention). The 3rd field is new as of Phase 30
+/// (ROADMAP 29.7) — `texel_tune.rs`'s loader treats a missing 3rd field
+/// (every pre-existing data file) as implicit Balanced (mode 0), so old
+/// data keeps working completely unmodified; this format is purely
+/// additive.
 fn write_sample(writer: &mut impl Write, sample: &Sample) {
-    writeln!(writer, "{}|{}", sample.fen, sample.game_result)
+    writeln!(writer, "{}|{}|{}", sample.fen, sample.game_result, sample.play_style_mode)
         .expect("failed to write sample line");
 }

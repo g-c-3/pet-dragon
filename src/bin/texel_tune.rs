@@ -132,9 +132,14 @@ fn main() {
     eprintln!("Wrote tuned weights to {}", output_path);
 }
 
-/// Parse every `data_files`-listed file (comma-separated paths) of
-/// `<FEN>|<game_result>` lines (texel_gen.rs's format) into feature-
-/// extracted samples. Malformed lines are skipped with a warning rather
+/// Parse every `data_files`-listed file (comma-separated paths) into
+/// feature-extracted samples. Accepts BOTH texel_gen.rs's original
+/// `<FEN>|<game_result>` format (every pre-Phase-30 data file — treated
+/// as implicit Balanced/no PlayStyle tag) and the new, Phase 30
+/// (ROADMAP 29.7) `<FEN>|<game_result>|<play_style_mode>` format. FEN
+/// text itself never contains `|` (space/`:`/`,`-separated fields only,
+/// including the Pet Dragon extension), so splitting the whole line on
+/// `|` is unambiguous. Malformed lines are skipped with a warning rather
 /// than aborting the whole run — a handful of bad lines in a
 /// 147k-sample database shouldn't sink hours of Actions compute.
 fn load_samples(data_files: &str) -> Vec<Sample> {
@@ -149,6 +154,7 @@ fn load_samples(data_files: &str) -> Vec<Sample> {
         };
         let reader = BufReader::new(file);
         let mut file_count = 0usize;
+        let mut styled_count = 0usize;
         for (line_no, line) in reader.lines().enumerate() {
             let line = match line {
                 Ok(l) => l,
@@ -161,13 +167,32 @@ fn load_samples(data_files: &str) -> Vec<Sample> {
             if line.is_empty() {
                 continue;
             }
-            let Some((fen, result_str)) = line.rsplit_once('|') else {
-                eprintln!("WARNING: {}:{}: missing '|' separator, skipped", path, line_no + 1);
-                continue;
+            let parts: Vec<&str> = line.split('|').collect();
+            let (fen, result_str, mode_str) = match parts.as_slice() {
+                [fen, result] => (*fen, *result, None),
+                [fen, result, mode] => (*fen, *result, Some(*mode)),
+                _ => {
+                    eprintln!(
+                        "WARNING: {}:{}: expected 2 or 3 '|'-separated fields, skipped",
+                        path,
+                        line_no + 1
+                    );
+                    continue;
+                }
             };
             let Ok(result) = result_str.trim().parse::<f64>() else {
                 eprintln!("WARNING: {}:{}: bad result value '{}', skipped", path, line_no + 1, result_str);
                 continue;
+            };
+            let mode: u32 = match mode_str {
+                Some(m) => match m.trim().parse() {
+                    Ok(m) => m,
+                    Err(_) => {
+                        eprintln!("WARNING: {}:{}: bad mode value '{}', skipped", path, line_no + 1, m);
+                        continue;
+                    }
+                },
+                None => pet_dragon_lib::eval::style::BALANCED, // pre-Phase-30 data — implicit, always correct
             };
             let pos = match Position::from_fen(fen.trim()) {
                 Ok(p) => p,
@@ -176,11 +201,15 @@ fn load_samples(data_files: &str) -> Vec<Sample> {
                     continue;
                 }
             };
-            let features = extract_features(&pos);
+            let mut features = extract_features(&pos);
+            if mode != pet_dragon_lib::eval::style::BALANCED {
+                features.style = Some(pet_dragon_lib::texel::features::extract_style_features(&pos, mode));
+                styled_count += 1;
+            }
             samples.push(Sample { features, result });
             file_count += 1;
         }
-        eprintln!("  {}: {} samples", path, file_count);
+        eprintln!("  {}: {} samples ({} PlayStyle-tagged)", path, file_count, styled_count);
     }
     samples
 }
@@ -444,7 +473,24 @@ fn write_tuned_weights(
     out.push_str(&format!("undefended_queen: {},\n", fmt_packed(w.undefended_queen)));
     out.push_str(&format!("threat_by_minor: {},\n\n", fmt_packed(w.threat_by_minor)));
 
-    out.push_str(&format!("tempo: {},\n", w.tempo));
+    out.push_str(&format!("tempo: {},\n\n", w.tempo));
+
+    out.push_str("// PlayStyle (Phase 30, ROADMAP 29.7) — copy into eval/style.rs's\n");
+    out.push_str("// KILLER_ATTACKER_BONUS / KILLER_STORM_BONUS_PER_PAWN /\n");
+    out.push_str("// TACTICAL_BONUS_PER_SQUARE / POSITIONAL_BONUS_PER_SQUARE /\n");
+    out.push_str("// ENDGAME_BONUS_PER_UNIT const names directly (plain i32 array/scalars,\n");
+    out.push_str("// not s(mg,eg) — see weights.rs's own field doc comment for why).\n");
+    out.push_str(&format!("KILLER_ATTACKER_BONUS: {:?},\n", w.killer_attacker_bonus));
+    out.push_str(&format!(
+        "KILLER_STORM_BONUS_PER_PAWN: {},\n",
+        w.killer_storm_bonus_per_pawn
+    ));
+    out.push_str(&format!("TACTICAL_BONUS_PER_SQUARE: {},\n", w.tactical_bonus_per_square));
+    out.push_str(&format!(
+        "POSITIONAL_BONUS_PER_SQUARE: {},\n",
+        w.positional_bonus_per_square
+    ));
+    out.push_str(&format!("ENDGAME_BONUS_PER_UNIT: {},\n", w.endgame_bonus_per_unit));
 
     fs::write(path, out).expect("failed to write tuned weights file");
 }

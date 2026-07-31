@@ -326,6 +326,15 @@ fn parse_tuned_weights(text: &str) -> TunableWeights {
     let enemy_king_dist_eg = extract_scalar(text, "enemy_king_dist_eg");
     let own_king_dist_eg = extract_scalar(text, "own_king_dist_eg");
 
+    // PlayStyle (Phase 30, ROADMAP 29.7) — same extract_scalar/
+    // extract_int_array helpers as every other field above, matching
+    // texel_tune.rs's write_tuned_weights output exactly.
+    let killer_attacker_bonus = extract_int_array(text, "KILLER_ATTACKER_BONUS");
+    let killer_storm_bonus_per_pawn = extract_scalar(text, "KILLER_STORM_BONUS_PER_PAWN");
+    let tactical_bonus_per_square = extract_scalar(text, "TACTICAL_BONUS_PER_SQUARE");
+    let positional_bonus_per_square = extract_scalar(text, "POSITIONAL_BONUS_PER_SQUARE");
+    let endgame_bonus_per_unit = extract_scalar(text, "ENDGAME_BONUS_PER_UNIT");
+
     TunableWeights {
         material_values,
         bishop_pair,
@@ -362,6 +371,11 @@ fn parse_tuned_weights(text: &str) -> TunableWeights {
         undefended_queen,
         threat_by_minor,
         tempo,
+        killer_attacker_bonus,
+        killer_storm_bonus_per_pawn,
+        tactical_bonus_per_square,
+        positional_bonus_per_square,
+        endgame_bonus_per_unit,
     }
 }
 
