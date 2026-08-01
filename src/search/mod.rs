@@ -387,6 +387,37 @@ pub struct SearchInfo {
     /// ROADMAP already gives for why Phase 26's correction-history sub-items
     /// were split into 3a/3b/3c rather than bundled.
     pub threat_defusal: bool,
+
+    // ── Improving flag (Phase 26-adjacent, D114, Session 116) ─────────────────
+    /// Per-ply static eval history, written only when `improving_enabled`
+    /// is true. Sentinel `i32::MIN` means "no usable value at this ply"
+    /// (either never visited this search, or the node was in check —
+    /// `evaluate()` isn't called for in-check nodes, see `alpha_beta.rs`).
+    /// Indexed by `ply` directly (not a ring buffer) — `MAX_PLY` is small
+    /// (128) so the whole array is cheap to keep resident and to zero in
+    /// `reset_for_search()`. Read two plies back (`ply - 2`) by
+    /// `alpha_beta.rs` to compute the `improving` flag: ply and ply-2
+    /// always share the same side to move, since ply alternates every
+    /// half-move.
+    pub static_eval_stack: [i32; MAX_PLY],
+    /// UCI `ImprovingHeuristic` setting, default `false` — same rollout
+    /// shape as `null_move_king_guard`/D75 and `threat_defusal`/D98: a
+    /// new, unproven technique shipped off, zero extra computation and
+    /// byte-identical behavior when disabled. When `false`,
+    /// `alpha_beta.rs` never writes `static_eval_stack` and always treats
+    /// `improving` as `true` — which reproduces the pre-D114 LMP/futility
+    /// behavior exactly (see `pruning::LMP_THRESHOLDS_IMPROVING` and
+    /// `pruning::futility_margin()`'s doc comments for why `true` is the
+    /// byte-identical case). When `true`, both Late Move Pruning
+    /// (`pruning::should_apply_lmp`/`lmp_threshold`) and futility pruning
+    /// (`pruning::futility_margin`) become improving-aware: a node whose
+    /// static eval hasn't improved on its own two plies back prunes more
+    /// aggressively than one that has. Needs its own isolated SPRT-style
+    /// A/B via `uci_match_runner` (same binary, two configs) before ever
+    /// being trusted as a default, same discipline every other Phase
+    /// 26-family toggle in this file follows. Persistent across moves,
+    /// same threading pattern as `null_move_king_guard`.
+    pub improving_enabled: bool,
 }
 
 impl SearchInfo {
@@ -431,6 +462,8 @@ impl SearchInfo {
             lmp_enabled: true,
             singular_multicut_enabled: true,
             threat_defusal: false,
+            static_eval_stack: [i32::MIN; MAX_PLY],
+            improving_enabled: false,
         }
     }
 
@@ -465,6 +498,10 @@ impl SearchInfo {
         self.pv_length   = [0; MAX_PLY];
         self.pv_table    = [[Move::NULL; MAX_PLY]; MAX_PLY];
         self.killers     = [[Move::NULL; KILLER_COUNT]; MAX_PLY];
+        // D114: stale improving-flag data from a previous search must
+        // never leak into this one — same reasoning as pv_table/killers
+        // above. Cheap: MAX_PLY (128) i32s.
+        self.static_eval_stack = [i32::MIN; MAX_PLY];
         // Note: history and countermoves kept between searches
         // They improve move ordering over multiple moves in the game
 

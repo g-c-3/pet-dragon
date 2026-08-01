@@ -39,7 +39,7 @@ use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
-    pruning::{continuation_hash, lmr_thread_base, nonpawn_hash, pawn_hash, should_apply_lmp, should_try_probcut, singular_margin_reduction, try_probcut},
+    pruning::{continuation_hash, futility_margin, lmr_thread_base, nonpawn_hash, pawn_hash, should_apply_lmp, should_try_probcut, singular_margin_reduction, try_probcut},
     see::{see, see_value_of},
     SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
@@ -492,6 +492,33 @@ fn alpha_beta_with_excluded(
         raw_static_eval
     };
 
+    // ── Improving flag (D114, Session 116) ────────────────────────────────────
+    // Gated behind info.improving_enabled (default false) — when off,
+    // `improving` is unconditionally `true` and `static_eval_stack` is
+    // never touched, which reproduces pre-D114 behavior exactly (see
+    // `SearchInfo::improving_enabled`'s doc comment for why `true` is
+    // the byte-identical case). When on: `false` if in check (no usable
+    // static eval this node), else compares this node's `static_eval`
+    // to the value two plies ago for the same side to move (ply and
+    // ply-2 always share a side, since ply alternates every half-move).
+    // Unknown two-plies-back data (too shallow, or that node was in
+    // check) defaults to `true` — same "assume improving when unsure"
+    // convention Stockfish uses, since under-pruning on missing
+    // information is safer than over-pruning on it.
+    let improving = if info.improving_enabled {
+        let imp = if in_check {
+            false
+        } else if ply >= 2 && info.static_eval_stack[ply - 2] != i32::MIN {
+            static_eval > info.static_eval_stack[ply - 2]
+        } else {
+            true
+        };
+        info.static_eval_stack[ply] = if in_check { i32::MIN } else { static_eval };
+        imp
+    } else {
+        true
+    };
+
     // ── Razoring ─────────────────────────────────────────────────────────────
     // If static eval is far below alpha at low depth, drop to qsearch
     if !pv_node
@@ -721,14 +748,18 @@ fn alpha_beta_with_excluded(
         let gives_check  = move_gives_check(pos, mv);
 
         // ── Futility pruning ──────────────────────────────────────────────────
-        // Skip quiet moves near leaves when we're far behind
+        // Skip quiet moves near leaves when we're far behind. Margin is
+        // improving-aware as of D114 (Session 116) — see
+        // `pruning::futility_margin()`'s doc comment; byte-identical to
+        // the pre-D114 formula when `improving` is `true`, which it
+        // always is when `info.improving_enabled` is `false`.
         if !pv_node
             && !in_check
             && !gives_check
             && is_quiet
             && depth <= MIN_DEPTH_FUTILITY
             && moves_tried > 0
-            && static_eval + 100 * depth + 200 <= alpha
+            && static_eval + futility_margin(depth, improving) <= alpha
         {
             continue;
         }
@@ -744,9 +775,12 @@ fn alpha_beta_with_excluded(
         // SearchInfo::lmp_enabled's doc comment. Lets the same binary be
         // A/B'd against the external-Stockfish bench regression without a
         // rebuild.
+        // D114 (Session 116): threshold is now improving-aware — see
+        // `improving`'s own doc comment above and
+        // `pruning::should_apply_lmp`'s updated signature.
         if info.lmp_enabled && should_apply_lmp(
             depth, moves_tried, is_quiet, in_check, gives_check, pv_node,
-            alpha, beta,
+            alpha, beta, improving,
         ) {
             continue;
         }
@@ -2166,5 +2200,85 @@ mod tests {
         let pos = Position::from_fen(fen).unwrap();
         assert_eq!(attacker_count_on(&pos, Square::D5, Color::White), 2);
         assert_eq!(attacker_count_on(&pos, Square::D5, Color::Black), 0);
+    }
+
+    // ── Improving flag (D114, Session 116) ─────────────────────────────────────
+
+    #[test]
+    fn test_improving_enabled_defaults_to_false() {
+        let info = SearchInfo::new();
+        assert!(!info.improving_enabled,
+            "improving_enabled must default to false — new/unproven \
+             technique (D114), same rollout shape as null_move_king_guard \
+             (D75) and threat_defusal (D98)");
+    }
+
+    #[test]
+    fn test_static_eval_stack_starts_at_sentinel() {
+        let info = SearchInfo::new();
+        assert!(info.static_eval_stack.iter().all(|&v| v == i32::MIN),
+            "static_eval_stack must start fully sentinel — no ply has a \
+             usable value before any search has run");
+    }
+
+    #[test]
+    fn test_static_eval_stack_untouched_when_improving_disabled() {
+        setup();
+        // With improving_enabled left at its default (false), alpha_beta
+        // must never write static_eval_stack — this is the "zero cost /
+        // byte-identical when off" contract improving_enabled's own doc
+        // comment promises, verified directly rather than just inferred
+        // from the LMP/futility call sites.
+        let fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let _ = alpha_beta(
+            &mut pos, 4, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert!(info.static_eval_stack.iter().all(|&v| v == i32::MIN),
+            "static_eval_stack must remain fully sentinel when \
+             improving_enabled is false");
+    }
+
+    #[test]
+    fn test_static_eval_stack_populated_when_improving_enabled() {
+        setup();
+        // With improving_enabled on, at least the root node's static eval
+        // (ply 0, always computed unless the root is in check) must land
+        // in the stack.
+        let fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        info.improving_enabled = true;
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let _ = alpha_beta(
+            &mut pos, 4, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.static_eval_stack[0], i32::MIN,
+            "root node's static eval should be recorded once \
+             improving_enabled is true");
+    }
+
+    #[test]
+    fn test_search_completes_with_improving_enabled() {
+        setup();
+        // Sanity check: enabling the new heuristic must not panic, hang,
+        // or return a bogus/no move on an ordinary position — same shape
+        // as test_null_move_king_guard_on_still_searches_safely and
+        // test_threat_defusal's own search-completes checks.
+        let mut pos = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.improving_enabled = true;
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 5, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.best_move, Move::NULL,
+            "search must return a legal move with improving_enabled on");
+        assert!(score.abs() <= INFINITY);
     }
 }

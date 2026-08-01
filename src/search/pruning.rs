@@ -191,23 +191,48 @@ pub fn lmr_thread_base(thread_id: usize) -> f64 {
 // that moves ordered this late this deep essentially never turn out to
 // matter. Stockfish/Ethereal-family technique.
 //
-// Ethereal and Stockfish both differentiate the threshold by an
-// "improving" flag (is static eval better than it was two plies ago for
-// this side). Pet Dragon's alpha_beta doesn't currently track that flag
-// at all — adding it is a real, separate change with its own risk
-// surface — so this uses the single, more conservative ("non-improving")
-// threshold uniformly at every node. Safe default: it only ever prunes
-// *fewer* moves than an improving-aware version would, never more.
-const LMP_THRESHOLDS: [usize; (crate::search::MAX_DEPTH_LMP + 1) as usize] = [
+// D114 (Session 116): Ethereal and Stockfish both differentiate the
+// threshold by an "improving" flag (is static eval better than it was
+// two plies ago for this side) — from D60/Session 82 through D113,
+// Pet Dragon's alpha_beta didn't track that flag at all, so a single
+// table (the values now called `LMP_THRESHOLDS_IMPROVING` below) was
+// applied uniformly at every node as a deliberately conservative
+// choice: using the higher (less-pruning) "improving" values
+// everywhere never prunes *more* than a real improving-aware split
+// would, only ever less. D114 adds the real split, gated behind
+// `SearchInfo::improving_enabled` (default `false` — byte-identical to
+// the pre-D114 uniform-table behavior until explicitly enabled and A/B
+// validated, same rollout discipline as `null_move_king_guard`/D75).
+const LMP_THRESHOLDS_IMPROVING: [usize; (crate::search::MAX_DEPTH_LMP + 1) as usize] = [
     0, 3, 4, 6, 9, 12, 16, 20, 25,
+];
+
+/// Non-improving LMP thresholds — used only when `improving_enabled` is
+/// true AND the position is not improving (static eval no better than
+/// two plies ago for this side, or unknown/in-check). Roughly half of
+/// `LMP_THRESHOLDS_IMPROVING`, matching the halving relationship
+/// Stockfish uses between its own improving/non-improving move-count
+/// pruning thresholds: when the position isn't getting better, trust
+/// the shallow-depth signal more and skip late quiets more
+/// aggressively. Hand-picked starting values (not Texel-tuned — this
+/// is a search pruning constant, not an eval weight, same status
+/// `LMP_THRESHOLDS_IMPROVING` itself has always had), needs its own
+/// SPRT-style A/B via `uci_match_runner` before any default-on
+/// consideration, same as `improving_enabled` itself.
+const LMP_THRESHOLDS_NON_IMPROVING: [usize; (crate::search::MAX_DEPTH_LMP + 1) as usize] = [
+    0, 1, 2, 3, 4, 6, 8, 10, 12,
 ];
 
 /// Quiet-move-count threshold for this depth, beyond which LMP prunes.
 /// Depth is clamped into the table's range — callers should already be
 /// gating on `depth <= MAX_DEPTH_LMP` via `should_apply_lmp`, this is
 /// just a defensive clamp so an out-of-range depth can't panic.
-pub fn lmp_threshold(depth: i32) -> usize {
-    LMP_THRESHOLDS[depth.clamp(0, crate::search::MAX_DEPTH_LMP) as usize]
+/// `improving` selects which of the two D114 tables applies — pass
+/// `true` unconditionally to reproduce pre-D114 behavior exactly (see
+/// `LMP_THRESHOLDS_IMPROVING`'s doc comment).
+pub fn lmp_threshold(depth: i32, improving: bool) -> usize {
+    let table = if improving { &LMP_THRESHOLDS_IMPROVING } else { &LMP_THRESHOLDS_NON_IMPROVING };
+    table[depth.clamp(0, crate::search::MAX_DEPTH_LMP) as usize]
 }
 
 /// Should this quiet move be skipped outright (not just reduced) by LMP?
@@ -224,6 +249,7 @@ pub fn should_apply_lmp(
     pv_node:     bool,
     alpha:       i32,
     beta:        i32,
+    improving:   bool,
 ) -> bool {
     if pv_node                                  { return false; }
     if in_check || gives_check                  { return false; }
@@ -232,7 +258,28 @@ pub fn should_apply_lmp(
     if alpha.abs() >= MATE_THRESHOLD || beta.abs() >= MATE_THRESHOLD {
         return false;
     }
-    moves_tried >= lmp_threshold(depth)
+    moves_tried >= lmp_threshold(depth, improving)
+}
+
+// ── Futility pruning margin (D114, Session 116) ────────────────────────────────
+// Base formula (`100 * depth + 200`) is unchanged from pre-D114 —
+// extracted into its own function so `alpha_beta.rs`'s call site and
+// this module's unit tests share one source of truth, and so the new
+// improving-aware branch below has somewhere to live without
+// duplicating the condition inline. When `improving` is true, this is
+// byte-identical to the pre-D114 formula; when false, the constant
+// term drops from 200 to 100 — a smaller margin makes the skip
+// condition (`static_eval + margin <= alpha`) easier to satisfy, i.e.
+// prunes more aggressively, same "trust the eval more when the
+// position isn't getting better" reasoning as the LMP split above.
+// Hand-picked, not Texel-tuned (search constant, not an eval weight);
+// needs its own SPRT-style A/B, same as `improving_enabled` itself.
+pub fn futility_margin(depth: i32, improving: bool) -> i32 {
+    if improving {
+        100 * depth + 200
+    } else {
+        100 * depth + 100
+    }
 }
 
 // ── Probcut ───────────────────────────────────────────────────────────────────
@@ -866,10 +913,13 @@ mod tests {
     fn test_lmp_threshold_increases_with_depth() {
         // Deeper nodes must tolerate at least as many quiet moves before
         // pruning — a shrinking threshold would prune more aggressively
-        // the deeper we go, which is backwards.
+        // the deeper we go, which is backwards. Checked for both D114
+        // tables independently.
         for d in 1..crate::search::MAX_DEPTH_LMP {
-            assert!(lmp_threshold(d + 1) >= lmp_threshold(d),
-                "LMP threshold should not shrink with depth (depth {})", d);
+            assert!(lmp_threshold(d + 1, true) >= lmp_threshold(d, true),
+                "LMP threshold (improving) should not shrink with depth (depth {})", d);
+            assert!(lmp_threshold(d + 1, false) >= lmp_threshold(d, false),
+                "LMP threshold (non-improving) should not shrink with depth (depth {})", d);
         }
     }
 
@@ -877,53 +927,117 @@ mod tests {
     fn test_lmp_threshold_clamped_out_of_range() {
         // Depth 0 and depths beyond the table must not panic — they
         // clamp to the nearest in-range entry.
-        let _ = lmp_threshold(0);
-        let _ = lmp_threshold(crate::search::MAX_DEPTH_LMP + 5);
+        let _ = lmp_threshold(0, true);
+        let _ = lmp_threshold(crate::search::MAX_DEPTH_LMP + 5, true);
+        let _ = lmp_threshold(0, false);
+        let _ = lmp_threshold(crate::search::MAX_DEPTH_LMP + 5, false);
+    }
+
+    #[test]
+    fn test_lmp_threshold_improving_true_matches_pre_d114_table() {
+        // improving=true must reproduce the exact pre-D114 values —
+        // this is what makes improving_enabled=false (which always
+        // passes improving=true, see alpha_beta.rs) byte-identical to
+        // engine behavior before D114 existed.
+        let expected = [0usize, 3, 4, 6, 9, 12, 16, 20, 25];
+        for (d, &want) in expected.iter().enumerate() {
+            assert_eq!(lmp_threshold(d as i32, true), want,
+                "improving=true threshold at depth {d} must match the original table");
+        }
+    }
+
+    #[test]
+    fn test_lmp_threshold_non_improving_never_exceeds_improving() {
+        // The whole point of the split: non-improving must prune at
+        // least as aggressively (threshold no higher) as improving, at
+        // every depth in range.
+        for d in 0..=crate::search::MAX_DEPTH_LMP {
+            assert!(lmp_threshold(d, false) <= lmp_threshold(d, true),
+                "non-improving threshold must not exceed improving threshold (depth {d})");
+        }
     }
 
     #[test]
     fn test_lmp_not_applied_in_pv_node() {
-        assert!(!should_apply_lmp(4, 20, true, false, false, true, 0, 0),
+        assert!(!should_apply_lmp(4, 20, true, false, false, true, 0, 0, true),
             "LMP must never fire in a PV node");
     }
 
     #[test]
     fn test_lmp_not_applied_in_check_or_giving_check() {
-        assert!(!should_apply_lmp(4, 20, true, true, false, false, 0, 0),
+        assert!(!should_apply_lmp(4, 20, true, true, false, false, 0, 0, true),
             "LMP must not fire when in check");
-        assert!(!should_apply_lmp(4, 20, true, false, true, false, 0, 0),
+        assert!(!should_apply_lmp(4, 20, true, false, true, false, 0, 0, true),
             "LMP must not fire on a move that gives check");
     }
 
     #[test]
     fn test_lmp_not_applied_to_non_quiet_moves() {
-        assert!(!should_apply_lmp(4, 20, false, false, false, false, 0, 0),
+        assert!(!should_apply_lmp(4, 20, false, false, false, false, 0, 0, true),
             "LMP must not fire on captures/promotions");
     }
 
     #[test]
     fn test_lmp_not_applied_beyond_max_depth() {
         let too_deep = crate::search::MAX_DEPTH_LMP + 1;
-        assert!(!should_apply_lmp(too_deep, 100, true, false, false, false, 0, 0),
+        assert!(!should_apply_lmp(too_deep, 100, true, false, false, false, 0, 0, true),
             "LMP must not fire beyond MAX_DEPTH_LMP");
     }
 
     #[test]
     fn test_lmp_not_applied_near_mate_scores() {
-        assert!(!should_apply_lmp(4, 20, true, false, false, false, MATE_THRESHOLD, 0),
+        assert!(!should_apply_lmp(4, 20, true, false, false, false, MATE_THRESHOLD, 0, true),
             "LMP must not fire when alpha is a mate-range score");
-        assert!(!should_apply_lmp(4, 20, true, false, false, false, 0, MATE_THRESHOLD),
+        assert!(!should_apply_lmp(4, 20, true, false, false, false, 0, MATE_THRESHOLD, true),
             "LMP must not fire when beta is a mate-range score");
     }
 
     #[test]
     fn test_lmp_fires_past_threshold() {
         let d = 4;
-        let threshold = lmp_threshold(d);
-        assert!(!should_apply_lmp(d, threshold - 1, true, false, false, false, 0, 0),
+        let threshold = lmp_threshold(d, true);
+        assert!(!should_apply_lmp(d, threshold - 1, true, false, false, false, 0, 0, true),
             "LMP must not fire just below the threshold");
-        assert!(should_apply_lmp(d, threshold, true, false, false, false, 0, 0),
+        assert!(should_apply_lmp(d, threshold, true, false, false, false, 0, 0, true),
             "LMP must fire once the quiet-move count reaches the threshold");
+    }
+
+    #[test]
+    fn test_lmp_fires_earlier_when_non_improving() {
+        // D114: with the same moves_tried count, a non-improving node
+        // must be at least as willing to prune as an improving one —
+        // demonstrated at a count that clears the non-improving
+        // threshold but not the improving one.
+        let d = 4;
+        let non_improving_threshold = lmp_threshold(d, false);
+        let improving_threshold = lmp_threshold(d, true);
+        assert!(non_improving_threshold < improving_threshold,
+            "test assumes the two tables actually differ at depth {d}");
+        assert!(should_apply_lmp(d, non_improving_threshold, true, false, false, false, 0, 0, false),
+            "LMP must fire for a non-improving node at its own (lower) threshold");
+        assert!(!should_apply_lmp(d, non_improving_threshold, true, false, false, false, 0, 0, true),
+            "the same moves_tried count must not fire yet for an improving node");
+    }
+
+    #[test]
+    fn test_futility_margin_improving_matches_pre_d114_formula() {
+        // improving=true must reproduce the exact pre-D114 formula —
+        // same byte-identical-when-disabled requirement as the LMP
+        // table above.
+        for depth in 1..=5 {
+            assert_eq!(futility_margin(depth, true), 100 * depth + 200,
+                "improving=true margin at depth {depth} must match the original formula");
+        }
+    }
+
+    #[test]
+    fn test_futility_margin_non_improving_smaller() {
+        // Non-improving must use a smaller (more-pruning) margin than
+        // improving, at every depth — never larger.
+        for depth in 1..=5 {
+            assert!(futility_margin(depth, false) < futility_margin(depth, true),
+                "non-improving futility margin must be smaller at depth {depth}");
+        }
     }
 
     #[test]
