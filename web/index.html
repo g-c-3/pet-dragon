@@ -914,6 +914,16 @@
     margin-bottom: 0.75rem;
   }
   .console-log-empty { color: var(--text-muted); text-align: center; padding: 1.5rem 0; }
+  .console-log-textdump {
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+  }
+  .console-log-textdump .textdump-hint {
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 0.5rem;
+  }
   .console-log-entry {
     display: flex;
     gap: 0.5rem;
@@ -2677,8 +2687,8 @@
     <div class="console-toolbar">
       <div class="console-filters" id="console-filters">
         <button class="console-filter-btn active" data-level="all"   onclick="_consoleSetFilter('all')">All</button>
-        <button class="console-filter-btn"        data-level="log"   onclick="_consoleSetFilter('log')">Log</button>
-        <button class="console-filter-btn"        data-level="info"  onclick="_consoleSetFilter('info')">Info</button>
+        <button class="console-filter-btn"        data-level="log"   onclick="_consoleSetFilter('log')" title="Show the full move log — same content as the 📜 Log download">Log</button>
+        <button class="console-filter-btn"        data-level="info"  onclick="_consoleSetFilter('info')" title="Show the FEN diagnostic export — same content as the 📋 FEN download">Info</button>
         <button class="console-filter-btn"        data-level="warn"  onclick="_consoleSetFilter('warn')">Warn</button>
         <button class="console-filter-btn"        data-level="error" onclick="_consoleSetFilter('error')">Error</button>
       </div>
@@ -4839,7 +4849,11 @@ function _formatLogMoveLine(e) {
     if (typeof e.skill === 'number') bits.push('skill ' + e.skill);
     tag = '(engine' + (e.forPlayerSide ? ', AI-assist' : '') + (bits.length ? ' — ' + bits.join(', ') : '') + ')';
   }
-  let line = moveNo + ' ' + e.san + '  ' + tag;
+  // e.uci is the standard coordinate move (e.g. "e2e4", "e7e8q") — shown
+  // alongside the app's own SAN-like label since that label always inserts
+  // the source file on captures (e.g. "Qaxa7") whether disambiguation is
+  // needed or not, which can look unfamiliar next to normal chess notation.
+  let line = moveNo + ' ' + e.san + '  [' + e.uci + ']  ' + tag;
   if (e.blunder) line += '  ⚠ BLUNDER — engine\'s actual best move here was ' + e.engineChoiceUci;
   return line;
 }
@@ -4850,6 +4864,7 @@ function _buildFullMoveLogText() {
   lines.push('Generated: ' + new Date().toString());
   lines.push('Total games recorded: ' + fullGameLog.length);
   lines.push('Eval values are signed centipawn scores (e.g. +1.25) or mate-in-N, always from White\'s perspective.');
+  lines.push('Each move shows this app\'s own move label, then the standard coordinate move in [brackets] (e.g. [e2e4]).');
   lines.push('='.repeat(78));
   fullGameLog.forEach(function (game) {
     lines.push('');
@@ -8137,7 +8152,31 @@ function _consoleDashRenderAll() {
   list.scrollTop = list.scrollHeight;
 }
 
+// Renders a plain-text block (the full move log, or the FEN diagnostic
+// export) into the same on-screen area the raw console messages use —
+// built from the exact same text-builder functions their download buttons
+// call, so what you see here always matches what gets downloaded.
+function _consoleDashRenderTextDump(text, hint) {
+  const list = document.getElementById('console-log-list');
+  if (!list) return;
+  list.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'console-log-textdump';
+  if (hint) {
+    const hintEl = document.createElement('span');
+    hintEl.className = 'textdump-hint';
+    hintEl.textContent = hint;
+    wrap.appendChild(hintEl);
+  }
+  const body = document.createElement('span');
+  body.textContent = text;
+  wrap.appendChild(body);
+  list.appendChild(wrap);
+  list.scrollTop = 0;
+}
+
 function _consoleDashOnLive(entry) {
+  if (_consoleDashFilter === 'log' || _consoleDashFilter === 'info') return; // showing the move log / FEN text dump, not raw console messages
   if (_consoleDashFilter !== 'all' && entry.level !== _consoleDashFilter) return;
   const list = document.getElementById('console-log-list');
   if (!list) return;
@@ -8147,6 +8186,20 @@ function _consoleDashOnLive(entry) {
   const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
   list.appendChild(_consoleDashEntryHtml(entry));
   if (nearBottom) list.scrollTop = list.scrollHeight;
+}
+
+// Redraws whatever the active tab should show — raw console messages for
+// All/Warn/Error, or the move log / FEN text dump for Log/Info. Shared by
+// openConsoleDash(), _consoleSetFilter(), and _consoleClear() so all three
+// always agree on what's currently on screen.
+function _consoleDashRefresh() {
+  if (_consoleDashFilter === 'log') {
+    _consoleDashRenderTextDump(_buildFullMoveLogText(), 'Full move log — identical to the 📜 Log download.');
+  } else if (_consoleDashFilter === 'info') {
+    _consoleDashRenderTextDump(_buildFenDiagnosticText(), 'FEN diagnostic export — identical to the 📋 FEN download.');
+  } else {
+    _consoleDashRenderAll();
+  }
 }
 
 function _consoleDashStartLive() {
@@ -8165,7 +8218,7 @@ function openConsoleDash() {
   closePickers();
   document.getElementById('console-overlay').classList.add('show');
   document.getElementById('console-btn').classList.add('active');
-  _consoleDashRenderAll();
+  _consoleDashRefresh();
   _consoleDashStartLive();
 }
 
@@ -8174,22 +8227,22 @@ function _consoleSetFilter(level) {
   document.querySelectorAll('#console-filters .console-filter-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.level === level);
   });
-  _consoleDashRenderAll();
+  _consoleDashRefresh();
 }
 
 function _consoleClear() {
   if (window._consoleDash) window._consoleDash.clear();
-  _consoleDashRenderAll();
+  _consoleDashRefresh();
 }
 
 // ─── FEN diagnostic export ───────────────────────────────────────────────────
 // Dumps everything needed to reproduce an engine issue outside the app:
 // the game's starting FEN, move list, current position (both standard FEN
 // and the exact engine-flavoured FEN Pet Dragon was actually sent), and the
-// strength/skill settings in effect for each side. Downloaded as .txt rather
-// than shown in-app since it's meant to be attached to a bug report, not read
-// on the phone.
-function _consoleDownloadFen() {
+// strength/skill settings in effect for each side. Available both as a .txt
+// download (to attach to a bug report) and, via the Console Dashboard's
+// "Info" tab, as an on-screen view of that exact same content.
+function _buildFenDiagnosticText() {
   const lines = [];
   lines.push('Pet Dragon — diagnostic FEN export');
   lines.push('Generated: ' + new Date().toString());
@@ -8251,7 +8304,12 @@ function _consoleDownloadFen() {
     lines.push('(none)');
   }
 
-  const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+  return lines.join('\n');
+}
+
+function _consoleDownloadFen() {
+  const text = _buildFenDiagnosticText();
+  const blob = new Blob([text], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
