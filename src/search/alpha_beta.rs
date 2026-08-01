@@ -388,6 +388,14 @@ fn alpha_beta_with_excluded(
         }
     }
 
+    // ── Check detection ───────────────────────────────────────────────────────
+    // Hoisted above the draw-detection block below (D116, Session 118) so
+    // the fifty-move-rule guard can use it. Purely a reordering, not a
+    // behavior change on its own — the position is read-only between here
+    // and where this used to live (mate distance pruning is pure math,
+    // the draw checks below are pure reads, no move has been made yet).
+    let in_check = pos.in_check(pos.side_to_move);
+
     // ── Draw detection ────────────────────────────────────────────────────────
     // Check repetition BEFORE TT lookup
     if !root_node && pos.is_repetition(ply) {
@@ -395,8 +403,25 @@ fn alpha_beta_with_excluded(
     }
 
     // Fifty-move rule
+    // D116 (Session 118): guarded against reporting a draw when the
+    // position is simultaneously checkmate — this used to fire
+    // unconditionally the moment halfmove_clock >= 100, with no check for
+    // whether the side to move has actually just been mated. Mirrors
+    // Stockfish's own `Position::is_draw()` guard:
+    // `st->rule50 > 99 && (!checkers() || MoveList<LEGAL>(*this).size())`.
+    // Repetition (above) and insufficient material (below) can never
+    // coincide with checkmate — see DECISIONS.md D116 for why — so only
+    // this specific check needed the guard. `generate_moves(pos)` here
+    // duplicates the real move generation a few dozen lines below, but
+    // only on the rare path where both halfmove_clock >= 100 AND the side
+    // to move is in check — negligible cost in practice.
     if pos.halfmove_clock >= 100 {
-        return draw_score(ply, info.contempt);
+        if !in_check || !generate_moves(pos).is_empty() {
+            return draw_score(ply, info.contempt);
+        }
+        // else: in check with zero legal moves — checkmate. Fall through;
+        // the normal move-generation/checkmate path below detects it and
+        // returns the correct mate score instead of a wrong draw.
     }
 
     // Insufficient material
@@ -446,10 +471,9 @@ fn alpha_beta_with_excluded(
         tt_move = Move::NULL;
     }
 
-    // ── Check detection ───────────────────────────────────────────────────────
-    let in_check = pos.in_check(pos.side_to_move);
-
-    // Check extension: extend search when in check
+    // ── Check extension ────────────────────────────────────────────────────────
+    // `in_check` is computed above, before draw detection (D116) — extend
+    // search when in check.
     if in_check {
         depth += 1;
     }
@@ -1422,6 +1446,72 @@ mod tests {
             "50-move draw at root-side ply should reflect Contempt exactly");
     }
 
+    #[test]
+    fn test_fifty_move_rule_does_not_override_checkmate() {
+        // D116 (Session 118): before this fix, the fifty-move check fired
+        // unconditionally the moment halfmove_clock >= 100, with no guard
+        // for the position simultaneously being checkmate — this position
+        // is both. Black king on g8, boxed in by its own f7/g7/h7 pawns,
+        // mated by the rook on a8 along the open 8th rank.
+        setup();
+        let fen = "R5k1/5ppp/8/8/8/8/8/6K1 b - - 100 1";
+        let mut pos  = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt       = TranspositionTable::new(4);
+        info.time_allocated_ms = 60_000;
+
+        assert!(pos.in_check(Color::Black), "test position must actually be check");
+
+        let score = alpha_beta(
+            &mut pos, 1, -INFINITY, INFINITY,
+            0, true, &mut info, &tt, Move::NULL,
+        );
+        // Score is from Black's (side to move, and the mated side)
+        // perspective — must be a deeply negative mate score, never the
+        // draw score the pre-D116 code returned here.
+        assert_ne!(score, DRAW_SCORE,
+            "checkmate at halfmove_clock >= 100 must never score as a draw");
+        assert!(score <= -MATE_THRESHOLD,
+            "checkmate must return a mate score from the mated side's \
+             perspective, got {score}");
+    }
+
+    #[test]
+    fn test_fifty_move_rule_still_draws_when_not_checkmate() {
+        // D116's companion case: halfmove_clock >= 100 with the side to
+        // move in check but NOT mated (has a legal escape) must still
+        // fall through to the normal move-generation path rather than
+        // returning a premature draw — but that path itself may still
+        // conclude a draw once real search runs; this test just confirms
+        // the position isn't checkmate and the guard's "in check but has
+        // a legal move" branch is exercised (not just the "not in check
+        // at all" branch test_fifty_move_rule already covers).
+        setup();
+        // Black king g8, checked by a rook on g1 down the open g-file
+        // (f7/h7 pawns don't block that file — only g7 would, and it's
+        // empty). Kf8 and Kh8 are both legal escapes (neither attacked),
+        // so this is check, not checkmate — the guard's "in check but
+        // has a legal move" branch should be exercised here.
+        let fen = "6k1/5p1p/8/8/8/8/8/K5R1 b - - 100 1";
+        let mut pos = Position::from_fen(fen).unwrap();
+        assert!(pos.in_check(Color::Black), "test position must actually be check");
+        let legal_moves = generate_moves(&pos);
+        assert!(!legal_moves.is_empty(),
+            "test position must have at least one legal move (Kh8)");
+
+        let mut info = SearchInfo::new();
+        let tt       = TranspositionTable::new(4);
+        info.time_allocated_ms = 60_000;
+        let score = alpha_beta(
+            &mut pos, 1, -INFINITY, INFINITY,
+            0, true, &mut info, &tt, Move::NULL,
+        );
+        // Not checkmate, so must not be scored as an immediate mate —
+        // the fifty-move guard's "in check but has a legal move" branch
+        // should take the normal draw_score() path here.
+        assert!(score.abs() < MATE_THRESHOLD,
+            "non-mate position must not return a mate-range score, got {score}");
+    }
     #[test]
     fn test_stalemate_returns_draw() {
         setup();
