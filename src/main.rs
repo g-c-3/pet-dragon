@@ -205,6 +205,12 @@ struct EngineState {
     /// TDSE — see `SearchInfo::threat_defusal`'s doc comment and
     /// DECISIONS.md D98.
     threat_defusal: bool,
+
+    /// UCI `ImprovingHeuristic` setting, default `false`. D114 (Session
+    /// 116) — same threading pattern as `null_move_king_guard`/
+    /// `threat_defusal` above. See `SearchInfo::improving_enabled`'s doc
+    /// comment for the full reasoning.
+    improving_enabled: bool,
 }
 
 impl EngineState {
@@ -242,6 +248,7 @@ impl EngineState {
             lmp_enabled: true,
             singular_multicut_enabled: true,
             threat_defusal: false,
+            improving_enabled: false,
             limit_strength: false,
             elo: pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
         }
@@ -463,6 +470,11 @@ fn cmd_uci() {
     // same rollout shape as NullMoveKingGuard (D75), not the D91/D92
     // already-shipped-default-on pattern.
     println!("option name ThreatDefusal type check default false");
+    // D114 (Session 116): improving-aware LMP/futility pruning, default
+    // false — same unproven-technique rollout shape as ThreatDefusal/
+    // NullMoveKingGuard, needs its own SPRT-style A/B before a default
+    // flip is ever considered. See DECISIONS.md D114.
+    println!("option name ImprovingHeuristic type check default false");
     println!();
     println!("uciok");
 }
@@ -600,6 +612,13 @@ fn cmd_setoption(state: &mut EngineState, line: &str) {
             // pattern as the others, default false — see
             // SearchInfo::threat_defusal's doc comment and DECISIONS.md D98.
             state.threat_defusal = value.eq_ignore_ascii_case("true");
+        }
+        "improvingheuristic" => {
+            // D114 (Session 116): same recorded-here/applied-in-cmd_go
+            // pattern as the others, default false — see
+            // SearchInfo::improving_enabled's doc comment and
+            // DECISIONS.md D114.
+            state.improving_enabled = value.eq_ignore_ascii_case("true");
         }
         "uci_elo" => {
             if let Ok(n) = value.parse::<i32>() {
@@ -837,6 +856,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
     let lmp_enabled = state.lmp_enabled;
     let singular_multicut_enabled = state.singular_multicut_enabled;
     let threat_defusal = state.threat_defusal;
+    let improving_enabled = state.improving_enabled;
 
     // Take snapshots of ordering tables for the main thread's SearchInfo.
     // This preserves history knowledge across moves.
@@ -882,6 +902,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
                 h_info.lmp_enabled = lmp_enabled;
                 h_info.singular_multicut_enabled = singular_multicut_enabled;
                 h_info.threat_defusal = threat_defusal;
+                h_info.improving_enabled = improving_enabled;
                 // Phase 23.2/D49: thread identity, consumed by
                 // lmr_thread_base() and thread_tie_break() to vary this
                 // helper's LMR aggressiveness and quiet-move tie-breaking
@@ -917,6 +938,7 @@ fn cmd_go(state: &mut EngineState, line: &str) {
         main_info.lmp_enabled = lmp_enabled;
         main_info.singular_multicut_enabled = singular_multicut_enabled;
         main_info.threat_defusal = threat_defusal;
+        main_info.improving_enabled = improving_enabled;
         #[cfg(not(target_arch = "wasm32"))]
         { main_info.syzygy = syzygy_for_threads; }
 
@@ -1569,6 +1591,40 @@ mod tests {
             "The SearchInfo actually used by the search thread must reflect \
              the configured ThreatDefusal value, not just EngineState's own \
              copy of it");
+    }
+
+    #[test]
+    fn test_improving_heuristic_option_defaults_to_false() {
+        setup();
+        let state = EngineState::new();
+        assert!(!state.improving_enabled,
+            "ImprovingHeuristic should default to false — new/unproven \
+             technique, same rollout shape as ThreatDefusal (D98) and \
+             NullMoveKingGuard (D75) (D114, Session 116)");
+    }
+
+    #[test]
+    fn test_improving_heuristic_option_parses_true_and_false() {
+        setup();
+        let mut state = EngineState::new();
+        cmd_setoption(&mut state, "setoption name ImprovingHeuristic value true");
+        assert!(state.improving_enabled);
+        cmd_setoption(&mut state, "setoption name ImprovingHeuristic value false");
+        assert!(!state.improving_enabled);
+    }
+
+    #[test]
+    fn test_cmd_go_applies_improving_heuristic_to_search() {
+        setup();
+        let mut state = EngineState::new();
+        state.improving_enabled = true;
+        cmd_go(&mut state, "go depth 4");
+        let returned = state.wait_for_search()
+            .expect("search should have produced a SearchInfo");
+        assert!(returned.improving_enabled,
+            "The SearchInfo actually used by the search thread must reflect \
+             the configured ImprovingHeuristic value, not just EngineState's \
+             own copy of it");
     }
 
     #[test]
