@@ -2606,10 +2606,10 @@
       <span class="sub-icon">🧩</span>
     </button>
     <button class="sub-btn" id="sound-btn" onclick="openSoundPicker()" title="Sound">
-      <span class="sub-icon" id="sound-icon">🔇</span>
+      <span class="sub-icon" id="sound-icon">🔊</span>
     </button>
     <button class="sub-btn" id="glow-btn" onclick="openGlowPicker()" title="Glow">
-      <span class="sub-icon off" id="glow-icon">✨</span>
+      <span class="sub-icon" id="glow-icon">✨</span>
     </button>
     <button class="sub-btn" id="console-btn" onclick="openConsoleDash()" title="Console">
       <span class="sub-icon">🖥️</span>
@@ -6853,7 +6853,8 @@ function updateMuteBtn() {
 
 function updateSoundHeaderBtn() {
   const icon = document.getElementById('sound-icon');
-  icon.textContent = soundOn ? '🔊' : '🔇';
+  // Icon always shows the unmuted speaker, regardless of actual sound state.
+  icon.textContent = '🔊';
 }
 
 function toggleMute() {
@@ -6941,12 +6942,12 @@ function updateGlowHeaderBtn() {
   const btn  = document.getElementById('glow-btn');
   const icon = document.getElementById('glow-icon');
   icon.textContent = '✨';
+  // Icon always shows full colour, regardless of actual glow state.
+  icon.classList.remove('off');
   if (glowOn) {
     btn.classList.add('active');
-    icon.classList.remove('off');
   } else {
     btn.classList.remove('active');
-    icon.classList.add('off');
   }
 }
 
