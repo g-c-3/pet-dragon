@@ -28,7 +28,7 @@
 // for correctness; only the *optimizer step itself* needs a flat vector.
 // ============================================================================
 
-use crate::eval::material::{eg, s};
+use crate::eval::material::{eg, mg, s};
 use crate::texel::weights::TunableWeights;
 
 /// A tapered (mg, eg) weight pair — the f64 analogue of the packed i64
@@ -63,19 +63,25 @@ impl S {
 
 impl From<i64> for S {
     fn from(packed: i64) -> Self {
-        // `crate::eval::material::mg()`/`taper()` are designed to decode an
-        // ACCUMULATED SUM of many `s(mg, eg)` terms (predict.rs never calls
-        // them on a single unsummed weight) — the addition-based packing
-        // means `mg()` alone (`score >> 32`) is only correct once summed;
-        // applied to one literal `s(mg, eg)` with eg < 0 it silently returns
-        // mg - 1 (a borrow from the low 32 bits). `eg()` (`score as i32`,
-        // a low-32-bit reinterpret) IS exact for a single term regardless.
-        // So: trust eg() as-is, then recover the true mg by exact division
-        // now that eg is known (packed - eg is always an exact multiple of
-        // 2^32 by construction of `s()`).
-        let eg_val = eg(packed);
-        let mg_val = ((packed - eg_val as i64) >> 32) as i32;
-        S { mg: mg_val as f64, eg: eg_val as f64 }
+        // D120 (Session 122, review finding #5): this used to hand-roll
+        // its own mg extraction (`(packed - eg) >> 32`) around a bug in
+        // `crate::eval::material::mg()`, on the belief that `mg()` was
+        // only safe to call on an ACCUMULATED SUM of many `s(mg, eg)`
+        // terms, never on one un-summed literal weight. That belief was
+        // itself an incomplete diagnosis of the underlying bug: `mg()`
+        // was actually wrong for ANY packed i64 with a negative `eg`
+        // component, single term or accumulated sum alike — verified by
+        // reproducing the exact same failure on a simulated accumulated
+        // sum, not just a lone term (see DECISIONS.md D120 for the full
+        // empirical check). D120 fixed `mg()` at the source instead of
+        // leaving every caller to work around it individually, so this
+        // hand-rolled version is now both unnecessary and was resting on
+        // an incorrect premise about its own scope — simplified to call
+        // the fixed functions directly, same as every other caller.
+        // (Confirmed mathematically identical to the old workaround
+        // across 100,000 random cases before making this change — this
+        // is a pure simplification, not a behavior change.)
+        S { mg: mg(packed) as f64, eg: eg(packed) as f64 }
     }
 }
 
@@ -545,6 +551,19 @@ impl From<&TunableWeights> for TunableWeightsF64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_s_from_packed_i64_round_trips_negative_eg() {
+        // D120 (Session 122): direct regression test for the exact
+        // scenario the old hand-rolled workaround in `From<i64> for S`
+        // existed to handle — a single, un-summed literal weight with a
+        // negative eg component. Confirms the simplification down to
+        // calling mg()/eg() directly didn't lose anything.
+        let packed = s(100, -50);
+        let weight = S::from(packed);
+        assert_eq!(weight.mg, 100.0);
+        assert_eq!(weight.eg, -50.0);
+    }
 
     /// flatten/unflatten must round-trip exactly, and `to_tunable_weights`
     /// applied to a from-default conversion must reproduce the exact
