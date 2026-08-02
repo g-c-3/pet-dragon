@@ -769,11 +769,12 @@ fn alpha_beta_with_excluded(
         // Recapture extension (D117, Session 119, review finding #3) —
         // applies to ANY move, not just the TT move, unlike the
         // singular-extension logic above. Gated behind
-        // info.recapture_extension_enabled (default false, see
-        // SearchInfo's doc comment); when disabled this is a no-op and
-        // move_ext is untouched, byte-identical to before D117. Capped
-        // together with whatever tt_move_extension already contributed
-        // — MAX_EXTENSION is a per-move total, not per-mechanism.
+        // info.recapture_extension_enabled (default true as of D125,
+        // Session 127 — see SearchInfo's doc comment and DECISIONS.md
+        // D125); when disabled this is a no-op and move_ext is
+        // untouched, byte-identical to before D117. Capped together
+        // with whatever tt_move_extension already contributed —
+        // MAX_EXTENSION is a per-move total, not per-mechanism.
         if info.recapture_extension_enabled {
             move_ext += recapture_and_passed_pawn_extension(pos, mv, prev_move, depth);
             move_ext = move_ext.clamp(-2, MAX_EXTENSION);
@@ -2412,12 +2413,14 @@ mod tests {
     // ── Recapture extension (D117, Session 119, review finding #3) ─────────────
 
     #[test]
-    fn test_recapture_extension_enabled_defaults_to_false() {
+    fn test_recapture_extension_enabled_defaults_to_true() {
+        // D125 (Session 127): flipped to default true by explicit
+        // decision, ahead of this project's usual SPRT-style A/B step
+        // — see DECISIONS.md D125.
         let info = SearchInfo::new();
-        assert!(!info.recapture_extension_enabled,
-            "recapture_extension_enabled must default to false — \
-             new/unproven technique (D117), same rollout shape as \
-             improving_enabled/threat_defusal/null_move_king_guard");
+        assert!(info.recapture_extension_enabled,
+            "recapture_extension_enabled must default to true as of \
+             D125 (Session 127)");
     }
 
     #[test]

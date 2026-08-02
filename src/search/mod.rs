@@ -420,12 +420,18 @@ pub struct SearchInfo {
     pub improving_enabled: bool,
 
     // ── Recapture extension (D117, Session 119, review finding #3) ────────────
-    /// UCI `RecaptureExtension` setting, default `false` — same
-    /// unproven-technique rollout shape as `improving_enabled`/
-    /// `threat_defusal`/`null_move_king_guard`. When `true`,
-    /// `alpha_beta.rs`'s move loop extends any move that's a genuine
-    /// recapture (captures on the same square the opponent's
-    /// immediately preceding move captured on, at `depth <= 4`) via
+    /// UCI `RecaptureExtension` setting, default `true` as of D125
+    /// (Session 127) — Gokul's explicit call to flip the default
+    /// without running the standard SPRT-style A/B first (only signal
+    /// available was D117's flat n=20 functional check — confirms the
+    /// mechanism works, not that it helps; see DECISIONS.md D125 for
+    /// the full note on skipping this project's usual gated-rollout
+    /// discipline). Before D125, defaulted `false` like every other
+    /// unproven-technique toggle (`improving_enabled`/`threat_defusal`/
+    /// `null_move_king_guard`). When `true`, `alpha_beta.rs`'s move
+    /// loop extends any move that's a genuine recapture (captures on
+    /// the same square the opponent's immediately preceding move
+    /// captured on, at `depth <= 4`) via
     /// `pruning::recapture_and_passed_pawn_extension()`, combined with
     /// whatever extension the TT move's own singular-extension result
     /// already contributed, capped together. Deliberately scoped to
@@ -434,9 +440,9 @@ pub struct SearchInfo {
     /// see `pruning::extension()`'s doc comment) wasn't flagged as
     /// buggy by the review that prompted this and stays out of scope,
     /// unwired, until/unless a separate decision activates it too. When
-    /// `false` (default): zero extra computation, byte-identical to
-    /// before this option existed — the move loop's `move_ext` for any
-    /// non-TT-move stays exactly `0`, same as before D117.
+    /// `false`: zero extra computation, byte-identical to before this
+    /// option existed — the move loop's `move_ext` for any non-TT-move
+    /// stays exactly `0`, same as before D117.
     pub recapture_extension_enabled: bool,
 }
 
@@ -484,7 +490,7 @@ impl SearchInfo {
             threat_defusal: false,
             static_eval_stack: [i32::MIN; MAX_PLY],
             improving_enabled: false,
-            recapture_extension_enabled: false,
+            recapture_extension_enabled: true,
         }
     }
 
