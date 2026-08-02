@@ -82,12 +82,43 @@ pub const fn s(mg: i32, eg: i32) -> i64 {
 }
 
 /// Extract middlegame score from packed value
+///
+/// D120 (Session 122, review finding #5) fix: the pre-fix version
+/// (`(score >> 32) as i32`, a plain arithmetic right shift) was wrong
+/// whenever `eg` was negative. `s()` above sign-extends `eg as i64`
+/// before adding it to the shifted `mg` half — when `eg` is negative,
+/// that sign-extension borrows into the mg half's own bits, and a
+/// plain arithmetic shift on the way back out doesn't correct for it.
+/// Empirically verified (200,000 random `(mg, eg)` pairs, not just
+/// reasoned about): the old extraction was wrong on essentially
+/// exactly half of them — every case with `eg < 0` — always off by
+/// exactly 1 (too low), while the `eg()` extraction below was correct
+/// in 100% of the same cases (the bug is specific to `mg()`).
+/// Since every tapered eval term in this engine (material, PST,
+/// mobility, pawns, king safety, threats, open lines, PlayStyle
+/// bonuses — all of it) is packed and unpacked through these two
+/// functions, this was quietly under-counting the middlegame
+/// contribution of roughly half of all eval terms by 1 centipawn each,
+/// for as long as this packing scheme has existed.
+///
+/// Fixed using the same technique Stockfish's own `Score` packing
+/// uses: add half the low half's range before shifting
+/// (`wrapping_add` rather than `+`, so this stays correct — and
+/// panic-free in debug builds — even in the extreme, never-actually-
+/// occurring case of `score` sitting right at `i64`'s own bounds), and
+/// shift as unsigned (`as u64 >>`) so no sign-extension happens during
+/// the shift itself. The trailing `as i32` then correctly reinterprets
+/// the resulting low 32 bits as a signed value.
 #[inline]
 pub const fn mg(score: i64) -> i32 {
-    (score >> 32) as i32
+    (score.wrapping_add(0x8000_0000) as u64 >> 32) as i32
 }
 
 /// Extract endgame score from packed value
+///
+/// Unaffected by the D120 fix above — a plain low-32-bits truncation
+/// via `as i32` was, and remains, correct for every case (verified
+/// alongside `mg()`'s own fix, same 200,000-case sweep).
 #[inline]
 pub const fn eg(score: i64) -> i32 {
     score as i32
@@ -245,5 +276,63 @@ mod tests {
         let score = s(100, 0);
         assert_eq!(taper(score, 12), 50,
             "Midpoint phase should blend equally");
+    }
+
+    // ── Packed score mg()/eg() round-trip (D120, Session 122, review finding #5) ──
+
+    #[test]
+    fn test_mg_eg_round_trip_negative_eg() {
+        // The exact bug D120 fixed: before it, mg() returned 99 here
+        // instead of the correct 100, because eg's negative
+        // sign-extension during s()'s packing borrowed into the mg
+        // half's bits and the old plain-arithmetic-shift mg()
+        // extraction didn't correct for it.
+        let score = s(100, -50);
+        assert_eq!(mg(score), 100, "mg() must round-trip correctly when eg is negative");
+        assert_eq!(eg(score), -50, "eg() must round-trip correctly when eg is negative");
+    }
+
+    #[test]
+    fn test_mg_eg_round_trip_negative_mg() {
+        let score = s(-30, 20);
+        assert_eq!(mg(score), -30);
+        assert_eq!(eg(score), 20);
+    }
+
+    #[test]
+    fn test_mg_eg_round_trip_both_negative() {
+        let score = s(-30, -50);
+        assert_eq!(mg(score), -30);
+        assert_eq!(eg(score), -50);
+    }
+
+    #[test]
+    fn test_mg_eg_round_trip_sweep() {
+        // Broader sweep than the individual cases above — covers the
+        // full sign combination space plus zero, at a range
+        // representative of real eval term magnitudes (well within
+        // i32, nowhere near i64's actual range where s() lives).
+        for mg_v in [-500, -100, -1, 0, 1, 100, 500] {
+            for eg_v in [-500, -100, -1, 0, 1, 100, 500] {
+                let score = s(mg_v, eg_v);
+                assert_eq!(mg(score), mg_v,
+                    "mg() round-trip failed for s({mg_v}, {eg_v})");
+                assert_eq!(eg(score), eg_v,
+                    "eg() round-trip failed for s({mg_v}, {eg_v})");
+            }
+        }
+    }
+
+    #[test]
+    fn test_taper_with_negative_eg_uses_correct_mg_value() {
+        // End-to-end check at the level every eval term actually calls
+        // (taper(), not mg()/eg() directly) — confirms the fix reaches
+        // real eval output, not just the unit-level extraction
+        // functions in isolation.
+        let score = s(100, -50);
+        assert_eq!(taper(score, 24), 100,
+            "Full middlegame taper must use the correct mg value even \
+             when eg is negative — this is exactly the scenario D120 \
+             fixed");
     }
 }
