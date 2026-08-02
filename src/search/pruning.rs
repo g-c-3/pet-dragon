@@ -656,6 +656,19 @@ mod tests {
     }
 
     #[test]
+    fn test_lmr_not_applied_to_tt_move() {
+        // D118 (Session 120, review finding #4): this exact case is the
+        // one the pre-fix inline gate in alpha_beta.rs silently missed —
+        // should_apply_lmr() itself always excluded the TT move
+        // correctly, but nothing called it, so the bug was in the
+        // wiring, not this function. Kept here anyway as a direct,
+        // permanent guard against the same omission creeping back in.
+        let mv = Move::new(Square::E2, Square::E3, MoveKind::Quiet);
+        assert!(!should_apply_lmr(mv, 5, 6, false, false, false, true),
+            "The TT move should not be reduced");
+    }
+
+    #[test]
     fn test_lmr_not_applied_shallow() {
         let mv = Move::new(Square::E2, Square::E3, MoveKind::Quiet);
         assert!(!should_apply_lmr(mv, 5, 2, false, false, false, false),

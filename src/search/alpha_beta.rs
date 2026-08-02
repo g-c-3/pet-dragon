@@ -39,10 +39,10 @@ use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
-    pruning::{continuation_hash, futility_margin, lmr_thread_base, nonpawn_hash, pawn_hash, recapture_and_passed_pawn_extension, should_apply_lmp, should_try_probcut, singular_margin_reduction, try_probcut, MAX_EXTENSION},
+    pruning::{continuation_hash, futility_margin, lmr_thread_base, nonpawn_hash, pawn_hash, recapture_and_passed_pawn_extension, should_apply_lmp, should_apply_lmr, should_try_probcut, singular_margin_reduction, try_probcut, MAX_EXTENSION},
     see::{see, see_value_of},
     SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
-    MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
+    MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR,
     MIN_DEPTH_NULL_MOVE, MIN_DEPTH_RAZORING, MIN_DEPTH_SINGULAR,
     draw_score,
 };
@@ -854,12 +854,26 @@ fn alpha_beta_with_excluded(
             // Late Move Reductions
             let mut reduction = 0i32;
 
-            if depth >= MIN_DEPTH_LMR
-                && moves_tried >= 3
-                && is_quiet
-                && !in_check
-                && !gives_check
-            {
+            // D118 (Session 120, review finding #4): this used to be an
+            // inline duplicate of should_apply_lmr()'s logic that was
+            // missing two of its guards (is_killer, is_tt_move) — a
+            // killer move or the TT move could get reduced here even
+            // though the tested, intended-to-be-canonical gate function
+            // says neither should be. Fixed by calling should_apply_lmr()
+            // directly instead of re-deriving its condition by hand a
+            // second time, so the two can never diverge again. Treated
+            // as a bug fix rather than a new gated toggle (unlike D114/
+            // D117) — excluding the TT move and killer moves from LMR is
+            // standard practice (Stockfish does both), and
+            // should_apply_lmr() already existed, fully tested, clearly
+            // documenting the intended gate; the bug was the inline copy
+            // silently omitting two of its checks, not a new idea being
+            // introduced. `is_killer`/`is_tt_move` are cheap: a 2-element
+            // array `.contains()` and a `Move` equality check.
+            let is_killer  = info.killers[ply].contains(&mv);
+            let is_tt_move = mv == tt_move;
+
+            if should_apply_lmr(mv, moves_tried, depth, in_check, gives_check, is_killer, is_tt_move) {
                 // LMR formula (similar to Stockfish). Base constant is
                 // per-thread (Phase 23.2/D49): thread 0 (main thread)
                 // always gets 0.75, unchanged from before — only helper
@@ -2433,6 +2447,30 @@ mod tests {
         );
         assert_ne!(info.best_move, Move::NULL,
             "search must return a legal move on a recapture-heavy position");
+        assert!(score.abs() <= INFINITY);
+    }
+
+    // ── LMR gate now calls should_apply_lmr (D118, Session 120, review finding #4) ──
+
+    #[test]
+    fn test_search_completes_after_lmr_gate_now_calls_should_apply_lmr() {
+        // Sanity/regression check: routing the real LMR gate through
+        // should_apply_lmr() (instead of an inline duplicate missing the
+        // is_killer/is_tt_move guards) must not break search — same
+        // shape as every other wiring-change sanity test in this file.
+        // Deeper than 5 plies specifically so LMR (MIN_DEPTH_LMR) and
+        // both killer moves and a TT move are actually exercised across
+        // iterative deepening, not just present in theory.
+        setup();
+        let mut pos = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 7, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.best_move, Move::NULL,
+            "search must return a legal move after the D118 LMR gate fix");
         assert!(score.abs() <= INFINITY);
     }
 }
