@@ -151,12 +151,7 @@ pub fn iterative_deepening(
 
         // Build result for this depth
         let pv = info.get_pv();
-        let score_for_result = if info.best_score.abs() > 0
-            && info.best_score != -INFINITY {
-            info.best_score
-        } else {
-            best_score
-        };
+        let score_for_result = choose_result_score(info.best_score, best_score);
 
         result = SearchResult {
             best_move,
@@ -413,6 +408,36 @@ pub fn iterative_deepening(
     }
 
     result
+}
+
+// ── Result score selection (D123, Session 125, review finding #7) ─────────────
+
+/// Choose which score to report for a completed depth: prefer
+/// `info_best_score` (the search's own live root score for this depth)
+/// over `fallback_best_score` (the local `best_score` tracker in
+/// `iterative_deepening()`, which only updates when
+/// `info.best_move != Move::NULL` for that depth and so can go stale on
+/// the rare edge case where a completed depth left it `Move::NULL`).
+///
+/// D123 fix: the pre-fix version additionally required
+/// `info_best_score.abs() > 0` before trusting it — `info_best_score`'s
+/// real "unset" sentinel is `-INFINITY` (set in
+/// `SearchInfo::reset_for_search()`), not `0`, so that extra clause
+/// incorrectly treated a genuinely drawn root position (a completely
+/// legitimate score of exactly `0`) as if it were invalid, silently
+/// falling back to the (possibly stale) `fallback_best_score` instead.
+/// Harmless in the common path, where both values already agree — only
+/// diverges on the narrow edge case described above, which is why this
+/// was Low severity — but the fix is unambiguous either way: the only
+/// condition that should disqualify `info_best_score` is it being the
+/// actual sentinel, not its magnitude.
+#[inline]
+fn choose_result_score(info_best_score: i32, fallback_best_score: i32) -> i32 {
+    if info_best_score != -INFINITY {
+        info_best_score
+    } else {
+        fallback_best_score
+    }
 }
 
 // ── Search at a specific depth with aspiration windows ────────────────────────
@@ -956,5 +981,36 @@ mod tests {
         let legal = crate::movegen::generate_moves(&pos);
         assert!(legal.iter().any(|&m| m == result.best_move),
             "TDSE must never hand back an illegal move as the final result");
+    }
+
+    // ── choose_result_score (D123, Session 125, review finding #7) ─────────────
+
+    #[test]
+    fn test_choose_result_score_prefers_info_best_score_when_zero() {
+        // The exact pre-fix bug: info_best_score = 0 (a genuine draw) used
+        // to be wrongly treated as invalid by the old `.abs() > 0` clause,
+        // falling back to fallback_best_score instead. A real draw score
+        // must be trusted and returned as-is.
+        assert_eq!(choose_result_score(0, 999), 0,
+            "a genuine score of 0 (a real draw) must not be treated as \
+             unset — this is exactly the D123 bug");
+    }
+
+    #[test]
+    fn test_choose_result_score_falls_back_only_on_real_sentinel() {
+        // -INFINITY is the actual "unset" sentinel (SearchInfo::reset_for_search)
+        // — this is the only case that should fall back.
+        assert_eq!(choose_result_score(-INFINITY, 42), 42,
+            "must fall back to fallback_best_score only when info_best_score \
+             is the real -INFINITY sentinel");
+    }
+
+    #[test]
+    fn test_choose_result_score_prefers_info_best_score_when_nonzero() {
+        // Sanity check for the common (non-edge-case) path: a normal,
+        // non-zero, non-sentinel info_best_score is always preferred over
+        // the fallback, regardless of the fallback's own value.
+        assert_eq!(choose_result_score(150, -50), 150);
+        assert_eq!(choose_result_score(-150, 50), -150);
     }
 }
