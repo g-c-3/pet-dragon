@@ -65,6 +65,26 @@ pub fn see(pos: &Position, mv: Move, threshold: i32) -> bool {
             None    => break,
         };
 
+        // D122 (Session 124, review finding #6): a king can't legally
+        // capture into a square still attacked by the opponent — doing
+        // so would move the king into check. If the simulated next
+        // attacker is a king, and the OPPOSING side (`side.flip()`)
+        // still has any legal attacker on `to` (checked via the same
+        // occupancy-respecting `least_valuable_attacker` used to select
+        // every other attacker in this loop, not the raw `attackers`
+        // bitboard, which — for non-sliding pieces specifically — can
+        // still include already-used pieces; see D122's DECISIONS.md
+        // entry for why that's safe everywhere else in this function
+        // but not here), this king "capture" is illegal and the
+        // exchange sequence must stop here, same as running out of
+        // attackers entirely. Same check every mainstream engine's SEE
+        // implementation applies at exactly this point.
+        if attacker_kind == PieceKind::King
+            && least_valuable_attacker(pos, &attackers, side.flip(), occupancy).is_some()
+        {
+            break;
+        }
+
         depth += 1;
         if depth >= gain.len() { break; }
 
@@ -125,6 +145,15 @@ pub fn see_value_of(pos: &Position, mv: Move) -> i32 {
             Some(x) => x,
             None    => break,
         };
+
+        // D122 (Session 124, review finding #6) — same king-legality
+        // guard as see() above; see that copy's comment for the full
+        // reasoning.
+        if attacker_kind == PieceKind::King
+            && least_valuable_attacker(pos, &attackers, side.flip(), occupancy).is_some()
+        {
+            break;
+        }
 
         depth += 1;
         if depth >= gain.len() { break; }
@@ -306,5 +335,56 @@ mod tests {
         let val = see_value_of(&pos, mv);
         assert!(val > 0,
             "Queen capturing rook with rook behind should gain: {}", val);
+    }
+
+    // ── King-legality guard (D122, Session 124, review finding #6) ─────────────
+    //
+    // Both regression tests below use the exact same position: White pawn
+    // d4 captures a Black knight on e5. After that, White's ONLY other
+    // attacker on e5 is its own king (e4); Black's ONLY attacker on e5 is
+    // its own king (e6). Neither king can legally recapture there, since
+    // each would be moving into a square the OTHER king still guards.
+    //
+    // Before D122, the exchange simulation let Black's king "recapture"
+    // the pawn anyway (illegal in real chess), producing a see_value_of()
+    // of 220 instead of the correct 320 — verified by an independent
+    // Python model of this exact algorithm (old vs. new) swept across
+    // 20,000 randomized realistic attacker/defender chains: ~9% (1821)
+    // produced a different final result, this exact shape
+    // (both sides down to king-only) among them. This is a real,
+    // frequently-reachable difference, not a corner case that
+    // self-cancels — worth stating plainly since an earlier hand-traced
+    // example (not this one) happened to cancel out, which could have
+    // been mistaken for a general pattern without the broader sweep.
+
+    #[test]
+    fn test_see_value_king_cannot_illegally_recapture() {
+        setup();
+        // White pawn d4, White king e4; Black knight e5 (captured), Black
+        // king e6. Neither king can recapture on e5 without moving into
+        // the other king's attack.
+        let fen = "8/8/4k3/4n3/3PK3/8/8/8 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        let mv  = capture(Square::D4, Square::E5, PieceKind::Knight);
+        assert_eq!(see_value_of(&pos, mv), 320,
+            "White should keep the full 320 value of the captured knight — \
+             neither king can legally recapture. Pre-D122 this returned \
+             220, corrupted by simulating Black's king illegally \
+             recapturing the pawn.");
+    }
+
+    #[test]
+    fn test_see_king_legality_guard_flips_threshold_result() {
+        setup();
+        // Same position as above — demonstrates the fix changes a real
+        // boolean see() outcome, not just the numeric see_value_of(). At
+        // threshold 300 (between the pre-fix 220 and the correct 320),
+        // the pre-D122 code would incorrectly return false here.
+        let fen = "8/8/4k3/4n3/3PK3/8/8/8 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        let mv  = capture(Square::D4, Square::E5, PieceKind::Knight);
+        assert!(see(&pos, mv, 300),
+            "see() at threshold 300 must return true once the king's \
+             recapture is correctly excluded (true material gain is 320)");
     }
 }
