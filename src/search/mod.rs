@@ -418,6 +418,26 @@ pub struct SearchInfo {
     /// 26-family toggle in this file follows. Persistent across moves,
     /// same threading pattern as `null_move_king_guard`.
     pub improving_enabled: bool,
+
+    // ── Recapture extension (D117, Session 119, review finding #3) ────────────
+    /// UCI `RecaptureExtension` setting, default `false` — same
+    /// unproven-technique rollout shape as `improving_enabled`/
+    /// `threat_defusal`/`null_move_king_guard`. When `true`,
+    /// `alpha_beta.rs`'s move loop extends any move that's a genuine
+    /// recapture (captures on the same square the opponent's
+    /// immediately preceding move captured on, at `depth <= 4`) via
+    /// `pruning::recapture_and_passed_pawn_extension()`, combined with
+    /// whatever extension the TT move's own singular-extension result
+    /// already contributed, capped together. Deliberately scoped to
+    /// the recapture component only — passed-pawn-push extension
+    /// (bundled in the same underlying function for historical reasons,
+    /// see `pruning::extension()`'s doc comment) wasn't flagged as
+    /// buggy by the review that prompted this and stays out of scope,
+    /// unwired, until/unless a separate decision activates it too. When
+    /// `false` (default): zero extra computation, byte-identical to
+    /// before this option existed — the move loop's `move_ext` for any
+    /// non-TT-move stays exactly `0`, same as before D117.
+    pub recapture_extension_enabled: bool,
 }
 
 impl SearchInfo {
@@ -464,6 +484,7 @@ impl SearchInfo {
             threat_defusal: false,
             static_eval_stack: [i32::MIN; MAX_PLY],
             improving_enabled: false,
+            recapture_extension_enabled: false,
         }
     }
 

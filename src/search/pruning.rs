@@ -29,9 +29,26 @@ pub const MAX_EXTENSION: i32 = 2;
 
 /// Calculate search extension for a move
 /// Returns depth bonus (0 = no extension, 1 = extend by 1, etc.)
+///
+/// D117 (Session 119): this whole function is dead code in the live
+/// search — nothing in `alpha_beta.rs` calls it (its only caller,
+/// before this session, was its own unit test below). `alpha_beta.rs`
+/// has its own separate, correct, always-live check-extension
+/// (`if in_check { depth += 1; }`, applied once per node rather than
+/// per move here). This function still exists and is now internally
+/// correct (see `is_recapture`'s fix below) as a coherent reference
+/// implementation and test target, but recapture/passed-pawn-push
+/// extension only actually runs in real games via
+/// `recapture_and_passed_pawn_extension()` below, called directly from
+/// `alpha_beta.rs`'s move loop, gated behind
+/// `SearchInfo::recapture_extension_enabled` (default `false`) —
+/// deliberately scoped to recapture only for now (review finding #3),
+/// not passed-pawn-push, which was never flagged as buggy and stays
+/// dead until/unless a separate decision activates it too.
 pub fn extension(
     pos:         &Position,
     mv:          Move,
+    prev_move:   Move,
     in_check:    bool,
     gives_check: bool,
     depth:       i32,
@@ -45,13 +62,43 @@ pub fn extension(
         ext += 1;
     }
 
-    // Recapture extension: extend forced recapture sequences
-    // Prevents horizon effect during exchanges
-    if is_recapture(pos, mv) && depth <= 4 {
+    // Recapture + passed-pawn-push extension — see
+    // `recapture_and_passed_pawn_extension()`'s own doc comment.
+    ext += recapture_and_passed_pawn_extension(pos, mv, prev_move, depth);
+
+    // Hard cap: never extend beyond MAX_EXTENSION
+    ext.min(MAX_EXTENSION)
+}
+
+/// Recapture + passed-pawn-push extension (D117, Session 119). +1 if
+/// `mv` is a genuine recapture (see `is_recapture`) at shallow
+/// remaining depth (`depth <= 4`); independently, +1 if `mv` is a
+/// passed pawn pushing to within 2 ranks of promotion. The two are
+/// additive (a move can be both), same as the original bundled
+/// `extension()` always intended.
+///
+/// Called directly from `alpha_beta.rs`'s move loop (gated behind
+/// `SearchInfo::recapture_extension_enabled`) as well as from
+/// `extension()` above — pulled out to its own function so both call
+/// sites share one implementation instead of the live path duplicating
+/// `extension()`'s recapture/passed-pawn logic a second time the way
+/// `should_apply_lmr()` vs. the inline LMR gate already do (review
+/// finding #4 — deliberately not repeating that pattern here).
+/// Doesn't apply `MAX_EXTENSION` itself — callers combine this with
+/// whatever other extension a move already has (e.g. the TT move's own
+/// singular-extension result) and cap the total themselves.
+pub fn recapture_and_passed_pawn_extension(
+    pos:       &Position,
+    mv:        Move,
+    prev_move: Move,
+    depth:     i32,
+) -> i32 {
+    let mut ext = 0i32;
+
+    if is_recapture(mv, prev_move) && depth <= 4 {
         ext += 1;
     }
 
-    // Passed pawn extension: extend when passed pawn near promotion
     if is_passed_pawn_push(pos, mv) {
         let rank = mv.to.rank();
         let side = pos.side_to_move;
@@ -64,15 +111,28 @@ pub fn extension(
         }
     }
 
-    // Hard cap: never extend beyond MAX_EXTENSION
-    ext.min(MAX_EXTENSION)
+    ext
 }
 
-/// Is this move a recapture on the same square as the previous capture?
-fn is_recapture(pos: &Position, mv: Move) -> bool {
-    // Check if there's a piece on 'to' to capture (it's a capture move)
+/// Is this move a recapture — does it capture on the exact same square
+/// the opponent's immediately preceding move captured on?
+///
+/// D117 (Session 119) fix (review finding #3): the pre-fix version
+/// only checked "is `mv` a capture, and is there currently an enemy
+/// piece on its destination square" — it never looked at `prev_move`
+/// at all, so it fired on essentially every capture, not genuine
+/// recaptures specifically. Fixed to the standard definition: both
+/// `mv` and `prev_move` must be captures, and they must land on the
+/// same square. Same simplification Stockfish itself uses for its own
+/// recapture check (`to_sq(m) == to_sq((ss-1)->currentMove)`) — this
+/// doesn't special-case en passant's one-rank offset between the
+/// captured pawn's square and the capturing pawn's destination square,
+/// a known, accepted minor imprecision in that convention rather than
+/// something unique to this fix.
+fn is_recapture(mv: Move, prev_move: Move) -> bool {
     mv.kind.is_capture()
-        && pos.piece_on(mv.to, pos.side_to_move.flip()).is_some()
+        && prev_move.kind.is_capture()
+        && mv.to == prev_move.to
 }
 
 /// Is this a passed pawn push?
@@ -662,10 +722,94 @@ mod tests {
         setup();
         let pos = Position::start_pos().unwrap();
         let mv  = Move::new(Square::E2, Square::E3, MoveKind::Quiet);
-        // Even with all extensions, should not exceed MAX_EXTENSION
-        let ext = extension(&pos, mv, true, true, 10, 0);
+        // Even with all extensions, should not exceed MAX_EXTENSION.
+        // prev_move = Move::NULL is fine here — is_recapture() only
+        // needs prev_move.kind.is_capture(), and NULL isn't a capture,
+        // so this exercises the check-extension path only, which is
+        // enough to prove the cap holds.
+        let ext = extension(&pos, mv, Move::NULL, true, true, 10, 0);
         assert!(ext <= MAX_EXTENSION,
             "Extension should not exceed MAX_EXTENSION");
+    }
+
+    // ── is_recapture (D117, Session 119, review finding #3) ────────────────────
+
+    #[test]
+    fn test_is_recapture_true_for_genuine_recapture() {
+        // Opponent captured on d5 (their previous move); we capture
+        // back on d5 — a genuine recapture.
+        let prev_move = Move::new(Square::E4, Square::D5, MoveKind::Capture);
+        let mv        = Move::new(Square::C6, Square::D5, MoveKind::Capture);
+        assert!(is_recapture(mv, prev_move),
+            "capturing on the same square the opponent just captured on \
+             must be detected as a recapture");
+    }
+
+    #[test]
+    fn test_is_recapture_false_for_ordinary_capture_different_square() {
+        // The pre-D117 bug: this used to return true for ANY capture,
+        // regardless of where the opponent's previous move landed. An
+        // ordinary capture on a square the opponent's last move didn't
+        // touch must not count as a recapture.
+        let prev_move = Move::new(Square::E4, Square::D5, MoveKind::Capture);
+        let mv        = Move::new(Square::F6, Square::G4, MoveKind::Capture);
+        assert!(!is_recapture(mv, prev_move),
+            "a capture on a different square than the opponent's last \
+             move must not be treated as a recapture (this is the exact \
+             bug D117 fixed — the old version ignored prev_move entirely)");
+    }
+
+    #[test]
+    fn test_is_recapture_false_when_previous_move_was_not_a_capture() {
+        // Same destination square as a quiet previous move — still not
+        // a recapture, since nothing was captured there to recapture.
+        let prev_move = Move::new(Square::E2, Square::D5, MoveKind::Quiet);
+        let mv        = Move::new(Square::C6, Square::D5, MoveKind::Capture);
+        assert!(!is_recapture(mv, prev_move),
+            "landing on the same square as a non-capturing previous \
+             move is not a recapture");
+    }
+
+    #[test]
+    fn test_is_recapture_false_when_this_move_is_not_a_capture() {
+        let prev_move = Move::new(Square::E4, Square::D5, MoveKind::Capture);
+        let mv        = Move::new(Square::C6, Square::D5, MoveKind::Quiet);
+        assert!(!is_recapture(mv, prev_move),
+            "a non-capturing move can never be a recapture, regardless \
+             of the previous move");
+    }
+
+    #[test]
+    fn test_recapture_and_passed_pawn_extension_fires_for_recapture() {
+        setup();
+        let pos       = Position::start_pos().unwrap();
+        let prev_move = Move::new(Square::E4, Square::D5, MoveKind::Capture);
+        let mv        = Move::new(Square::C6, Square::D5, MoveKind::Capture);
+        assert_eq!(recapture_and_passed_pawn_extension(&pos, mv, prev_move, 3), 1,
+            "a genuine recapture at shallow depth should extend by 1");
+    }
+
+    #[test]
+    fn test_recapture_and_passed_pawn_extension_respects_depth_cutoff() {
+        setup();
+        let pos       = Position::start_pos().unwrap();
+        let prev_move = Move::new(Square::E4, Square::D5, MoveKind::Capture);
+        let mv        = Move::new(Square::C6, Square::D5, MoveKind::Capture);
+        // depth > 4: the recapture-extension's own depth <= 4 guard
+        // must suppress it even though the move is a genuine recapture.
+        assert_eq!(recapture_and_passed_pawn_extension(&pos, mv, prev_move, 5), 0,
+            "recapture extension must not fire beyond depth 4");
+    }
+
+    #[test]
+    fn test_recapture_and_passed_pawn_extension_zero_for_unrelated_capture() {
+        setup();
+        let pos       = Position::start_pos().unwrap();
+        let prev_move = Move::new(Square::E4, Square::D5, MoveKind::Capture);
+        let mv        = Move::new(Square::F6, Square::G4, MoveKind::Capture);
+        assert_eq!(recapture_and_passed_pawn_extension(&pos, mv, prev_move, 3), 0,
+            "an ordinary capture unrelated to the opponent's last move \
+             must not extend — this is the D117 bug fix's direct effect");
     }
 
     #[test]

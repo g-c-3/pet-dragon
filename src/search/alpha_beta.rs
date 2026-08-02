@@ -39,7 +39,7 @@ use crate::position::Position;
 use crate::search::{
     ordering::{next_move, score_captures, score_moves,
                update_ordering_on_cutoff},
-    pruning::{continuation_hash, futility_margin, lmr_thread_base, nonpawn_hash, pawn_hash, should_apply_lmp, should_try_probcut, singular_margin_reduction, try_probcut},
+    pruning::{continuation_hash, futility_margin, lmr_thread_base, nonpawn_hash, pawn_hash, recapture_and_passed_pawn_extension, should_apply_lmp, should_try_probcut, singular_margin_reduction, try_probcut, MAX_EXTENSION},
     see::{see, see_value_of},
     SearchInfo, INFINITY, MATE_SCORE, MATE_THRESHOLD,
     MAX_PLY, MIN_DEPTH_FUTILITY, MIN_DEPTH_IIR, MIN_DEPTH_LMR,
@@ -764,7 +764,20 @@ fn alpha_beta_with_excluded(
 
         // Singular/multi-cut/negative extension (D59) — only the TT move
         // itself gets it, and it can now be negative (negative extension).
-        let move_ext = if mv == tt_move { tt_move_extension } else { 0 };
+        let mut move_ext = if mv == tt_move { tt_move_extension } else { 0 };
+
+        // Recapture extension (D117, Session 119, review finding #3) —
+        // applies to ANY move, not just the TT move, unlike the
+        // singular-extension logic above. Gated behind
+        // info.recapture_extension_enabled (default false, see
+        // SearchInfo's doc comment); when disabled this is a no-op and
+        // move_ext is untouched, byte-identical to before D117. Capped
+        // together with whatever tt_move_extension already contributed
+        // — MAX_EXTENSION is a per-move total, not per-mechanism.
+        if info.recapture_extension_enabled {
+            move_ext += recapture_and_passed_pawn_extension(pos, mv, prev_move, depth);
+            move_ext = move_ext.clamp(-2, MAX_EXTENSION);
+        }
 
         let is_capture   = mv.kind.is_capture();
         let is_promotion = mv.kind.is_promotion();
@@ -2369,6 +2382,57 @@ mod tests {
         );
         assert_ne!(info.best_move, Move::NULL,
             "search must return a legal move with improving_enabled on");
+        assert!(score.abs() <= INFINITY);
+    }
+
+    // ── Recapture extension (D117, Session 119, review finding #3) ─────────────
+
+    #[test]
+    fn test_recapture_extension_enabled_defaults_to_false() {
+        let info = SearchInfo::new();
+        assert!(!info.recapture_extension_enabled,
+            "recapture_extension_enabled must default to false — \
+             new/unproven technique (D117), same rollout shape as \
+             improving_enabled/threat_defusal/null_move_king_guard");
+    }
+
+    #[test]
+    fn test_search_completes_with_recapture_extension_enabled() {
+        setup();
+        // Sanity check: enabling the new toggle must not panic, hang, or
+        // return a bogus/no move on an ordinary position — same shape as
+        // test_search_completes_with_improving_enabled just above.
+        let mut pos = Position::start_pos().unwrap();
+        let mut info = SearchInfo::new();
+        info.recapture_extension_enabled = true;
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 5, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.best_move, Move::NULL,
+            "search must return a legal move with recapture_extension_enabled on");
+        assert!(score.abs() <= INFINITY);
+    }
+
+    #[test]
+    fn test_search_completes_on_recapture_heavy_position_with_extension_enabled() {
+        // A position with a pending exchange sequence on d5 — exercises
+        // the actual recapture-extension code path (not just "search
+        // doesn't crash on the start position"), since the first reply
+        // in this line is very likely to be a genuine recapture on d5.
+        setup();
+        let fen = "r1bqkbnr/ppp2ppp/2n5/3pp3/3PP3/2N5/PPP2PPP/R1BQKBNR w KQkq - 0 4";
+        let mut pos = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        info.recapture_extension_enabled = true;
+        info.time_allocated_ms = 60_000;
+        let tt = TranspositionTable::new(16);
+        let score = alpha_beta(
+            &mut pos, 6, -INFINITY, INFINITY, 0, true, &mut info, &tt, Move::NULL,
+        );
+        assert_ne!(info.best_move, Move::NULL,
+            "search must return a legal move on a recapture-heavy position");
         assert!(score.abs() <= INFINITY);
     }
 }
