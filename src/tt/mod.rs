@@ -278,11 +278,23 @@ impl TranspositionTable {
     // We store mate scores relative to current ply, adjust on retrieval.
 
     /// Adjust score before storing in TT (convert from root-relative to ply-relative)
+    ///
+    /// D119 (Session 121, review finding #2): uses the single shared
+    /// `crate::search::MATE_THRESHOLD` (900,000) as of this fix — before
+    /// it, this module defined its own separate `MATE_THRESHOLD =
+    /// 30_000`, independent of and much smaller than the real one. Real
+    /// impact was assessed as low but non-zero: Pet Dragon's eval
+    /// essentially never reaches scores anywhere near 30,000 in normal
+    /// play, so the "ordinary score misclassified as a mate score"
+    /// scenario the report raised was mostly theoretical — but a
+    /// duplicated magic number with two very different values for the
+    /// same concept is a real correctness landmine regardless of how
+    /// often it's actually hit, and worth fixing on that basis alone.
     #[inline]
     pub fn score_to_tt(score: i32, ply: i32) -> i32 {
-        if score >= Self::MATE_THRESHOLD {
+        if score >= crate::search::MATE_THRESHOLD {
             score + ply
-        } else if score <= -Self::MATE_THRESHOLD {
+        } else if score <= -crate::search::MATE_THRESHOLD {
             score - ply
         } else {
             score
@@ -292,17 +304,14 @@ impl TranspositionTable {
     /// Adjust score after retrieving from TT (convert from ply-relative to root-relative)
     #[inline]
     pub fn score_from_tt(score: i32, ply: i32) -> i32 {
-        if score >= Self::MATE_THRESHOLD {
+        if score >= crate::search::MATE_THRESHOLD {
             score - ply
-        } else if score <= -Self::MATE_THRESHOLD {
+        } else if score <= -crate::search::MATE_THRESHOLD {
             score + ply
         } else {
             score
         }
     }
-
-    /// Threshold above which a score is considered a mate score
-    pub const MATE_THRESHOLD: i32 = 30_000;
 
     // ── Statistics ────────────────────────────────────────────────────────────
 
@@ -456,8 +465,11 @@ mod tests {
 
     #[test]
     fn test_mate_score_adjustment() {
-        // Mate in 3 from root (score = MATE - 3)
-        let mate_score = TranspositionTable::MATE_THRESHOLD + 100;
+        // Mate in 3 from root (score = MATE - 3). D119: now uses the
+        // single shared crate::search::MATE_THRESHOLD (900,000) —
+        // before the fix this used the module's own separate, much
+        // smaller 30_000 constant.
+        let mate_score = crate::search::MATE_THRESHOLD + 100;
 
         // Store: adjust for ply 2
         let stored = TranspositionTable::score_to_tt(mate_score, 2);
@@ -467,6 +479,25 @@ mod tests {
         let retrieved = TranspositionTable::score_from_tt(stored, 2);
         assert_eq!(retrieved, mate_score,
             "Mate score should round-trip through TT adjustment");
+    }
+
+    #[test]
+    fn test_score_to_tt_no_longer_uses_stale_local_threshold() {
+        // D119 (Session 121, review finding #2) regression guard: before
+        // this fix, a score of e.g. 50,000 (well above the old, wrong
+        // local MATE_THRESHOLD = 30_000, but nowhere near a real mate
+        // score) would have been incorrectly ply-adjusted as if it were
+        // a mate score. With the shared, correct 900,000 threshold, an
+        // ordinary large-but-not-mate score in that gap must pass
+        // through unchanged.
+        let ordinary_large_score = 50_000;
+        assert!(ordinary_large_score < crate::search::MATE_THRESHOLD,
+            "test assumes this score is below the real mate threshold");
+        let stored = TranspositionTable::score_to_tt(ordinary_large_score, 5);
+        assert_eq!(stored, ordinary_large_score,
+            "a score below the real MATE_THRESHOLD must pass through \
+             score_to_tt unchanged, not get ply-adjusted as if it were \
+             a mate score");
     }
 
     #[test]
