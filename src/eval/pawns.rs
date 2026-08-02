@@ -27,7 +27,7 @@
 // ============================================================================
 
 use crate::bitboard::Bitboard;
-use crate::eval::material::{eg, s, taper};
+use crate::eval::material::{s, taper};
 use crate::position::Position;
 use crate::types::{Color, PieceKind, Square};
 
@@ -389,6 +389,12 @@ mod tests {
     use crate::bitboard::magic::init_magic;
     use crate::bitboard::masks::init_masks;
     use crate::eval::material::game_phase;
+    // D121 (Session 123): eg() is only used inside this test module —
+    // same "release build excludes #[cfg(test)] entirely" reasoning as
+    // alpha_beta.rs's MoveKind fix in this same session, see there for
+    // the full explanation of why this only ever warned in
+    // `cargo build --release`, never in `cargo test`.
+    use crate::eval::material::eg;
     use crate::position::Position;
     use crate::position::zobrist::init_zobrist;
 
