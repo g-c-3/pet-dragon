@@ -49,7 +49,7 @@ use crate::search::{
 #[cfg(test)]
 use crate::search::DRAW_SCORE;
 use crate::tt::{Bound, TranspositionTable};
-use crate::types::{Color, Move, MoveKind, PieceKind, Square};
+use crate::types::{Color, Move, PieceKind, Square};
 
 // ── Null-move flip helper (D108) ────────────────────────────────────────────
 //
@@ -1269,6 +1269,16 @@ mod tests {
     use crate::search::SearchInfo;
     use crate::tt::TranspositionTable;
     use crate::types::Color;
+    // D121 (Session 123): MoveKind is only used inside this test
+    // module (all real usages are test fixtures like
+    // Move::new(..., MoveKind::Quiet)) — a release build excludes this
+    // whole #[cfg(test)] module, which is exactly why the top-level
+    // `use crate::types::{..., MoveKind, ...}` (removed) showed up as
+    // an unused-import warning only in `cargo build --release`, never
+    // in `cargo test` (this module, and its `use super::*` re-export
+    // of the parent's imports, doesn't exist in a non-test build at
+    // all — no contradiction, just two different compilation configs).
+    use crate::types::MoveKind;
 
     fn setup() {
         init_masks();
