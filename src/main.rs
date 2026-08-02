@@ -212,9 +212,11 @@ struct EngineState {
     /// comment for the full reasoning.
     improving_enabled: bool,
 
-    /// UCI `RecaptureExtension` setting, default `false`. D117 (Session
-    /// 119) — same threading pattern as `improving_enabled` above. See
-    /// `SearchInfo::recapture_extension_enabled`'s doc comment.
+    /// UCI `RecaptureExtension` setting, default `true` as of D125
+    /// (Session 127, Gokul's explicit call, skipping the standard A/B —
+    /// see `SearchInfo::recapture_extension_enabled`'s doc comment and
+    /// DECISIONS.md D125). D117 (Session 119) — same threading pattern
+    /// as `improving_enabled` above.
     recapture_extension_enabled: bool,
 }
 
@@ -254,7 +256,7 @@ impl EngineState {
             singular_multicut_enabled: true,
             threat_defusal: false,
             improving_enabled: false,
-            recapture_extension_enabled: false,
+            recapture_extension_enabled: true,
             limit_strength: false,
             elo: pet_dragon_lib::search::skill::ELO_TABLE[pet_dragon_lib::search::skill::MAX_SKILL_LEVEL as usize],
         }
@@ -482,10 +484,12 @@ fn cmd_uci() {
     // flip is ever considered. See DECISIONS.md D114.
     println!("option name ImprovingHeuristic type check default false");
     // D117 (Session 119, review finding #3): recapture extension for
-    // any move (not just the TT move), default false — same unproven-
-    // technique rollout shape as the others above. See DECISIONS.md
-    // D117.
-    println!("option name RecaptureExtension type check default false");
+    // any move (not just the TT move). Default flipped to `true` by
+    // D125 (Session 127) — Gokul's explicit call, ahead of this
+    // project's usual SPRT-style A/B step (the only data point at flip
+    // time was D117's flat n=20 functional check). See DECISIONS.md
+    // D117 and D125.
+    println!("option name RecaptureExtension type check default true");
     println!();
     println!("uciok");
 }
@@ -1649,13 +1653,16 @@ mod tests {
     }
 
     #[test]
-    fn test_recapture_extension_option_defaults_to_false() {
+    fn test_recapture_extension_option_defaults_to_true() {
         setup();
         let state = EngineState::new();
-        assert!(!state.recapture_extension_enabled,
-            "RecaptureExtension should default to false — new/unproven \
-             technique, same rollout shape as ImprovingHeuristic/ \
-             ThreatDefusal/NullMoveKingGuard (D117, Session 119)");
+        // D125 (Session 127): flipped to default true by explicit
+        // decision, ahead of this project's usual SPRT-style A/B step
+        // — see DECISIONS.md D125 for the full note on why the standard
+        // gated-rollout discipline was skipped here.
+        assert!(state.recapture_extension_enabled,
+            "RecaptureExtension should default to true as of D125 \
+             (Session 127)");
     }
 
     #[test]
