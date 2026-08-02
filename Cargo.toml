@@ -1,6 +1,6 @@
 [package]
 name = "pet_dragon"
-version = "0.1.0"
+version = "0.9.9"
 edition = "2021"
 authors = ["Gokul Chandar"]
 description = "Pet Dragon — world's first original chess variant engine in Rust"
