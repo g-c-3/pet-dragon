@@ -179,8 +179,16 @@ fn play_one_game(
             return GameOutcome::Draw;
         }
 
+        // Bug fix (confirmed 2026-08-03, external bug report):
+        // make_move_with_history() already pushes to game_history
+        // internally — the extra push_game_history() call here was
+        // double-counting every position after the first, causing
+        // is_threefold_repetition()'s raw count check (`>= 3`) to trip
+        // a full occurrence early (2 real occurrences x 2 pushes each
+        // = a count of 4). That pulled every match's measured Elo delta
+        // toward 50% via spurious early repetition draws, in both
+        // directions.
         pos.make_move_with_history(result.best_move);
-        pos.push_game_history();
         plies += 1;
     }
 }
