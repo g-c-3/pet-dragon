@@ -272,18 +272,58 @@ fn pyrrhic_piece_to_pd(p: pyrrhic_rs::Piece) -> PieceKind {
 mod tests {
     use super::*;
 
-    /// SyzygyProber::new must never panic, regardless of path validity.
+    /// `SyzygyProber::new()`, and the castling-rights guard on both probe
+    /// entry points, in a single test.
     ///
-    /// NOTE: pyrrhic-rs's `TableBases::new()` does not validate the search
-    /// path against the filesystem at init time — observed CI behavior shows
-    /// it returns `Ok` with `max_pieces() == 7` (the library's full ceiling)
-    /// even for a nonexistent directory. Real tablebase absence only
-    /// surfaces later, as a probe failure (`probe_wdl`/`probe_root` return
-    /// `None`), which is untestable here without bundling real `.rtbw`
-    /// files. This test only guards against construction-time panics.
+    /// CI bug fix (confirmed 2026-08-03, session 130): this used to be
+    /// three separate tests, each calling `SyzygyProber::new()`. That's
+    /// unsafe — `pyrrhic_rs::TableBases` is a process-wide singleton
+    /// (DECISIONS.md D17), so only the *first* `new()` call across the
+    /// whole test binary succeeds; every later call returns
+    /// `Err(AlreadyInitialized)` regardless of path. `cargo test` runs
+    /// tests concurrently by default, so which call "wins" is a race —
+    /// any test that `.unwrap()`s its own call is flaky by construction.
+    /// This was caught by a real CI run: `test_probe_wdl_refuses_...`
+    /// failed with exactly this `AlreadyInitialized` panic while its
+    /// sibling `test_probe_root_refuses_...` (same code, same call)
+    /// happened to win the race and passed. Consolidating to one `new()`
+    /// call for the whole module removes the race outright rather than
+    /// papering over one specific ordering.
+    ///
+    /// NOTE (carried over from the original construction-only test):
+    /// pyrrhic-rs's `TableBases::new()` does not validate the search path
+    /// against the filesystem at init time — observed CI behavior shows
+    /// it returns `Ok` with `max_pieces() == 7` (the library's full
+    /// ceiling) even for a nonexistent directory. Real tablebase absence
+    /// only surfaces later, as a probe failure (`probe_wdl`/`probe_root`
+    /// return `None`), which is untestable here without bundling real
+    /// `.rtbw` files.
     #[test]
-    fn test_syzygy_new_does_not_panic() {
-        let _ = SyzygyProber::new("/nonexistent/syzygy/path/for/test");
+    fn test_syzygy_prober_construction_and_castling_guard() {
+        crate::bitboard::masks::init_masks();
+        crate::bitboard::magic::init_magic();
+        crate::position::zobrist::init_zobrist();
+
+        // Construction must not panic, regardless of path validity.
+        let tb = SyzygyProber::new("/nonexistent/syzygy/path/for/test")
+            .expect("SyzygyProber::new() should return Ok even for a \
+                     nonexistent path (pyrrhic-rs doesn't validate the \
+                     path at init time) — this is the ONLY call to \
+                     SyzygyProber::new() in this test binary; see the \
+                     doc comment above for why that matters");
+
+        // Low piece count (well within any real tablebase's range) but
+        // White still has kingside castling rights.
+        let pos = Position::from_fen("4k3/8/8/8/8/8/8/4K2R w K - 0 1").unwrap();
+        assert!(has_castling_rights(&pos), "sanity: rights present in this FEN");
+
+        assert_eq!(tb.probe_wdl(&pos), None,
+            "probe_wdl must return None while castling rights remain, \
+             even before considering whether real TB files are loaded");
+        assert_eq!(tb.probe_root(&pos), None,
+            "probe_root must return None while castling rights remain, \
+             so the engine never plays a TB-suggested move that ignores \
+             a legal castling option");
     }
 
     /// extract_position_bits must produce non-overlapping white/black masks
@@ -331,41 +371,6 @@ mod tests {
             Position::from_fen("8/8/8/4k3/8/8/4K3/R7 w - - 0 1").unwrap();
         assert!(!has_castling_rights(&no_rights),
             "position with '-' castling field should report no rights");
-    }
-
-    /// probe_wdl must refuse to probe (return None) whenever any castling
-    /// right remains, before ever reaching pyrrhic-rs — regardless of
-    /// piece count or whether real tablebase files are loaded.
-    #[test]
-    fn test_probe_wdl_refuses_when_castling_rights_present() {
-        crate::bitboard::masks::init_masks();
-        crate::bitboard::magic::init_magic();
-        crate::position::zobrist::init_zobrist();
-
-        // Low piece count (well within any real tablebase's range) but
-        // White still has kingside castling rights.
-        let pos = Position::from_fen("4k3/8/8/8/8/8/8/4K2R w K - 0 1").unwrap();
-        assert!(has_castling_rights(&pos), "sanity: rights present in this FEN");
-
-        let tb = SyzygyProber::new("/nonexistent/syzygy/path/for/test").unwrap();
-        assert_eq!(tb.probe_wdl(&pos), None,
-            "probe_wdl must return None while castling rights remain, \
-             even before considering whether real TB files are loaded");
-    }
-
-    /// probe_root must refuse to probe (return None) under the same
-    /// condition, so the engine never plays a TB-suggested move that
-    /// ignores a legal castling option.
-    #[test]
-    fn test_probe_root_refuses_when_castling_rights_present() {
-        crate::bitboard::masks::init_masks();
-        crate::bitboard::magic::init_magic();
-        crate::position::zobrist::init_zobrist();
-
-        let pos = Position::from_fen("4k3/8/8/8/8/8/8/4K2R w K - 0 1").unwrap();
-        let tb = SyzygyProber::new("/nonexistent/syzygy/path/for/test").unwrap();
-        assert_eq!(tb.probe_root(&pos), None,
-            "probe_root must return None while castling rights remain");
     }
 
     /// TB_WIN_SCORE must be above any normal eval but below mate threshold.
