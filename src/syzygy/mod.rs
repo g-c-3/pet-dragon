@@ -143,6 +143,9 @@ impl SyzygyProber {
         if pos.halfmove_clock > 0 {
             return None; // 50-move clock makes WDL result unreliable
         }
+        if has_castling_rights(pos) {
+            return None; // Syzygy tables don't encode castling — see below
+        }
         let (white, black, kings, queens, rooks, bishops, knights, pawns, ep, turn) =
             extract_position_bits(pos);
         match self.tb.probe_wdl(
@@ -164,6 +167,9 @@ impl SyzygyProber {
     /// `None` if the probe fails or the position has more pieces than the
     /// loaded tablebase files support.
     pub fn probe_root(&self, pos: &Position) -> Option<(u8, u8, PieceKind, i32)> {
+        if has_castling_rights(pos) {
+            return None; // Syzygy tables don't encode castling — see below
+        }
         let (white, black, kings, queens, rooks, bishops, knights, pawns, ep, turn) =
             extract_position_bits(pos);
         let rule50 = pos.halfmove_clock;
@@ -184,6 +190,27 @@ impl SyzygyProber {
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Does `pos` still have any castling right, for either color?
+///
+/// Bug fix (confirmed 2026-08-03, external bug report): Syzygy tables are
+/// generated under the fixed assumption that castling is never possible —
+/// the underlying retrograde-analysis tables don't encode castling rights
+/// at all, so every mainstream Syzygy-consuming engine (Stockfish
+/// included) gates every probe on zero remaining castling rights. Pet
+/// Dragon never did this at either call site. `ENGINE_ARCHITECTURE.md`
+/// previously claimed this was safe because "castling rights are gone by
+/// the time few enough pieces remain for tablebase lookup" — that
+/// assumption has no backing decision or test and is contradicted by the
+/// project's own data (roughly 26% of games retain at least one castling
+/// right, with no game rule forcing rights to clear before material thins
+/// into tablebase range; a king and its never-moved rook can easily
+/// survive untouched into a 5-7 piece endgame). Centralized here (rather
+/// than duplicated at each call site) so a future third call site can't
+/// reintroduce the gap.
+fn has_castling_rights(pos: &Position) -> bool {
+    pos.castling.has_any(Color::White) || pos.castling.has_any(Color::Black)
+}
 
 /// Extract the raw `u64` bitboard values that pyrrhic-rs expects from a `Position`.
 ///
@@ -285,6 +312,60 @@ mod tests {
         // Cursed win < normal win; blessed loss > normal loss
         assert!(wdl_to_score(WdlProbeResult::CursedWin)  < TB_WIN_SCORE);
         assert!(wdl_to_score(WdlProbeResult::BlessedLoss) > -TB_WIN_SCORE);
+    }
+
+    /// has_castling_rights must detect a right on either side, and be
+    /// false once both sides have none.
+    #[test]
+    fn test_has_castling_rights() {
+        crate::bitboard::masks::init_masks();
+        crate::bitboard::magic::init_magic();
+        crate::position::zobrist::init_zobrist();
+
+        let with_rights = Position::start_pos().unwrap();
+        assert!(has_castling_rights(&with_rights),
+            "starting position has castling rights for both sides");
+
+        // K+R vs K endgame FEN with no castling rights remaining.
+        let no_rights =
+            Position::from_fen("8/8/8/4k3/8/8/4K3/R7 w - - 0 1").unwrap();
+        assert!(!has_castling_rights(&no_rights),
+            "position with '-' castling field should report no rights");
+    }
+
+    /// probe_wdl must refuse to probe (return None) whenever any castling
+    /// right remains, before ever reaching pyrrhic-rs — regardless of
+    /// piece count or whether real tablebase files are loaded.
+    #[test]
+    fn test_probe_wdl_refuses_when_castling_rights_present() {
+        crate::bitboard::masks::init_masks();
+        crate::bitboard::magic::init_magic();
+        crate::position::zobrist::init_zobrist();
+
+        // Low piece count (well within any real tablebase's range) but
+        // White still has kingside castling rights.
+        let pos = Position::from_fen("4k3/8/8/8/8/8/8/4K2R w K - 0 1").unwrap();
+        assert!(has_castling_rights(&pos), "sanity: rights present in this FEN");
+
+        let tb = SyzygyProber::new("/nonexistent/syzygy/path/for/test").unwrap();
+        assert_eq!(tb.probe_wdl(&pos), None,
+            "probe_wdl must return None while castling rights remain, \
+             even before considering whether real TB files are loaded");
+    }
+
+    /// probe_root must refuse to probe (return None) under the same
+    /// condition, so the engine never plays a TB-suggested move that
+    /// ignores a legal castling option.
+    #[test]
+    fn test_probe_root_refuses_when_castling_rights_present() {
+        crate::bitboard::masks::init_masks();
+        crate::bitboard::magic::init_magic();
+        crate::position::zobrist::init_zobrist();
+
+        let pos = Position::from_fen("4k3/8/8/8/8/8/8/4K2R w K - 0 1").unwrap();
+        let tb = SyzygyProber::new("/nonexistent/syzygy/path/for/test").unwrap();
+        assert_eq!(tb.probe_root(&pos), None,
+            "probe_root must return None while castling rights remain");
     }
 
     /// TB_WIN_SCORE must be above any normal eval but below mate threshold.
