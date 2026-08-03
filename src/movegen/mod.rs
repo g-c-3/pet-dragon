@@ -148,8 +148,14 @@ pub fn generate_captures(pos: &Position) -> MoveList {
     let mut pseudo = MoveList::new();
     let color = pos.side_to_move;
 
-    // Pawn captures and promotions
-    pawns::generate_pawn_captures(pos, color, &mut pseudo);
+    // Pawn tactical moves: captures, en passant, promotion captures, and
+    // quiet promotions. Deliberately NOT pawns::generate_pawn_captures()
+    // here — that function is shared with generate_pawn_moves() (full
+    // pseudo-legal generation) and must stay quiet-promotion-free to
+    // avoid double-generating them there. See the doc comment on
+    // pawns::generate_pawn_tactical() for the regression this split
+    // avoids (confirmed 2026-08-03, session 131, real CI perft failure).
+    pawns::generate_pawn_tactical(pos, color, &mut pseudo);
 
     // Piece captures
     pieces::generate_piece_captures(pos, color, &mut pseudo);
@@ -234,5 +240,34 @@ mod tests {
         let captures = generate_captures(&pos);
         assert_eq!(captures.len(), 0,
             "No captures available at start position");
+    }
+
+    #[test]
+    fn test_generate_captures_includes_quiet_promotion_no_duplication() {
+        // Regression guard (confirmed 2026-08-03, session 131): the
+        // actual entry point quiescence search calls —
+        // movegen::generate_captures(), not pawns::generate_pawn_captures
+        // directly — must include a quiet promotion exactly once, and
+        // full move generation (generate_moves) must independently also
+        // show it exactly once (not twice, which was the real CI perft
+        // failure this session traced back to).
+        setup();
+        let fen = "7k/4P3/8/8/8/8/8/4K3 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+
+        let captures = generate_captures(&pos);
+        assert_eq!(captures.len(), 4,
+            "generate_captures() should surface all 4 quiet promotion \
+             choices for the e7 pawn (this is quiescence's move set), \
+             got {}", captures.len());
+
+        let full = generate_moves(&pos);
+        let promo_count = full.iter().filter(|m| m.kind.is_promotion()).count();
+        assert_eq!(promo_count, 4,
+            "generate_moves() should show exactly 4 promotion moves for \
+             the e7 pawn, not 8 — a count of 8 would mean \
+             generate_pawn_pushes() and generate_pawn_captures() both \
+             added the same quiet promotions, got {} (total moves: {})",
+            promo_count, full.len());
     }
 }

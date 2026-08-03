@@ -55,23 +55,14 @@ pub fn generate_pawn_moves(
     generate_pawn_captures(pos, color, list);
 }
 
-/// Generate pawn tactical moves (used in quiescence search)
-/// Includes: diagonal captures, en passant, promotion captures, and
-/// quiet (non-capturing) promotions.
-///
-/// Bug fix (confirmed 2026-08-03, external bug report): quiet promotions
-/// were previously missing from this list entirely. `add_promotions()`
-/// was only ever reached via `generate_pawn_pushes()` (full move
-/// generation), never from this capture-only path, so a pawn that could
-/// walk straight to the queening square with no capture involved was
-/// invisible to quiescence search — it just stood pat on the static
-/// eval instead of considering "push pawn, promote to queen". This
-/// matches the standard convention (used by essentially every other
-/// engine) that quiescence's tactical move set is *captures and
-/// promotions*, not captures alone. `alpha_beta.rs::quiescence()`'s
-/// "quiet checks" section already assumed promotions were covered here
-/// (it explicitly skips `mv.kind.is_promotion()`) — that assumption is
-/// now actually true.
+/// Generate only pawn captures (diagonal captures, en passant, and
+/// promotion captures). This is the pawn half of full pseudo-legal move
+/// generation — used inside `generate_pawn_moves()` alongside
+/// `generate_pawn_pushes()`, which already generates quiet promotions.
+/// **Must not** also generate quiet promotions here, or every quiet
+/// promotion is double-added when both functions run together (see the
+/// regression note on `generate_pawn_tactical()` below — this is exactly
+/// the bug that function was split out to avoid).
 pub fn generate_pawn_captures(
     pos:   &Position,
     color: Color,
@@ -79,6 +70,43 @@ pub fn generate_pawn_captures(
 ) {
     generate_pawn_diagonal_captures(pos, color, list);
     generate_en_passant(pos, color, list);
+}
+
+/// Generate pawn *tactical* moves: everything `generate_pawn_captures()`
+/// generates, plus quiet (non-capturing) promotions. This is the set
+/// `movegen::generate_captures()` (quiescence search) draws from — it is
+/// **not** used by `generate_pawn_moves()` (full pseudo-legal
+/// generation), which gets quiet promotions from `generate_pawn_pushes()`
+/// instead.
+///
+/// Bug fix (confirmed 2026-08-03, external bug report): quiet promotions
+/// were originally missing from quiescence's move set entirely —
+/// `add_promotions()` was only ever reached via `generate_pawn_pushes()`,
+/// never from the capture-only path quiescence used. This matches the
+/// standard convention (used by essentially every other engine) that
+/// quiescence's tactical move set is *captures and promotions*, not
+/// captures alone.
+///
+/// Regression fix (confirmed 2026-08-03, session 131, caught by a real
+/// CI perft failure — Kiwipete depth 4 came back wrong): the first
+/// attempt at the fix above added quiet promotions directly inside
+/// `generate_pawn_captures()`. That's wrong, because
+/// `generate_pawn_moves()` (full move generation, used by perft and
+/// every normal search node — not just quiescence) calls *both*
+/// `generate_pawn_pushes()` (which already adds quiet promotions) *and*
+/// `generate_pawn_captures()`. Adding them to the latter as well
+/// double-generated every quiet promotion in ordinary pseudo-legal move
+/// lists, not just quiescence's — corrupting perft counts and every
+/// normal search node's move list. Splitting the quiet-promotion-
+/// inclusive behavior into this separate function, called only from
+/// `movegen::generate_captures()`, fixes this without touching
+/// `generate_pawn_moves()`'s path at all.
+pub fn generate_pawn_tactical(
+    pos:   &Position,
+    color: Color,
+    list:  &mut MoveList,
+) {
+    generate_pawn_captures(pos, color, list);
     generate_pawn_quiet_promotions(pos, color, list);
 }
 
@@ -703,18 +731,18 @@ fn test_promotion() {
     }
 
     #[test]
-    fn test_generate_pawn_captures_includes_quiet_promotion() {
+    fn test_generate_pawn_tactical_includes_quiet_promotion() {
         // Bug 1 regression (confirmed 2026-08-03): a pawn one step from
         // promotion with an empty queening square must appear in
-        // generate_pawn_captures()'s output, even though no capture is
+        // generate_pawn_tactical()'s output, even though no capture is
         // involved — this is the list quiescence search draws from.
         setup();
         let fen = "7k/4P3/8/8/8/8/8/4K3 w - - 0 1";
         let pos = Position::from_fen(fen).unwrap();
         let mut list = MoveList::new();
-        generate_pawn_captures(&pos, Color::White, &mut list);
+        generate_pawn_tactical(&pos, Color::White, &mut list);
         assert_eq!(list.len(), 4,
-            "generate_pawn_captures should include all 4 quiet promotion \
+            "generate_pawn_tactical should include all 4 quiet promotion \
              choices for the e7 pawn, got {}", list.len());
         let kinds: Vec<MoveKind> = list.iter().map(|m| m.kind).collect();
         assert!(kinds.contains(&MoveKind::PromoQueen));
@@ -728,14 +756,14 @@ fn test_promotion() {
     }
 
     #[test]
-    fn test_generate_pawn_captures_still_includes_promotion_captures() {
+    fn test_generate_pawn_tactical_still_includes_promotion_captures() {
         // Companion check: the fix must not disturb the existing
         // promotion-capture path (generate_pawn_diagonal_captures).
         setup();
         let fen = "3nk3/4P3/8/8/8/8/8/4K3 w - - 0 1";
         let pos = Position::from_fen(fen).unwrap();
         let mut list = MoveList::new();
-        generate_pawn_captures(&pos, Color::White, &mut list);
+        generate_pawn_tactical(&pos, Color::White, &mut list);
         assert_eq!(list.len(), 4,
             "e7 pawn with a capturable piece on d8 and no quiet-push \
              square (d8 occupied by the enemy piece, not e8) should still \
@@ -747,6 +775,48 @@ fn test_promotion() {
                  || mv.kind == MoveKind::PromoCapBishop
                  || mv.kind == MoveKind::PromoCapKnight);
         }
+    }
+
+    #[test]
+    fn test_generate_pawn_captures_excludes_quiet_promotion() {
+        // Regression guard (confirmed 2026-08-03, session 131): plain
+        // generate_pawn_captures() — the function generate_pawn_moves()
+        // calls alongside generate_pawn_pushes() for full pseudo-legal
+        // generation — must NOT include quiet promotions. It's already
+        // covered by generate_pawn_pushes(); adding it here too is
+        // exactly the double-generation bug that caused a real CI perft
+        // failure (Kiwipete depth 4 came back wrong) in this session.
+        setup();
+        let fen = "7k/4P3/8/8/8/8/8/4K3 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        let mut list = MoveList::new();
+        generate_pawn_captures(&pos, Color::White, &mut list);
+        assert_eq!(list.len(), 0,
+            "generate_pawn_captures alone should generate nothing for a \
+             pawn with only a quiet promotion available (no capture, no \
+             en passant) — quiet promotions belong to \
+             generate_pawn_pushes() only, got {} moves", list.len());
+    }
+
+    #[test]
+    fn test_generate_pawn_moves_no_duplicate_promotions() {
+        // Regression guard (confirmed 2026-08-03, session 131): the full
+        // pseudo-legal generator must produce exactly 4 promotion moves
+        // for a pawn one step from an empty queening square — not 8.
+        // This is the exact shape of bug a real CI perft failure caught:
+        // generate_pawn_pushes() and generate_pawn_captures() both
+        // running (via generate_pawn_moves()) must never both add the
+        // same quiet promotion.
+        setup();
+        let fen = "7k/4P3/8/8/8/8/8/4K3 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        let mut list = MoveList::new();
+        generate_pawn_moves(&pos, Color::White, &mut list);
+        assert_eq!(list.len(), 4,
+            "e7 pawn with an empty e8 should generate exactly 4 promotion \
+             moves via full pseudo-legal generation, got {} — a count of \
+             8 would mean quiet promotions were double-generated",
+            list.len());
     }
 
     #[test]
