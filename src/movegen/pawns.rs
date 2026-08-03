@@ -55,8 +55,23 @@ pub fn generate_pawn_moves(
     generate_pawn_captures(pos, color, list);
 }
 
-/// Generate only pawn captures (used in quiescence search)
-/// Includes: diagonal captures, en passant, promotion captures
+/// Generate pawn tactical moves (used in quiescence search)
+/// Includes: diagonal captures, en passant, promotion captures, and
+/// quiet (non-capturing) promotions.
+///
+/// Bug fix (confirmed 2026-08-03, external bug report): quiet promotions
+/// were previously missing from this list entirely. `add_promotions()`
+/// was only ever reached via `generate_pawn_pushes()` (full move
+/// generation), never from this capture-only path, so a pawn that could
+/// walk straight to the queening square with no capture involved was
+/// invisible to quiescence search — it just stood pat on the static
+/// eval instead of considering "push pawn, promote to queen". This
+/// matches the standard convention (used by essentially every other
+/// engine) that quiescence's tactical move set is *captures and
+/// promotions*, not captures alone. `alpha_beta.rs::quiescence()`'s
+/// "quiet checks" section already assumed promotions were covered here
+/// (it explicitly skips `mv.kind.is_promotion()`) — that assumption is
+/// now actually true.
 pub fn generate_pawn_captures(
     pos:   &Position,
     color: Color,
@@ -64,6 +79,7 @@ pub fn generate_pawn_captures(
 ) {
     generate_pawn_diagonal_captures(pos, color, list);
     generate_en_passant(pos, color, list);
+    generate_pawn_quiet_promotions(pos, color, list);
 }
 
 // ── Pawn pushes ───────────────────────────────────────────────────────────────
@@ -205,6 +221,53 @@ fn generate_en_passant(
                 MoveKind::EnPassant,
                 PieceKind::Pawn, // always captures a pawn
             ));
+        }
+    }
+}
+
+// ── Quiet promotions (tactical, non-capturing) ──────────────────────────────
+
+/// Generate quiet (non-capturing) pawn promotions — a single push that
+/// lands directly on the promotion rank. Needed by
+/// `generate_pawn_captures()` so quiescence search sees promotions even
+/// when no capture is involved (Bug 1 fix, see doc comment above that
+/// function). Double pushes never land on the promotion rank (guarded
+/// by the `+2 <= 7` / `>= 2` range checks in `generate_pawn_pushes()`),
+/// so only the single-push case needs handling here.
+fn generate_pawn_quiet_promotions(
+    pos:   &Position,
+    color: Color,
+    list:  &mut MoveList,
+) {
+    let empty = pos.empty_squares();
+    let mut pawns = pos.piece_bb(color, PieceKind::Pawn);
+
+    let promotion_rank = match color {
+        Color::White => 7u8,
+        Color::Black => 0u8,
+    };
+
+    while let Some(from) = pawns.pop_lsb() {
+        let to_single = match color {
+            Color::White => {
+                let sq = Square::from_file_rank(from.file(), from.rank() + 1);
+                sq.filter(|&s| empty.contains(s))
+            }
+            Color::Black => {
+                if from.rank() == 0 { None }
+                else {
+                    let sq = Square::from_file_rank(
+                        from.file(), from.rank() - 1
+                    );
+                    sq.filter(|&s| empty.contains(s))
+                }
+            }
+        };
+
+        if let Some(to) = to_single {
+            if to.rank() == promotion_rank {
+                add_promotions(from, to, false, list);
+            }
         }
     }
 }
@@ -637,6 +700,53 @@ fn test_promotion() {
             .collect();
         assert_eq!(e2_double.len(), 0,
             "Double push blocked when intermediate square occupied");
+    }
+
+    #[test]
+    fn test_generate_pawn_captures_includes_quiet_promotion() {
+        // Bug 1 regression (confirmed 2026-08-03): a pawn one step from
+        // promotion with an empty queening square must appear in
+        // generate_pawn_captures()'s output, even though no capture is
+        // involved — this is the list quiescence search draws from.
+        setup();
+        let fen = "7k/4P3/8/8/8/8/8/4K3 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        let mut list = MoveList::new();
+        generate_pawn_captures(&pos, Color::White, &mut list);
+        assert_eq!(list.len(), 4,
+            "generate_pawn_captures should include all 4 quiet promotion \
+             choices for the e7 pawn, got {}", list.len());
+        let kinds: Vec<MoveKind> = list.iter().map(|m| m.kind).collect();
+        assert!(kinds.contains(&MoveKind::PromoQueen));
+        assert!(kinds.contains(&MoveKind::PromoRook));
+        assert!(kinds.contains(&MoveKind::PromoBishop));
+        assert!(kinds.contains(&MoveKind::PromoKnight));
+        for mv in list.iter() {
+            assert!(mv.captured.is_none(),
+                "quiet promotion moves must not carry a captured piece");
+        }
+    }
+
+    #[test]
+    fn test_generate_pawn_captures_still_includes_promotion_captures() {
+        // Companion check: the fix must not disturb the existing
+        // promotion-capture path (generate_pawn_diagonal_captures).
+        setup();
+        let fen = "3nk3/4P3/8/8/8/8/8/4K3 w - - 0 1";
+        let pos = Position::from_fen(fen).unwrap();
+        let mut list = MoveList::new();
+        generate_pawn_captures(&pos, Color::White, &mut list);
+        assert_eq!(list.len(), 4,
+            "e7 pawn with a capturable piece on d8 and no quiet-push \
+             square (d8 occupied by the enemy piece, not e8) should still \
+             generate exactly 4 promotion-capture moves, got {}",
+            list.len());
+        for mv in list.iter() {
+            assert!(mv.kind == MoveKind::PromoCapQueen
+                 || mv.kind == MoveKind::PromoCapRook
+                 || mv.kind == MoveKind::PromoCapBishop
+                 || mv.kind == MoveKind::PromoCapKnight);
+        }
     }
 
     #[test]
