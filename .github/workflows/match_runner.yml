@@ -11,12 +11,12 @@ on:
         default: "20"
         type: string
       weight_a:
-        description: "Engine A NNUE blend weight percent (0-100)"
+        description: "Engine A NNUE blend weight percent (0-100) — ignored if flag_name is set (forced to 0)"
         required: false
         default: "0"
         type: string
       weight_b:
-        description: "Engine B NNUE blend weight percent (0-100)"
+        description: "Engine B NNUE blend weight percent (0-100) — ignored if flag_name is set (forced to 0)"
         required: false
         default: "25"
         type: string
@@ -30,6 +30,32 @@ on:
         required: false
         default: "0"
         type: string
+      flag_name:
+        description: "Experimental SearchInfo flag to SPRT-test instead of NNUE weight (Phase 34.1)"
+        required: false
+        default: "none"
+        type: choice
+        options:
+          - none
+          - nonpawn_correction
+          - continuation_correction
+          - improving
+      flag_a:
+        description: "Engine A's value for flag_name (only used if flag_name != none)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      flag_b:
+        description: "Engine B's value for flag_name (only used if flag_name != none) — default true tests flipping the shipped false default"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 env:
   CARGO_TERM_COLOR: always
@@ -66,6 +92,9 @@ jobs:
           ${{ inputs.movetime_ms }}
           ${{ inputs.seed_start }}
           match_results.txt
+          ${{ inputs.flag_name }}
+          ${{ inputs.flag_a }}
+          ${{ inputs.flag_b }}
 
       - name: Print summary
         run: cat match_results.txt
@@ -73,6 +102,6 @@ jobs:
       - name: Upload match results as artifact
         uses: actions/upload-artifact@v6
         with:
-          name: match-results-a${{ inputs.weight_a }}-b${{ inputs.weight_b }}-n${{ inputs.num_games }}-seed${{ inputs.seed_start }}
+          name: match-results-${{ inputs.flag_name }}-a${{ inputs.weight_a }}-b${{ inputs.weight_b }}-n${{ inputs.num_games }}-seed${{ inputs.seed_start }}
           path: match_results.txt
           retention-days: 30
