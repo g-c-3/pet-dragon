@@ -49,7 +49,7 @@ use pet_dragon_lib::types::{Color, PieceKind};
 /// Number of `s(mg, eg)` pairs `write_tuned_weights` emits, in order:
 /// material_values(5) + bishop_pair(1) + pst(6*64=384) + mobility(9+14+15+28=66)
 /// + isolated/doubled/backward(3) + passed_pawn_bonus(8) + open_lines(9) = 476.
-const EXPECTED_PAIR_COUNT: usize = 5 + 1 + 384 + 66 + 3 + 8 + 9 + 5; // +5: Phase 24 item 4 threats (D68)
+const EXPECTED_PAIR_COUNT: usize = 5 + 1 + 384 + 66 + 3 + 8 + 9 + 6; // +6: Phase 24 item 4 threats (D68) + Phase 34.2 threat_by_rook (Session 133)
 
 fn main() {
     init_masks();
@@ -312,6 +312,7 @@ fn parse_tuned_weights(text: &str) -> TunableWeights {
     let undefended_rook = next_s();
     let undefended_queen = next_s();
     let threat_by_minor = next_s();
+    let threat_by_rook = next_s();
 
     assert_eq!(i, EXPECTED_PAIR_COUNT, "s(mg,eg) pair count mismatch after parsing");
 
@@ -370,6 +371,7 @@ fn parse_tuned_weights(text: &str) -> TunableWeights {
         undefended_rook,
         undefended_queen,
         threat_by_minor,
+        threat_by_rook,
         tempo,
         killer_attacker_bonus,
         killer_storm_bonus_per_pawn,
