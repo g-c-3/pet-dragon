@@ -166,16 +166,14 @@ struct EngineState {
     /// default).
     null_move_king_guard: bool,
 
-    // ── Non-pawn-material correction history (Phase 26 item 3a, D80/D82) ──
-    /// UCI `NonPawnCorrectionHistory` setting, default `false`. Threaded
-    /// into `main_info`/`h_info.nonpawn_correction_enabled` in cmd_go,
-    /// same pattern as `null_move_king_guard` above — see
-    /// `SearchInfo::nonpawn_correction_enabled`'s doc comment. D82
-    /// corrects item 3a's initial always-on shipment to match this
-    /// established discipline: unvalidated correction sources ship
-    /// gated off, get their own isolated SPRT-style A/B via this option
-    /// (same binary, `uci_match_runner`, no rebuild needed), and only
-    /// then is a default flip considered.
+    // ── Non-pawn-material correction history (Phase 26 item 3a, D80/D82/D134) ──
+    /// UCI `NonPawnCorrectionHistory` setting, default `true` as of D134
+    /// (Session 137, SPRT-confirmed via D133). Threaded into
+    /// `main_info`/`h_info.nonpawn_correction_enabled` in cmd_go, same
+    /// pattern as `null_move_king_guard` above — see
+    /// `SearchInfo::nonpawn_correction_enabled`'s doc comment for the
+    /// full validation history (D82's original gated-off shipment
+    /// through D133's 700-game A/B to this default flip).
     nonpawn_correction_enabled: bool,
 
     // ── Continuation-based correction history (Phase 26 item 3b, D86) ────────
@@ -249,7 +247,7 @@ impl EngineState {
             skill_level: pet_dragon_lib::search::skill::MAX_SKILL_LEVEL,
             contempt: 0,
             null_move_king_guard: false,
-            nonpawn_correction_enabled: false,
+            nonpawn_correction_enabled: true, // D134 (Session 137) — see field doc comment
             continuation_correction_enabled: false,
             correction_extension_enabled: false,
             lmp_enabled: true,
@@ -465,7 +463,7 @@ fn cmd_uci() {
     // ever being trusted as a default — see DECISIONS.md and
     // ROADMAP.md Phase 26 item 1.
     println!("option name NullMoveKingGuard type check default false");
-    println!("option name NonPawnCorrectionHistory type check default false");
+    println!("option name NonPawnCorrectionHistory type check default true"); // D134 (Session 137)
     println!("option name ContinuationCorrectionHistory type check default false");
     println!("option name CorrectionExtension type check default false");
     // Phase 27 (Session 86): D59/D60 diagnostic toggles, both default true
@@ -1414,13 +1412,18 @@ mod tests {
     }
 
     #[test]
-    fn test_nonpawn_correction_history_option_defaults_to_false() {
+    fn test_nonpawn_correction_history_option_defaults_to_true() {
+        // Updated for D134 (Session 137): D133's 700-game SPRT (two
+        // independent batches, +11.9 Elo combined, consistent direction
+        // both times) justified flipping this default from false to
+        // true. This test used to assert the opposite — see D82/D134's
+        // doc comments on this field for the full validation history.
         setup();
         let state = EngineState::new();
-        assert!(!state.nonpawn_correction_enabled,
-            "NonPawnCorrectionHistory should default to false — byte- \
-             identical to before item 3a existed for any GUI that never \
-             touches this option (D82)");
+        assert!(state.nonpawn_correction_enabled,
+            "NonPawnCorrectionHistory should default to true as of D134 \
+             (Session 137) — SPRT-confirmed via D133's 700-game A/B, not \
+             just an unvalidated guess");
     }
 
     #[test]
