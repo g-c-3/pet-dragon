@@ -129,6 +129,9 @@ pub struct TexelFeatures {
     /// Count of our knight/bishop attacks landing on an enemy rook or
     /// queen, minus theirs. A fork counts twice, naturally.
     pub threat_by_minor_diff: i32,
+    /// Count of our rook attacks landing on an enemy queen, minus theirs
+    /// (Session 133 / Phase 34.2, external review §8.1).
+    pub threat_by_rook_diff: i32,
 
     /// PlayStyle bonus features (Phase 30, ROADMAP 29.7) — `None` unless
     /// populated separately via `extract_style_features()` below (never
@@ -201,6 +204,7 @@ pub fn extract_features(pos: &Position) -> TexelFeatures {
         undefended_rook_diff: th.2,
         undefended_queen_diff: th.3,
         threat_by_minor_diff: th.4,
+        threat_by_rook_diff: th.5,
         style: None, // populated separately by extract_style_features(), never here
     }
 }
@@ -750,13 +754,15 @@ fn extract_open_lines(pos: &Position, us: Color, them: Color) -> OpenLinesRaw {
 /// (rook_open, rook_semi, rook_7th, rooks_connected_pairs, battery_rook_queen,
 ///  contested_file, queen_open, queen_semi, battery_bishop_queen)
 /// Mirrors `eval::threats::evaluate_threats` exactly (Phase 24 item 4,
-/// D68) — same loops, same attacker/defender counting, same conditions.
+/// D68, extended Phase 34.2/Session 133 for threat_by_rook) — same loops,
+/// same attacker/defender counting, same conditions.
 /// Returns (undefended_knight_diff, undefended_bishop_diff,
-/// undefended_rook_diff, undefended_queen_diff, threat_by_minor_diff).
-fn extract_threats(pos: &Position, us: Color, them: Color) -> (i32, i32, i32, i32, i32) {
-    let (uk_u, ub_u, ur_u, uq_u, tbm_u) = threats_side_raw(pos, us);
-    let (uk_t, ub_t, ur_t, uq_t, tbm_t) = threats_side_raw(pos, them);
-    (uk_u - uk_t, ub_u - ub_t, ur_u - ur_t, uq_u - uq_t, tbm_u - tbm_t)
+/// undefended_rook_diff, undefended_queen_diff, threat_by_minor_diff,
+/// threat_by_rook_diff).
+fn extract_threats(pos: &Position, us: Color, them: Color) -> (i32, i32, i32, i32, i32, i32) {
+    let (uk_u, ub_u, ur_u, uq_u, tbm_u, tbr_u) = threats_side_raw(pos, us);
+    let (uk_t, ub_t, ur_t, uq_t, tbm_t, tbr_t) = threats_side_raw(pos, them);
+    (uk_u - uk_t, ub_u - ub_t, ur_u - ur_t, uq_u - uq_t, tbm_u - tbm_t, tbr_u - tbr_t)
 }
 
 /// Mirrors `eval::threats::threats_for_color` exactly, counting occurrences
@@ -765,7 +771,7 @@ fn extract_threats(pos: &Position, us: Color, them: Color) -> (i32, i32, i32, i3
 /// this file): a deliberate mirror, not a shared function, so
 /// `predict()` can stay generic over `TunableWeights` without eval/*.rs
 /// needing to expose its internals.
-fn threats_side_raw(pos: &Position, color: Color) -> (i32, i32, i32, i32, i32) {
+fn threats_side_raw(pos: &Position, color: Color) -> (i32, i32, i32, i32, i32, i32) {
     let enemy = color.flip();
     let all_occ = pos.all_pieces();
 
@@ -803,7 +809,17 @@ fn threats_side_raw(pos: &Position, color: Color) -> (i32, i32, i32, i32, i32) {
         }
     }
 
-    (undefended_knight, undefended_bishop, undefended_rook, undefended_queen, threat_by_minor)
+    // Threat by rook: our rooks attacking enemy queen (Session 133 / Phase
+    // 34.2). Mirrors `eval::threats::threats_for_color`'s rook loop exactly.
+    let mut threat_by_rook = 0i32;
+    let enemy_queen = pos.piece_bb(enemy, PieceKind::Queen);
+    for sq in pos.piece_bb(color, PieceKind::Rook) {
+        let attacks = rook_attacks(sq, all_occ);
+        threat_by_rook += (attacks & enemy_queen).count() as i32;
+    }
+
+    (undefended_knight, undefended_bishop, undefended_rook, undefended_queen,
+     threat_by_minor, threat_by_rook)
 }
 
 /// Mirrors `eval::threats::count_attackers` exactly.

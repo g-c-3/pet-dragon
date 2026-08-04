@@ -97,6 +97,9 @@ pub struct TunableWeights {
     pub undefended_rook: i64,
     pub undefended_queen: i64,
     pub threat_by_minor: i64,
+    /// Session 133 / Phase 34.2 (external review §8.1) — our rooks
+    /// attacking an enemy queen. Distinct table from threat_by_minor.
+    pub threat_by_rook: i64,
 
     // ── Tempo ─────────────────────────────────────────────────────────────
     pub tempo: i32,
@@ -224,6 +227,10 @@ impl Default for TunableWeights {
             undefended_rook: s(-40, -25),
             undefended_queen: s(-80, -50),
             threat_by_minor: s(15, 10),
+            // Session 133 / Phase 34.2: matches eval/threats.rs's
+            // THREAT_BY_ROOK_BONUS exactly, same hand-picked/not-yet-tuned
+            // status as the block above.
+            threat_by_rook: s(20, 12),
 
             // eval/mod.rs
             tempo: 24,

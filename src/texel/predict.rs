@@ -130,13 +130,14 @@ pub fn predict(f: &TexelFeatures, w: &TunableWeights) -> i32 {
     ol += w.battery_bishop_queen * f.battery_bishop_queen_diff as i64;
     let open_lines = taper(ol, phase);
 
-    // ── Threats (Phase 24 item 4, D68) ──────────────────────────────────
+    // ── Threats (Phase 24 item 4, D68; extended Phase 34.2, Session 133) ──
     let mut th = 0i64;
     th += w.undefended_knight * f.undefended_knight_diff as i64;
     th += w.undefended_bishop * f.undefended_bishop_diff as i64;
     th += w.undefended_rook * f.undefended_rook_diff as i64;
     th += w.undefended_queen * f.undefended_queen_diff as i64;
     th += w.threat_by_minor * f.threat_by_minor_diff as i64;
+    th += w.threat_by_rook * f.threat_by_rook_diff as i64;
     let threats = taper(th, phase);
 
     material + tables + mobility + pawns + king_safety + open_lines + threats + w.tempo

@@ -139,6 +139,9 @@ pub struct TunableWeightsF64 {
     pub undefended_rook: S,
     pub undefended_queen: S,
     pub threat_by_minor: S,
+    /// Session 133 / Phase 34.2 (external review §8.1) — f64 mirror of
+    /// `TunableWeights::threat_by_rook`.
+    pub threat_by_rook: S,
 
     pub tempo: f64,
 
@@ -192,6 +195,7 @@ impl TunableWeightsF64 {
             undefended_rook: S::zero(),
             undefended_queen: S::zero(),
             threat_by_minor: S::zero(),
+            threat_by_rook: S::zero(),
             tempo: 0.0,
             killer_attacker_bonus: [0.0; 8],
             killer_storm_bonus_per_pawn: 0.0,
@@ -240,6 +244,7 @@ impl TunableWeightsF64 {
             undefended_rook: self.undefended_rook.to_packed(),
             undefended_queen: self.undefended_queen.to_packed(),
             threat_by_minor: self.threat_by_minor.to_packed(),
+            threat_by_rook: self.threat_by_rook.to_packed(),
             tempo: self.tempo.round() as i32,
             killer_attacker_bonus: self.killer_attacker_bonus.map(|v| v.round() as i32),
             killer_storm_bonus_per_pawn: self.killer_storm_bonus_per_pawn.round() as i32,
@@ -262,7 +267,7 @@ impl TunableWeightsF64 {
         + 8             // D63 item 2: pawn_storm_bonus
         + 2             // D63 item 3: knight_near_own_king + bishop_near_own_king
         + 9 * 2         // open lines
-        + 5 * 2         // Phase 24 item 4 (D68): threats — 5 S-typed terms
+        + 6 * 2         // Phase 24 item 4 (D68) + Phase 34.2 (Session 133): threats — 6 S-typed terms
         + 1             // tempo
         + 8 + 1 + 1 + 1 + 1; // Phase 30 (ROADMAP 29.7): PlayStyle — killer_attacker_bonus[8] + 4 scalars
 
@@ -349,6 +354,8 @@ impl TunableWeightsF64 {
         v.push(self.undefended_queen.eg);
         v.push(self.threat_by_minor.mg);
         v.push(self.threat_by_minor.eg);
+        v.push(self.threat_by_rook.mg);
+        v.push(self.threat_by_rook.eg);
         v.push(self.tempo);
         for w in &self.killer_attacker_bonus {
             v.push(*w);
@@ -442,6 +449,7 @@ impl TunableWeightsF64 {
         let undefended_rook = S::new(next(), next());
         let undefended_queen = S::new(next(), next());
         let threat_by_minor = S::new(next(), next());
+        let threat_by_rook = S::new(next(), next());
 
         let tempo = next();
 
@@ -491,6 +499,7 @@ impl TunableWeightsF64 {
             undefended_rook,
             undefended_queen,
             threat_by_minor,
+            threat_by_rook,
             tempo,
             killer_attacker_bonus,
             killer_storm_bonus_per_pawn,
@@ -538,6 +547,7 @@ impl From<&TunableWeights> for TunableWeightsF64 {
             undefended_rook: S::from(w.undefended_rook),
             undefended_queen: S::from(w.undefended_queen),
             threat_by_minor: S::from(w.threat_by_minor),
+            threat_by_rook: S::from(w.threat_by_rook),
             tempo: w.tempo as f64,
             killer_attacker_bonus: w.killer_attacker_bonus.map(|x| x as f64),
             killer_storm_bonus_per_pawn: w.killer_storm_bonus_per_pawn as f64,
@@ -618,6 +628,7 @@ mod tests {
         assert_eq!(back_to_int.undefended_rook, default_weights.undefended_rook);
         assert_eq!(back_to_int.undefended_queen, default_weights.undefended_queen);
         assert_eq!(back_to_int.threat_by_minor, default_weights.threat_by_minor);
+        assert_eq!(back_to_int.threat_by_rook, default_weights.threat_by_rook);
         assert_eq!(back_to_int.tempo, default_weights.tempo);
         assert_eq!(back_to_int.killer_attacker_bonus, default_weights.killer_attacker_bonus);
         assert_eq!(

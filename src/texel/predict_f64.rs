@@ -128,6 +128,7 @@ pub fn predict_f64(f: &TexelFeatures, w: &TunableWeightsF64) -> f64 {
     th = accum_only(th, w.undefended_rook, f.undefended_rook_diff);
     th = accum_only(th, w.undefended_queen, f.undefended_queen_diff);
     th = accum_only(th, w.threat_by_minor, f.threat_by_minor_diff);
+    th = accum_only(th, w.threat_by_rook, f.threat_by_rook_diff);
     let threats_score = th.taper(phase);
 
     material_score
@@ -571,6 +572,15 @@ pub fn predict_and_accumulate_grad(
         w.threat_by_minor,
         &mut grad.threat_by_minor,
         f.threat_by_minor_diff,
+        error_signal,
+        mg_factor,
+        eg_factor,
+    );
+    th = accum_grad(
+        th,
+        w.threat_by_rook,
+        &mut grad.threat_by_rook,
+        f.threat_by_rook_diff,
         error_signal,
         mg_factor,
         eg_factor,
