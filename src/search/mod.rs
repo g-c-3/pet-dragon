@@ -197,17 +197,25 @@ pub struct SearchInfo {
     /// spawn) — see `main.rs`.
     pub correction_history_nonpawn: crate::search::pruning::CorrectionHistory,
 
-    /// UCI `NonPawnCorrectionHistory` setting, default `false` (D82 —
-    /// corrected from item 3a's initial always-on shipment to match
-    /// item 1's own established discipline: an unvalidated correction
-    /// source ships gated off, gets its own isolated SPRT-style A/B via
-    /// this option, and only then is a default flip to `true`
-    /// considered). When `false`, `alpha_beta.rs` never reads or writes
-    /// `correction_history_nonpawn` — behavior is byte-identical to
-    /// before item 3a existed. When `true`, the non-pawn-material
-    /// correction table (see that field's own doc comment) is applied
-    /// and updated alongside the existing pawn-hash table. Persistent
-    /// across moves, same threading pattern as `null_move_king_guard`.
+    /// UCI `NonPawnCorrectionHistory` setting, default `true` as of D134
+    /// (Session 137). D82 originally shipped this gated off pending an
+    /// isolated SPRT-style A/B via this same option — that validation
+    /// ran in D133 (Session 136): 700 games combined across two
+    /// independent batches, consistently favoring `true` (Elo diff
+    /// -17.4 then -9.7, i.e. B/on ahead both times), landing around
+    /// +11.9 Elo combined. Not a clean 2-standard-error result at
+    /// n=700, but the direction held across both batches rather than
+    /// scattering around zero the way `improving_enabled` and
+    /// `continuation_correction_enabled` did in the same testing round
+    /// — Gokul's explicit call to accept the directional lean and flip
+    /// the default, same kind of judgment call D125 documented for
+    /// `recapture_extension_enabled`. When `false`, `alpha_beta.rs`
+    /// never reads or writes `correction_history_nonpawn` — behavior is
+    /// byte-identical to before item 3a existed. When `true` (now the
+    /// default), the non-pawn-material correction table (see that
+    /// field's own doc comment) is applied and updated alongside the
+    /// existing pawn-hash table. Persistent across moves, same
+    /// threading pattern as `null_move_king_guard`.
     pub nonpawn_correction_enabled: bool,
 
     // ── Continuation-based correction history (Phase 26 item 3b, D86) ────────
@@ -470,7 +478,7 @@ impl SearchInfo {
             seldepth:          0,
             correction_history: crate::search::pruning::CorrectionHistory::new(),
             correction_history_nonpawn: crate::search::pruning::CorrectionHistory::new(),
-            nonpawn_correction_enabled: false,
+            nonpawn_correction_enabled: true, // D134 (Session 137) — see field doc comment
             correction_history_continuation: crate::search::pruning::CorrectionHistory::new(),
             continuation_correction_enabled: false,
             correction_extension_enabled: false,

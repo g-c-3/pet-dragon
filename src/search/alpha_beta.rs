@@ -483,11 +483,11 @@ fn alpha_beta_with_excluded(
     // correction-history update at the end of this node (Phase 13.2);
     // static_eval is the corrected value all pruning decisions use.
     //
-    // Two independent correction sources (Phase 26 item 3a, D80/D82): pawn
-    // structure (always on) and non-pawn material placement (gated behind
-    // `info.nonpawn_correction_enabled`, default false, until its own
-    // SPRT-style A/B validates it — D82 corrects item 3a's initial
-    // always-on shipment to match item 1's own established discipline).
+    // Two independent correction sources (Phase 26 item 3a, D80/D82/D134):
+    // pawn structure (always on) and non-pawn material placement (gated
+    // behind `info.nonpawn_correction_enabled`, default true as of D134 —
+    // SPRT-confirmed via D133's 700-game A/B; D82 originally shipped it
+    // gated off pending exactly that validation).
     // Both, when active, are read against raw_static_eval and their
     // corrections summed via chained .apply() calls (mathematically
     // identical to summing directly) — each source learns its own
@@ -954,7 +954,7 @@ fn alpha_beta_with_excluded(
     // Both sources update against the same raw_static_eval baseline,
     // independently — see the static-eval comment above for why. The
     // non-pawn source only runs when info.nonpawn_correction_enabled is
-    // true (default false — see that field's doc comment).
+    // true (default true as of D134 — see that field's doc comment).
     if !info.stop && !in_check && !crate::search::is_mate_score(best_score) {
         let phash = pawn_hash(pos);
         info.correction_history.update(
@@ -1822,28 +1822,34 @@ mod tests {
     // ── Non-pawn-material correction history (ROADMAP Phase 26 item 3a, D80) ──
 
     #[test]
-    fn test_nonpawn_correction_defaults_to_false() {
-        // D82: an unvalidated correction source ships gated off, same
-        // discipline as null_move_king_guard — default engine behavior
-        // must be byte-identical to before item 3a existed for anyone
-        // who never touches this option.
+    fn test_nonpawn_correction_defaults_to_true() {
+        // Updated for D134 (Session 137): D133's 700-game SPRT (two
+        // independent batches, +11.9 Elo combined, consistent direction
+        // both times) justified flipping this default from false to
+        // true — see this field's doc comment in search/mod.rs for the
+        // full validation history (D82 → D133 → D134). This test used
+        // to assert the opposite.
         let info = SearchInfo::new();
-        assert!(!info.nonpawn_correction_enabled,
-            "nonpawn_correction_enabled must default to false");
+        assert!(info.nonpawn_correction_enabled,
+            "nonpawn_correction_enabled must default to true as of D134");
     }
 
     #[test]
     fn test_nonpawn_correction_off_leaves_table_untouched() {
         setup();
-        // With the flag left at its default (false), even a position
-        // guaranteed to produce a large error when the flag IS on (the
-        // same hanging-queen position used below) must leave the
-        // non-pawn table completely untouched — proves the gating
-        // actually short-circuits both the apply() and update() call
-        // sites, not just one of them.
+        // Session 137 / D134 update: the flag now defaults to true, so
+        // this test — which specifically exercises the OFF path — sets
+        // it to false explicitly rather than relying on
+        // SearchInfo::new()'s default. Even a position guaranteed to
+        // produce a large error when the flag IS on (the same
+        // hanging-queen position used below) must leave the non-pawn
+        // table completely untouched when the flag is off — proves the
+        // gating actually short-circuits both the apply() and update()
+        // call sites, not just one of them.
         let fen = "3r2k1/ppp2ppp/8/8/3Q4/8/PPP2PPP/4K3 b - - 0 1";
         let mut pos = Position::from_fen(fen).unwrap();
         let mut info = SearchInfo::new();
+        info.nonpawn_correction_enabled = false;
         info.time_allocated_ms = 60_000;
         let tt = TranspositionTable::new(16);
         let _ = alpha_beta(
