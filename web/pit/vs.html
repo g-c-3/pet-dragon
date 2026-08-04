@@ -149,39 +149,85 @@
   .card{
     background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:13px 14px;
   }
-  .side-col{ display:flex; flex-direction:column; gap:14px; }
+  .side-col{ display:flex; flex-direction:column; gap:10px; }
+
+  /* ---- Slim player card ------------------------------------------------ */
+  .player-card{
+    padding:11px 13px 12px;
+    position:relative;
+  }
+  .player-card::before{
+    content:''; position:absolute; left:0; top:10px; bottom:10px; width:2px; border-radius:2px;
+    background:var(--line);
+  }
+  .player-card[data-side="w"]::before{ background:var(--paper); opacity:0.55; }
+  .player-card[data-side="b"]::before{ background:var(--muted); opacity:0.85; }
   .player-card .card-head{
-    display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;
+    display:flex; align-items:center; gap:9px; margin-bottom:8px;
   }
   .player-card .card-title{
-    font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted);
-    display:flex; align-items:center; gap:7px;
+    font-family:var(--font-mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted);
+    display:flex; align-items:center; gap:6px; flex:none;
   }
-  .player-card[data-side="w"] .card-title::before{ content:'○'; color:var(--paper); }
-  .player-card[data-side="b"] .card-title::before{ content:'●'; color:var(--piece-black); text-shadow:0 0 2px var(--paper); }
-  .think-led{ width:7px; height:7px; border-radius:50%; background:var(--line); }
+  .player-card[data-side="w"] .card-title::before{ content:'○'; color:var(--paper); font-size:9px; }
+  .player-card[data-side="b"] .card-title::before{ content:'●'; color:var(--piece-black); text-shadow:0 0 2px var(--paper); font-size:9px; }
+
+  .engine-select-wrap{ position:relative; flex:1; min-width:0; }
+  .engine-select-wrap::after{
+    content:'⌄'; position:absolute; right:5px; top:50%; transform:translateY(-58%);
+    font-size:11px; color:var(--muted); pointer-events:none;
+  }
+  .engine-select-wrap select{
+    width:100%; appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background:transparent; border:none; border-radius:0; border-bottom:1px solid transparent;
+    color:var(--paper); font-family:var(--font-ui); font-weight:600; font-size:13px;
+    padding:2px 15px 3px 0; cursor:pointer;
+  }
+  .engine-select-wrap select:hover, .engine-select-wrap select:focus{
+    outline:none; border-bottom-color:var(--teal-dim); color:var(--teal);
+  }
+  .engine-select-wrap select:disabled{ cursor:not-allowed; opacity:0.6; }
+
+  .think-led{ width:6px; height:6px; border-radius:50%; background:var(--line); flex:none; }
   .think-led.on{ background:var(--amber); box-shadow:0 0 6px var(--amber); }
 
   .captured-row{
     display:flex; align-items:center; flex-wrap:wrap; gap:1px;
-    min-height:22px; margin-bottom:10px; padding-bottom:9px; border-bottom:1px solid var(--line);
+    min-height:16px; margin-bottom:9px;
   }
-  .captured-row .cap-piece{ font-size:17px; line-height:1; }
+  .captured-row .cap-piece{ font-size:14px; line-height:1; opacity:0.9; }
   .captured-row .cap-piece.w{
     color:var(--piece-white); text-shadow:0 0 2px rgba(0,0,0,.9), 0 1px 1px rgba(0,0,0,.7);
     -webkit-text-stroke:0.5px rgba(0,0,0,.55);
   }
   .captured-row .cap-piece.b{ color:var(--piece-black); -webkit-text-stroke:0.5px rgba(0,0,0,.55); }
-  .captured-row .cap-empty{ font-family:var(--font-mono); font-size:11px; color:var(--muted); }
-  .captured-row .cap-adv{ font-family:var(--font-mono); font-size:11px; color:var(--teal); margin-left:auto; padding-left:6px; }
+  .captured-row .cap-empty{ font-family:var(--font-mono); font-size:10px; color:var(--muted); opacity:0.7; }
+  .captured-row .cap-adv{ font-family:var(--font-mono); font-size:10.5px; color:var(--teal); margin-left:auto; padding-left:6px; }
 
-  .field-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px; }
-  .field-row label{ font-size:12px; color:var(--muted); }
+  .tuning-row{ display:flex; align-items:center; gap:12px; }
+  .tuning-row .skill-wrap{ flex:1; display:flex; align-items:center; gap:7px; min-width:0; }
+  .tuning-row .tuning-label{
+    font-family:var(--font-mono); font-size:9.5px; letter-spacing:0.06em; color:var(--muted); flex:none;
+  }
+  .tuning-row input[type="range"]{ flex:1; height:2px; accent-color:var(--teal); min-width:0; }
+  .tuning-row .skill-value{
+    font-family:var(--font-mono); font-size:11px; width:16px; text-align:right; color:var(--paper); flex:none;
+  }
+  .tuning-row .movetime-wrap{ display:flex; align-items:center; gap:3px; flex:none; }
+  .tuning-row .movetime-wrap .unit{ font-family:var(--font-mono); font-size:9.5px; color:var(--muted); }
+
   select, input[type="number"], input[type="text"]{
     background:var(--panel2); color:var(--paper); border:1px solid var(--line); border-radius:4px;
     font-family:var(--font-ui); font-size:12.5px; padding:5px 7px;
   }
   input[type="number"]{ width:78px; font-family:var(--font-mono); }
+  .tuning-row input[type="number"]{
+    width:52px; background:transparent; border:none; border-bottom:1px solid var(--line);
+    border-radius:0; padding:2px 1px; text-align:right; font-size:11.5px;
+  }
+  .tuning-row input[type="number"]:hover, .tuning-row input[type="number"]:focus{
+    outline:none; border-bottom-color:var(--teal-dim);
+  }
   input[type="range"]{ flex:1; accent-color: var(--teal); }
   .skill-value{ font-family:var(--font-mono); font-size:12px; width:26px; text-align:right; color:var(--paper); }
   .engine-tag{ font-family:var(--font-mono); font-size:10px; color:var(--muted); margin-top:2px; }
@@ -286,51 +332,53 @@
       <div class="card player-card" data-side="w">
         <div class="card-head">
           <div class="card-title">White</div>
+          <div class="engine-select-wrap">
+            <select id="engineW">
+              <option value="stockfish">Stockfish</option>
+              <option value="pet_dragon">Pet Dragon</option>
+            </select>
+          </div>
           <div class="think-led" id="ledW"></div>
         </div>
         <div class="captured-row" id="capturedW"></div>
-        <div class="field-row">
-          <label>Engine</label>
-          <select id="engineW">
-            <option value="stockfish">Stockfish</option>
-            <option value="pet_dragon">Pet Dragon</option>
-          </select>
+        <div class="tuning-row">
+          <div class="skill-wrap">
+            <span class="tuning-label">SKL</span>
+            <input type="range" id="skillW" min="0" max="20" value="10">
+            <span class="skill-value" id="skillWVal">10</span>
+          </div>
+          <div class="movetime-wrap">
+            <input type="number" id="movetimeW" min="50" max="60000" step="50" value="1000">
+            <span class="unit">ms</span>
+          </div>
         </div>
-        <div class="field-row">
-          <label>Skill (0–20)</label>
-          <input type="range" id="skillW" min="0" max="20" value="10">
-          <span class="skill-value" id="skillWVal">10</span>
-        </div>
-        <div class="field-row">
-          <label>Movetime (ms)</label>
-          <input type="number" id="movetimeW" min="50" max="60000" step="50" value="1000">
-        </div>
-        <div class="engine-tag" id="tagW">—</div>
+        <div class="engine-tag" id="tagW" style="display:none;">—</div>
       </div>
 
       <div class="card player-card" data-side="b">
         <div class="card-head">
           <div class="card-title">Black</div>
+          <div class="engine-select-wrap">
+            <select id="engineB">
+              <option value="pet_dragon" selected>Pet Dragon</option>
+              <option value="stockfish">Stockfish</option>
+            </select>
+          </div>
           <div class="think-led" id="ledB"></div>
         </div>
         <div class="captured-row" id="capturedB"></div>
-        <div class="field-row">
-          <label>Engine</label>
-          <select id="engineB">
-            <option value="pet_dragon" selected>Pet Dragon</option>
-            <option value="stockfish">Stockfish</option>
-          </select>
+        <div class="tuning-row">
+          <div class="skill-wrap">
+            <span class="tuning-label">SKL</span>
+            <input type="range" id="skillB" min="0" max="20" value="10">
+            <span class="skill-value" id="skillBVal">10</span>
+          </div>
+          <div class="movetime-wrap">
+            <input type="number" id="movetimeB" min="50" max="60000" step="50" value="1000">
+            <span class="unit">ms</span>
+          </div>
         </div>
-        <div class="field-row">
-          <label>Skill (0–20)</label>
-          <input type="range" id="skillB" min="0" max="20" value="10">
-          <span class="skill-value" id="skillBVal">10</span>
-        </div>
-        <div class="field-row">
-          <label>Movetime (ms)</label>
-          <input type="number" id="movetimeB" min="50" max="60000" step="50" value="1000">
-        </div>
-        <div class="engine-tag" id="tagB">—</div>
+        <div class="engine-tag" id="tagB" style="display:none;">—</div>
       </div>
 
       <div class="card match-card">
