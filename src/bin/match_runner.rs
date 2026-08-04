@@ -511,7 +511,19 @@ mod tests {
 
     #[test]
     fn test_experimental_flag_apply_sets_correct_field() {
+        // Explicitly set starting values rather than relying on
+        // SearchInfo::new()'s own defaults — this test verifies
+        // ExperimentalFlag::apply()'s mechanics (sets the right field,
+        // doesn't touch the others, can unset as well as set), which is
+        // independent of whatever SearchInfo::new() currently defaults
+        // to. nonpawn_correction_enabled defaults to `true` as of D134
+        // (Session 137) — starting it at `false` here keeps this test's
+        // three flags on equal footing and stops it from silently
+        // breaking again the next time a default changes.
         let mut info = SearchInfo::new();
+        info.nonpawn_correction_enabled = false;
+        info.continuation_correction_enabled = false;
+        info.improving_enabled = false;
         assert!(!info.nonpawn_correction_enabled);
         assert!(!info.continuation_correction_enabled);
         assert!(!info.improving_enabled);
@@ -529,5 +541,10 @@ mod tests {
 
         ExperimentalFlag::Improving.apply(&mut info, false);
         assert!(!info.improving_enabled, "apply(false) must be able to unset too");
+
+        ExperimentalFlag::NonpawnCorrection.apply(&mut info, false);
+        assert!(!info.nonpawn_correction_enabled,
+            "apply(false) must be able to unset nonpawn_correction_enabled \
+             too, now that it defaults to true (D134) rather than false");
     }
 }
