@@ -163,22 +163,25 @@
   .player-card[data-side="w"]::before{ background:var(--paper); opacity:0.55; }
   .player-card[data-side="b"]::before{ background:var(--muted); opacity:0.85; }
   .player-card .card-head{
-    display:flex; align-items:center; gap:9px; margin-bottom:8px;
+    display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;
   }
   .player-card .card-title{
     font-family:var(--font-mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted);
     display:flex; align-items:center; gap:6px; flex:none;
   }
-  .player-card[data-side="w"] .card-title::before{ content:'○'; color:var(--paper); font-size:9px; }
-  .player-card[data-side="b"] .card-title::before{ content:'●'; color:var(--piece-black); text-shadow:0 0 2px var(--paper); font-size:9px; }
+  .player-card[data-side="w"] .card-title::before{ content:'●'; color:var(--paper); font-size:9px; }
+  .player-card[data-side="b"] .card-title::before{ content:'○'; color:var(--piece-black); text-shadow:0 0 2px var(--paper); font-size:9px; }
 
-  .engine-select-wrap{ position:relative; flex:1; min-width:0; }
+  /* Sized to its content (the engine name) rather than stretching to fill
+     the row — the freed-up space next to it holds the movetime box and
+     the skill dial. Clicking the name still opens the native option list. */
+  .engine-select-wrap{ position:relative; flex:none; }
   .engine-select-wrap::after{
     content:'⌄'; position:absolute; right:5px; top:50%; transform:translateY(-58%);
     font-size:11px; color:var(--muted); pointer-events:none;
   }
   .engine-select-wrap select{
-    width:100%; appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    width:auto; appearance:none; -webkit-appearance:none; -moz-appearance:none;
     background:transparent; border:none; border-radius:0; border-bottom:1px solid transparent;
     color:var(--paper); font-family:var(--font-ui); font-weight:600; font-size:13px;
     padding:2px 15px 3px 0; cursor:pointer;
@@ -188,48 +191,60 @@
   }
   .engine-select-wrap select:disabled{ cursor:not-allowed; opacity:0.6; }
 
-  .think-led{ width:6px; height:6px; border-radius:50%; background:var(--line); flex:none; }
+  .think-led{ width:6px; height:6px; border-radius:50%; background:var(--line); flex:none; margin-left:auto; }
   .think-led.on{ background:var(--amber); box-shadow:0 0 6px var(--amber); }
+
+  /* ---- ms movetime box, now living in the card-head next to the engine
+     name instead of its own row ----------------------------------------- */
+  .movetime-wrap{ display:flex; align-items:center; gap:3px; flex:none; }
+  .movetime-wrap .unit{ font-family:var(--font-mono); font-size:9.5px; color:var(--muted); }
+  .movetime-wrap input[type="number"]{
+    width:44px; background:transparent; border:none; border-bottom:1px solid var(--line);
+    border-radius:0; padding:2px 1px; text-align:right; font-size:11.5px; font-family:var(--font-mono);
+    color:var(--paper);
+  }
+  .movetime-wrap input[type="number"]:hover, .movetime-wrap input[type="number"]:focus{
+    outline:none; border-bottom-color:var(--teal-dim);
+  }
+
+  /* ---- Skill dial: old analog car-meter needle over a full circular
+     scale. 20 chambers like a revolver cylinder — past 20 it comes back
+     around to 1, no hard stop. Drag, click, or scroll to set it. -------- */
+  .skill-dial-wrap{ display:flex; align-items:center; gap:4px; flex:none; }
+  .skill-dial-wrap.disabled{ opacity:0.4; pointer-events:none; }
+  .skill-native{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+  .skill-dial{ cursor:grab; touch-action:none; -webkit-user-select:none; user-select:none; flex:none; display:block; }
+  .skill-dial:active{ cursor:grabbing; }
+  .dial-face{ fill:var(--panel2); stroke:var(--line); stroke-width:1; }
+  .dial-rim{ fill:none; stroke:var(--line); stroke-width:1; opacity:0.8; }
+  .dial-tick{ stroke:var(--muted); stroke-width:1; opacity:0.45; }
+  .dial-tick.major{ opacity:0.85; }
+  .dial-tick.active{ stroke:var(--teal); stroke-width:1.7; opacity:1; }
+  .dial-needle{ stroke:var(--amber); stroke-width:2; stroke-linecap:round; }
+  .dial-hub{ fill:var(--amber); }
+  .skill-dial-wrap .skill-value{
+    font-family:var(--font-mono); font-size:11px; width:15px; text-align:right; color:var(--paper); flex:none;
+  }
 
   .captured-row{
     display:flex; align-items:center; flex-wrap:wrap; gap:1px;
-    min-height:16px; margin-bottom:9px;
+    min-height:12px; margin-bottom:4px;
   }
-  .captured-row .cap-piece{ font-size:14px; line-height:1; opacity:0.9; }
+  .captured-row .cap-piece{ font-size:12px; line-height:1; opacity:0.9; }
   .captured-row .cap-piece.w{
     color:var(--piece-white); text-shadow:0 0 2px rgba(0,0,0,.9), 0 1px 1px rgba(0,0,0,.7);
     -webkit-text-stroke:0.5px rgba(0,0,0,.55);
   }
   .captured-row .cap-piece.b{ color:var(--piece-black); -webkit-text-stroke:0.5px rgba(0,0,0,.55); }
-  .captured-row .cap-empty{ font-family:var(--font-mono); font-size:10px; color:var(--muted); opacity:0.7; }
-  .captured-row .cap-adv{ font-family:var(--font-mono); font-size:10.5px; color:var(--teal); margin-left:auto; padding-left:6px; }
-
-  .tuning-row{ display:flex; align-items:center; gap:12px; }
-  .tuning-row .skill-wrap{ flex:1; display:flex; align-items:center; gap:7px; min-width:0; }
-  .tuning-row .tuning-label{
-    font-family:var(--font-mono); font-size:9.5px; letter-spacing:0.06em; color:var(--muted); flex:none;
-  }
-  .tuning-row input[type="range"]{ flex:1; height:2px; accent-color:var(--teal); min-width:0; }
-  .tuning-row .skill-value{
-    font-family:var(--font-mono); font-size:11px; width:16px; text-align:right; color:var(--paper); flex:none;
-  }
-  .tuning-row .movetime-wrap{ display:flex; align-items:center; gap:3px; flex:none; }
-  .tuning-row .movetime-wrap .unit{ font-family:var(--font-mono); font-size:9.5px; color:var(--muted); }
+  .captured-row .cap-empty{ font-family:var(--font-mono); font-size:9px; color:var(--muted); opacity:0.7; }
+  .captured-row .cap-adv{ font-family:var(--font-mono); font-size:10px; color:var(--teal); margin-left:auto; padding-left:6px; }
 
   select, input[type="number"], input[type="text"]{
     background:var(--panel2); color:var(--paper); border:1px solid var(--line); border-radius:4px;
     font-family:var(--font-ui); font-size:12.5px; padding:5px 7px;
   }
   input[type="number"]{ width:78px; font-family:var(--font-mono); }
-  .tuning-row input[type="number"]{
-    width:52px; background:transparent; border:none; border-bottom:1px solid var(--line);
-    border-radius:0; padding:2px 1px; text-align:right; font-size:11.5px;
-  }
-  .tuning-row input[type="number"]:hover, .tuning-row input[type="number"]:focus{
-    outline:none; border-bottom-color:var(--teal-dim);
-  }
   input[type="range"]{ flex:1; accent-color: var(--teal); }
-  .skill-value{ font-family:var(--font-mono); font-size:12px; width:26px; text-align:right; color:var(--paper); }
   .engine-tag{ font-family:var(--font-mono); font-size:10px; color:var(--muted); margin-top:2px; }
 
   .match-card .card-title, .log-card .card-title, .history-card .card-title{
@@ -338,20 +353,25 @@
               <option value="pet_dragon">Pet Dragon</option>
             </select>
           </div>
-          <div class="think-led" id="ledW"></div>
-        </div>
-        <div class="captured-row" id="capturedW"></div>
-        <div class="tuning-row">
-          <div class="skill-wrap">
-            <span class="tuning-label">SKL</span>
-            <input type="range" id="skillW" min="0" max="20" value="10">
-            <span class="skill-value" id="skillWVal">10</span>
-          </div>
           <div class="movetime-wrap">
             <input type="number" id="movetimeW" min="50" max="60000" step="50" value="1000">
             <span class="unit">ms</span>
           </div>
+          <div class="skill-dial-wrap" data-side="w">
+            <input type="range" class="skill-native" id="skillW" min="1" max="20" value="10" tabindex="-1" aria-hidden="true">
+            <svg class="skill-dial" id="skillDialW" viewBox="0 0 40 40" width="30" height="30" role="slider" tabindex="0"
+                 aria-label="White skill level" aria-valuemin="1" aria-valuemax="20" aria-valuenow="10">
+              <circle class="dial-face" cx="20" cy="20" r="17"></circle>
+              <circle class="dial-rim" cx="20" cy="20" r="17"></circle>
+              <g class="dial-ticks" id="skillTicksW"></g>
+              <line class="dial-needle" id="skillNeedleW" x1="20" y1="20" x2="20" y2="6"></line>
+              <circle class="dial-hub" cx="20" cy="20" r="2.2"></circle>
+            </svg>
+            <span class="skill-value" id="skillWVal">10</span>
+          </div>
+          <div class="think-led" id="ledW"></div>
         </div>
+        <div class="captured-row" id="capturedW"></div>
         <div class="engine-tag" id="tagW" style="display:none;">—</div>
       </div>
 
@@ -364,20 +384,25 @@
               <option value="stockfish">Stockfish</option>
             </select>
           </div>
-          <div class="think-led" id="ledB"></div>
-        </div>
-        <div class="captured-row" id="capturedB"></div>
-        <div class="tuning-row">
-          <div class="skill-wrap">
-            <span class="tuning-label">SKL</span>
-            <input type="range" id="skillB" min="0" max="20" value="10">
-            <span class="skill-value" id="skillBVal">10</span>
-          </div>
           <div class="movetime-wrap">
             <input type="number" id="movetimeB" min="50" max="60000" step="50" value="1000">
             <span class="unit">ms</span>
           </div>
+          <div class="skill-dial-wrap" data-side="b">
+            <input type="range" class="skill-native" id="skillB" min="1" max="20" value="10" tabindex="-1" aria-hidden="true">
+            <svg class="skill-dial" id="skillDialB" viewBox="0 0 40 40" width="30" height="30" role="slider" tabindex="0"
+                 aria-label="Black skill level" aria-valuemin="1" aria-valuemax="20" aria-valuenow="10">
+              <circle class="dial-face" cx="20" cy="20" r="17"></circle>
+              <circle class="dial-rim" cx="20" cy="20" r="17"></circle>
+              <g class="dial-ticks" id="skillTicksB"></g>
+              <line class="dial-needle" id="skillNeedleB" x1="20" y1="20" x2="20" y2="6"></line>
+              <circle class="dial-hub" cx="20" cy="20" r="2.2"></circle>
+            </svg>
+            <span class="skill-value" id="skillBVal">10</span>
+          </div>
+          <div class="think-led" id="ledB"></div>
         </div>
+        <div class="captured-row" id="capturedB"></div>
         <div class="engine-tag" id="tagB" style="display:none;">—</div>
       </div>
 
@@ -844,6 +869,7 @@ function readSideInputs() {
     players[side].skill = parseInt(sideInputs[side].skill.value, 10);
     players[side].movetime = parseInt(sideInputs[side].movetime.value, 10) || 100;
   }
+  updateOrientationAndOrder();
 }
 
 function syncSideInputsFromState() {
@@ -851,19 +877,142 @@ function syncSideInputsFromState() {
     sideInputs[side].engine.value = players[side].engine;
     sideInputs[side].skill.value = players[side].skill;
     sideInputs[side].skillVal.textContent = players[side].skill;
+    updateSkillDialVisual(side);
     sideInputs[side].movetime.value = players[side].movetime;
   }
+  updateOrientationAndOrder();
+}
+
+/* Pet Dragon always sits at the bottom (board and sidebar alike), Stockfish
+ * always up top — driven by which engine is playing which color, not by
+ * color itself. Recomputed any time an engine assignment changes (manual
+ * select, "Swap colors now", or the automatic swap between games). */
+function updateOrientationAndOrder() {
+  const wCard = document.querySelector('.player-card[data-side="w"]');
+  const bCard = document.querySelector('.player-card[data-side="b"]');
+  const dragonCard = players.w.engine === 'pet_dragon' ? wCard : bCard;
+  const otherCard = dragonCard === wCard ? bCard : wCard;
+  dragonCard.parentElement.insertBefore(otherCard, dragonCard);
+
+  const dragonIsBlack = players.b.engine === 'pet_dragon' && players.w.engine !== 'pet_dragon';
+  boardEl.classList.toggle('flipped', dragonIsBlack);
 }
 
 for (const side of ['w','b']) {
   sideInputs[side].engine.addEventListener('change', readSideInputs);
   sideInputs[side].skill.addEventListener('input', () => {
     sideInputs[side].skillVal.textContent = sideInputs[side].skill.value;
+    updateSkillDialVisual(side);
     readSideInputs();
   });
   sideInputs[side].movetime.addEventListener('change', readSideInputs);
 }
 readSideInputs();
+
+/* ---------------------------------------------------------------------- */
+/* Skill dial — analog car-meter needle over a 20-position circular scale.*/
+/* Like a revolver cylinder: 20 chambers arranged all the way round, so   */
+/* going past 20 wraps back to 1 rather than hitting a hard stop. Drag,   */
+/* click, or scroll the dial; it just drives the (hidden) native range    */
+/* input, so everything downstream — readSideInputs, freeze-while-running,*/
+/* baselines, swap-colors — keeps working unchanged.                      */
+/* ---------------------------------------------------------------------- */
+
+const SKILL_MIN = 1, SKILL_MAX = 20, SKILL_STEPS = SKILL_MAX - SKILL_MIN + 1;
+const SKILL_DEG = 360 / SKILL_STEPS;
+
+function skillAngle(value) {
+  return (value - SKILL_MIN) * SKILL_DEG;
+}
+
+function buildSkillTicks(side) {
+  const group = document.getElementById('skillTicks' + side.toUpperCase());
+  group.innerHTML = '';
+  for (let v = SKILL_MIN; v <= SKILL_MAX; v++) {
+    const angle = skillAngle(v);
+    const rad = (angle - 90) * Math.PI / 180;
+    const major = (v === SKILL_MIN) || (v % 5 === 0);
+    const rOuter = 16.5, rInner = major ? 12 : 14;
+    const x1 = 20 + rOuter * Math.cos(rad), y1 = 20 + rOuter * Math.sin(rad);
+    const x2 = 20 + rInner * Math.cos(rad), y2 = 20 + rInner * Math.sin(rad);
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+    line.setAttribute('class', 'dial-tick' + (major ? ' major' : ''));
+    line.dataset.v = v;
+    group.appendChild(line);
+  }
+}
+
+function updateSkillDialVisual(side) {
+  const val = parseInt(sideInputs[side].skill.value, 10) || SKILL_MIN;
+  const needle = document.getElementById('skillNeedle' + side.toUpperCase());
+  const svg = document.getElementById('skillDial' + side.toUpperCase());
+  needle.setAttribute('transform', `rotate(${skillAngle(val)} 20 20)`);
+  svg.setAttribute('aria-valuenow', val);
+  document.getElementById('skillTicks' + side.toUpperCase())
+    .querySelectorAll('.dial-tick')
+    .forEach(t => t.classList.toggle('active', parseInt(t.dataset.v, 10) === val));
+}
+
+function setSkillValue(side, value) {
+  const input = sideInputs[side].skill;
+  if (input.disabled) return;
+  let v = ((value - SKILL_MIN) % SKILL_STEPS + SKILL_STEPS) % SKILL_STEPS + SKILL_MIN;
+  if (parseInt(input.value, 10) === v) return;
+  input.value = v;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function setupSkillDial(side) {
+  const svg = document.getElementById('skillDial' + side.toUpperCase());
+  const input = sideInputs[side].skill;
+
+  function valueFromEvent(evt) {
+    const rect = svg.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    const dx = evt.clientX - cx, dy = evt.clientY - cy;
+    let deg = Math.atan2(dx, -dy) * 180 / Math.PI;
+    if (deg < 0) deg += 360;
+    return SKILL_MIN + Math.round(deg / SKILL_DEG) % SKILL_STEPS;
+  }
+
+  svg.addEventListener('pointerdown', (evt) => {
+    if (input.disabled) return;
+    svg.setPointerCapture(evt.pointerId);
+    setSkillValue(side, valueFromEvent(evt));
+    const onMove = (e) => setSkillValue(side, valueFromEvent(e));
+    const onUp = () => {
+      svg.removeEventListener('pointermove', onMove);
+      svg.removeEventListener('pointerup', onUp);
+      svg.removeEventListener('pointercancel', onUp);
+    };
+    svg.addEventListener('pointermove', onMove);
+    svg.addEventListener('pointerup', onUp);
+    svg.addEventListener('pointercancel', onUp);
+  });
+
+  svg.addEventListener('wheel', (evt) => {
+    if (input.disabled) return;
+    evt.preventDefault();
+    setSkillValue(side, parseInt(input.value, 10) + (evt.deltaY < 0 ? 1 : -1));
+  }, { passive: false });
+
+  svg.addEventListener('keydown', (evt) => {
+    if (input.disabled) return;
+    if (evt.key === 'ArrowUp' || evt.key === 'ArrowRight') {
+      evt.preventDefault(); setSkillValue(side, parseInt(input.value, 10) + 1);
+    } else if (evt.key === 'ArrowDown' || evt.key === 'ArrowLeft') {
+      evt.preventDefault(); setSkillValue(side, parseInt(input.value, 10) - 1);
+    }
+  });
+}
+
+for (const side of ['w', 'b']) {
+  buildSkillTicks(side);
+  setupSkillDial(side);
+  updateSkillDialVisual(side);
+}
 
 // Phase 27: apply immediately on toggle, not just at boot — both setters
 // are cheap module-global stores, safe to call any time a game isn't
@@ -1210,6 +1359,7 @@ function updateControlsForRunState() {
     sideInputs[side].engine.disabled = match.running;
     sideInputs[side].skill.disabled = match.running;
     sideInputs[side].movetime.disabled = match.running;
+    document.querySelector('.skill-dial-wrap[data-side="' + side + '"]').classList.toggle('disabled', match.running);
   }
   // Phase 27: same freeze-while-running rule — avoids an in-flight game
   // silently mixing moves searched with the toggle on and off.
