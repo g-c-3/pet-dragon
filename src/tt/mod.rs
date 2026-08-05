@@ -26,8 +26,36 @@
 //   Benign races accepted — occasional hash corruption is tolerable.
 //   This is the standard Stockfish approach.
 //
+// Torn-write self-detection (D135, Session 139 — external investigation
+// report, confirmed real): TTEntry is 16 bytes — two 8-byte machine
+// words, not one. `store()`'s `ptr.write(new_entry)` is not atomic across
+// that whole write, so a concurrent store()/probe() on the same slot can
+// legally observe a torn entry: e.g. the `key` field from one write
+// paired with `mv`/`score`/`bound` from a different, unrelated write.
+// Storing `key` as a plain, independent field — as this module did before
+// D135 — does NOT catch that: a torn write can leave a genuinely matching
+// `key` sitting next to garbage payload fields, and `entry.key == exp_key`
+// has no way to tell. Fixed by Stockfish's actual trick, applied at the
+// granularity Rust's struct layout already gives us for free: `key` is
+// stored XORed with `payload_fingerprint()` of the entry's own
+// depth/bound/age/mv/score, and `probe()`/`probe_move()`/`store()`'s
+// replacement check all recompute the fingerprint from whatever payload
+// is CURRENTLY sitting in the slot (not from what was originally
+// intended) before comparing. If store() or probe() reads a torn mix of
+// two different writes' fields, the recomputed fingerprint will not match
+// what was XORed into `key` at write time (astronomically unlikely to
+// coincide by chance), so verification correctly fails and the slot is
+// treated as a miss — exactly the "corruption is self-detecting by
+// construction" property the old comment on this file claimed but the
+// old implementation didn't actually have. This assumes individual
+// struct-field-sized writes/reads (a u32, a u8, an i32) don't themselves
+// tear — true on every architecture this project targets, and no
+// stronger an assumption than the "benign races" design already rests
+// on for the rest of this file.
+//
 // Entry structure:
-//   key:   upper bits of Zobrist hash (verification)
+//   key:   upper bits of Zobrist hash, XORed with payload_fingerprint()
+//          of this entry's own depth/bound/age/mv/score (see above)
 //   depth: search depth this result came from
 //   score: evaluation score
 //   bound: Exact / LowerBound / UpperBound
@@ -57,8 +85,12 @@ pub enum Bound {
 /// Packed to 16 bytes for cache efficiency
 #[derive(Clone, Copy)]
 pub struct TTEntry {
-    /// Upper 32 bits of Zobrist hash — used to verify correct entry
-    /// (lower bits used for table index, upper bits for verification)
+    /// Upper 32 bits of Zobrist hash, XORed with `payload_fingerprint()`
+    /// of this entry's own depth/bound/age/mv/score (D135) — used to
+    /// verify correct entry AND to make torn-write corruption
+    /// self-detecting (see module doc comment). Recover the real key via
+    /// `TranspositionTable::recovered_key()`, never compare this field
+    /// directly against a raw Zobrist hash's upper bits.
     pub key:   u32,
     /// Search depth this result was computed at
     /// Higher depth = more reliable result
@@ -88,7 +120,10 @@ impl TTEntry {
         score: 0,
     };
 
-    /// Is this entry valid? (has real data)
+    /// Has this slot ever been written? A cheap pre-check only — an
+    /// entry passing this can still be for the wrong position (or torn);
+    /// real verification is `TranspositionTable::recovered_key(&entry)
+    /// == expected_key`, done in `probe()`/`probe_move()`.
     #[inline]
     pub fn is_valid(&self) -> bool {
         self.key != 0
@@ -173,6 +208,48 @@ impl TranspositionTable {
         (hash >> 32) as u32
     }
 
+    /// Cheap, deterministic 32-bit fingerprint of everything about an
+    /// entry EXCEPT its key (D135, Session 139) — folded into `key` via
+    /// XOR at write time so a torn write mixing this entry's payload
+    /// with a different write's `key` (or vice versa) is detectable:
+    /// recomputing this fingerprint from whatever payload is actually in
+    /// the slot and XORing it back against the stored `key` field only
+    /// reproduces the real expected key if the payload is the same one
+    /// that key was originally paired with. Doesn't need cryptographic
+    /// strength, just needs an accidental match after a real tear to be
+    /// astronomically unlikely — multiplicative mixing with a
+    /// golden-ratio-derived odd constant gives a good enough avalanche
+    /// for that at negligible cost (this runs on every store and probe).
+    #[inline]
+    fn payload_fingerprint(depth: i8, bound: Bound, age: u8, mv: Move, score: i32) -> u32 {
+        const MUL: u32 = 0x9E37_79B1; // odd constant, standard hash-mixing choice
+        let captured_bits: u32 = match mv.captured {
+            None    => 0,
+            Some(p) => 1 + p as u32, // 0 is reserved for "no capture"
+        };
+        let mut h: u32 = MUL;
+        h = h.wrapping_mul(31).wrapping_add(depth as u8 as u32);
+        h = h.wrapping_mul(31).wrapping_add(bound as u32);
+        h = h.wrapping_mul(31).wrapping_add(age as u32);
+        h = h.wrapping_mul(31).wrapping_add(mv.from as u32);
+        h = h.wrapping_mul(31).wrapping_add(mv.to as u32);
+        h = h.wrapping_mul(31).wrapping_add(mv.kind as u32);
+        h = h.wrapping_mul(31).wrapping_add(captured_bits);
+        h = h.wrapping_mul(31).wrapping_add(score as u32);
+        h
+    }
+
+    /// Recover the real Zobrist upper-bits key from a stored entry's
+    /// `key` field, undoing the XOR-with-fingerprint applied at write
+    /// time. The fingerprint is recomputed from `entry`'s OWN currently-
+    /// stored payload fields — not from whatever was originally intended
+    /// — which is exactly what makes this self-detecting against torn
+    /// writes (see module doc comment).
+    #[inline]
+    fn recovered_key(entry: &TTEntry) -> u32 {
+        entry.key ^ Self::payload_fingerprint(entry.depth, entry.bound, entry.age, entry.mv, entry.score)
+    }
+
     // ── Store ─────────────────────────────────────────────────────────────────
 
     /// OLD: Store a result in the TT.
@@ -196,22 +273,29 @@ impl TranspositionTable {
         let idx      = self.index(hash);
         let new_key  = Self::key_from_hash(hash);
         let existing = &self.entries[idx];
+        // D135: existing.key is XORed with existing's own payload
+        // fingerprint, not a raw key — must decode before comparing
+        // against new_key. Reads existing's CURRENT payload fields as
+        // they sit in the slot right now (a torn value if a race is in
+        // progress), same self-detection property as probe() relies on.
+        let existing_recovered = Self::recovered_key(existing);
 
         // Replacement decision
         let should_replace =
             existing.key == 0
             || existing.age != self.age
-            || existing.key == new_key
+            || existing_recovered == new_key
             || depth >= existing.depth;
 
         if should_replace {
-            let best_mv = if mv == Move::NULL && existing.key == new_key {
+            let best_mv = if mv == Move::NULL && existing_recovered == new_key {
                 existing.mv
             } else {
                 mv
             };
+            let fingerprint = Self::payload_fingerprint(depth, bound, self.age, best_mv, score);
             let new_entry = TTEntry {
-                key:   new_key,
+                key:   new_key ^ fingerprint,
                 depth,
                 bound,
                 age:   self.age,
@@ -219,7 +303,8 @@ impl TranspositionTable {
                 score,
             };
             // SAFETY: lock-free design per D4. Concurrent writes at most produce
-            // a corrupted entry; probe() catches this via key verification.
+            // a corrupted entry; probe() catches this via the key/fingerprint
+            // XOR-coupling (D135) — see module doc comment.
             unsafe {
                 let ptr = self.entries.as_ptr().add(idx) as *mut TTEntry;
                 ptr.write(new_entry);
@@ -250,7 +335,13 @@ impl TranspositionTable {
         let entry   = self.entries[idx];
         let exp_key = Self::key_from_hash(hash);
 
-        if entry.key == exp_key && entry.is_valid() {
+        // D135: recovered_key decodes entry.key against entry's OWN
+        // current payload fields — a torn read (this entry's key paired
+        // with a different write's depth/bound/age/mv/score, or vice
+        // versa) will not decode back to exp_key, so it's rejected here
+        // rather than silently trusted. This is what actually makes
+        // "corruption is self-detecting by construction" true.
+        if entry.is_valid() && Self::recovered_key(&entry) == exp_key {
             Some(entry)
         } else {
             None
@@ -265,7 +356,7 @@ impl TranspositionTable {
         let entry   = self.entries[idx];
         let exp_key = Self::key_from_hash(hash);
 
-        if entry.key == exp_key {
+        if entry.is_valid() && Self::recovered_key(&entry) == exp_key {
             entry.mv
         } else {
             Move::NULL
@@ -341,9 +432,14 @@ impl TranspositionTable {
 
 // SAFETY: TranspositionTable uses lock-free design with benign races (D4).
 // Multiple threads may call store() concurrently; at worst an entry is
-// partially overwritten, which probe() detects via Zobrist key mismatch.
-// This is identical to Stockfish's approach — no crashes, at most one
-// slightly suboptimal move per race event.
+// partially overwritten, which probe()/probe_move() detect via the
+// key/payload-fingerprint XOR coupling (D135) — a torn write mixing two
+// different writes' fields fails recovered_key() verification rather
+// than being silently trusted. This is Stockfish's actual approach, not
+// just a raw key-equality check (which a plain, uncoupled key field
+// cannot actually guarantee catches a tear — see D135 and the module doc
+// comment) — no crashes, at most one slightly suboptimal move per race
+// event.
 unsafe impl Send for TranspositionTable {}
 unsafe impl Sync for TranspositionTable {}
 
@@ -444,6 +540,51 @@ mod tests {
             "probe_move should return stored move");
         assert_eq!(tt.probe_move(0xDEAD_BEEF_CAFE_1234u64), Move::NULL,
             "probe_move should return NULL on miss");
+    }
+
+    #[test]
+    fn test_torn_write_detected_via_fingerprint() {
+        // D135 regression (external investigation report, Session 139):
+        // manually corrupt just the score field of an already-stored
+        // entry, simulating what a second thread's interleaved store()
+        // to the same slot would produce (key intact from write A,
+        // payload partially from write B). Before D135, `entry.key` was
+        // an independent field, so `entry.key == exp_key` would still
+        // have passed — the corrupted score would have been silently
+        // trusted as real. After D135, recovered_key() must fail once
+        // the payload no longer matches what was XORed into key at
+        // write time, so probe() correctly treats this as a miss rather
+        // than returning score=999 as if it were a genuine result.
+        let mut tt = TranspositionTable::new(1);
+        let hash = 0x1234_5678_9ABC_DEF0u64;
+        tt.store(hash, 5, 100, Bound::Exact, Move::NULL);
+        assert_eq!(tt.probe(hash).unwrap().score, 100, "sanity: stored correctly");
+
+        let idx = (hash as usize) & tt.mask;
+        tt.entries[idx].score = 999; // simulate a torn write
+
+        assert!(tt.probe(hash).is_none(),
+            "a payload that no longer matches its own key's fingerprint \
+             must be rejected, not silently trusted as score=999");
+    }
+
+    #[test]
+    fn test_torn_write_detected_via_fingerprint_probe_move() {
+        // Same mechanism, exercised through probe_move() specifically —
+        // the move-ordering fast path alpha_beta.rs uses even on a
+        // depth/score TT miss. A torn `mv` field must not be handed back
+        // for move ordering, same reasoning as test above.
+        let mut tt = TranspositionTable::new(1);
+        let hash = 0x1234_5678_9ABC_DEF0u64;
+        let mv = test_move();
+        tt.store(hash, 5, 100, Bound::Exact, mv);
+        assert_eq!(tt.probe_move(hash), mv, "sanity: stored correctly");
+
+        let idx = (hash as usize) & tt.mask;
+        tt.entries[idx].mv = Move::new(Square::A2, Square::A4, MoveKind::DoublePush);
+
+        assert_eq!(tt.probe_move(hash), Move::NULL,
+            "a torn move field must not be handed back for move ordering");
     }
 
     #[test]
