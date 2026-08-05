@@ -4,25 +4,25 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#181f2a">
 <title>Engine Bench — Stockfish vs Pet Dragon</title>
 <style>
   :root{
     color-scheme: dark;
-    --ink:#0d1117;
-    --panel:#151b23;
-    --panel2:#1b2330;
-    --line:#262f3b;
-    --paper:#eef1f0;
-    --muted:#8793a3;
-    --amber:#e8a33d;
-    --amber-dim:#8a6224;
-    --teal:#7ee0c3;
-    --teal-dim:#3f7566;
-    --alert:#e0636a;
-    --board-light:#28313d;
-    --board-dark:#12161c;
-    --piece-white:#f3efe6;
+    --ink:#181f2a;
+    --panel:#222c3a;
+    --panel2:#2b3648;
+    --line:#44536a;
+    --paper:#f8faf9;
+    --muted:#aab6c8;
+    --amber:#f7b750;
+    --amber-dim:#b3833c;
+    --teal:#8ff4d6;
+    --teal-dim:#519a86;
+    --alert:#f37981;
+    --board-light:#3c4a5e;
+    --board-dark:#1f2734;
+    --piece-white:#f7f3ea;
     --piece-black:var(--piece-white);
     --font-display: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
     --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -207,24 +207,67 @@
     outline:none; border-bottom-color:var(--teal-dim);
   }
 
-  /* ---- Skill dial: old analog car-meter needle over a full circular
-     scale. 20 chambers like a revolver cylinder — past 20 it comes back
-     around to 1, no hard stop. Drag, click, or scroll to set it. -------- */
-  .skill-dial-wrap{ display:flex; align-items:center; gap:4px; flex:none; }
-  .skill-dial-wrap.disabled{ opacity:0.4; pointer-events:none; }
+  /* ---- Skill odometer: a little mechanical km-counter, two digit drums
+     (tens/units) that display the current value. Click it to open the
+     1-20 picker below and select a value directly — that's the only way
+     to change it. ---------------------------------------------------- */
+  .skill-odo-wrap{ display:flex; align-items:center; flex:none; position:relative; }
+  .skill-odo-wrap.disabled{ opacity:0.4; pointer-events:none; }
   .skill-native{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
-  .skill-dial{ cursor:grab; touch-action:none; -webkit-user-select:none; user-select:none; flex:none; display:block; }
-  .skill-dial:active{ cursor:grabbing; }
-  .dial-face{ fill:var(--panel2); stroke:var(--line); stroke-width:1; }
-  .dial-rim{ fill:none; stroke:var(--line); stroke-width:1; opacity:0.8; }
-  .dial-tick{ stroke:var(--muted); stroke-width:1; opacity:0.45; }
-  .dial-tick.major{ opacity:0.85; }
-  .dial-tick.active{ stroke:var(--teal); stroke-width:1.7; opacity:1; }
-  .dial-needle{ stroke:var(--amber); stroke-width:2; stroke-linecap:round; }
-  .dial-hub{ fill:var(--amber); }
-  .skill-dial-wrap .skill-value{
-    font-family:var(--font-mono); font-size:11px; width:15px; text-align:right; color:var(--paper); flex:none;
+  .skill-odo{
+    position:relative; display:flex; background:#0a0d12; border:1px solid var(--line);
+    border-radius:2px; padding:0 1px; box-shadow:inset 0 1px 3px rgba(0,0,0,.7), inset 0 -1px 1px rgba(255,255,255,.04);
+    cursor:pointer; -webkit-user-select:none; user-select:none;
   }
+  .skill-odo::before{
+    content:''; position:absolute; inset:0; pointer-events:none; z-index:1;
+    background:linear-gradient(180deg, rgba(0,0,0,.6), transparent 32%, transparent 68%, rgba(0,0,0,.6));
+  }
+  .skill-odo::after{
+    content:''; position:absolute; left:1px; right:1px; top:50%; height:1px; z-index:1;
+    background:rgba(0,0,0,.35); transform:translateY(-0.5px);
+  }
+  .skill-odo-digit{
+    width:11px; height:16px; overflow:hidden; position:relative; border-left:1px solid rgba(255,255,255,.04);
+  }
+  .skill-odo-digit:first-child{ border-left:none; }
+  .skill-odo-strip{ display:flex; flex-direction:column; transition:transform .22s cubic-bezier(.32,.88,.4,1); }
+  .skill-odo-strip > span{
+    width:11px; height:16px; line-height:16px; text-align:center; font-family:var(--font-mono);
+    font-weight:600; font-size:11.5px; color:var(--amber); text-shadow:0 1px 0 rgba(0,0,0,.6); flex:none;
+  }
+
+  /* The picker opened by clicking the odometer above — a horizontal slider
+     instead of a dropdown list: drag the thumb (or click/drag the track)
+     to set the value, live-updating the odometer as you go. */
+  .skill-odo-popup{
+    display:none; flex-direction:column; align-items:center; gap:8px;
+    position:absolute; top:calc(100% + 4px); left:50%; transform:translateX(-50%); z-index:30;
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 8px 20px rgba(0,0,0,.55); padding:12px 12px 10px;
+  }
+  .skill-odo-popup.open{ display:flex; }
+  .skill-slider-value{
+    font-family:var(--font-mono); font-weight:700; font-size:12px; color:var(--amber);
+  }
+  .skill-slider-track{
+    position:relative; width:150px; height:6px; background:#0a0d12; border-radius:3px;
+    box-shadow:inset 0 1px 3px rgba(0,0,0,.7); cursor:pointer; touch-action:none;
+  }
+  .skill-slider-fill{
+    position:absolute; top:0; bottom:0; left:0; width:0%; background:var(--teal-dim);
+    border-radius:3px; pointer-events:none;
+  }
+  .skill-slider-tick{
+    position:absolute; top:-4px; height:14px; width:1px; background:var(--line); pointer-events:none;
+  }
+  .skill-slider-tick.major{ background:var(--muted); }
+  .skill-slider-thumb{
+    position:absolute; top:50%; left:0%; width:16px; height:16px;
+    transform:translate(-50%, -50%); background:var(--amber); border-radius:50%;
+    box-shadow:0 2px 5px rgba(0,0,0,.5), 0 0 0 2px var(--panel2); cursor:grab; touch-action:none;
+  }
+  .skill-slider-thumb:active{ cursor:grabbing; }
 
   .captured-row{
     display:flex; align-items:center; flex-wrap:wrap; gap:1px;
@@ -357,17 +400,13 @@
             <input type="number" id="movetimeW" min="50" max="60000" step="50" value="1000">
             <span class="unit">ms</span>
           </div>
-          <div class="skill-dial-wrap" data-side="w">
+          <div class="skill-odo-wrap" data-side="w">
             <input type="range" class="skill-native" id="skillW" min="1" max="20" value="10" tabindex="-1" aria-hidden="true">
-            <svg class="skill-dial" id="skillDialW" viewBox="0 0 40 40" width="30" height="30" role="slider" tabindex="0"
+            <div class="skill-odo" id="skillOdoW" tabindex="0" role="slider"
                  aria-label="White skill level" aria-valuemin="1" aria-valuemax="20" aria-valuenow="10">
-              <circle class="dial-face" cx="20" cy="20" r="17"></circle>
-              <circle class="dial-rim" cx="20" cy="20" r="17"></circle>
-              <g class="dial-ticks" id="skillTicksW"></g>
-              <line class="dial-needle" id="skillNeedleW" x1="20" y1="20" x2="20" y2="6"></line>
-              <circle class="dial-hub" cx="20" cy="20" r="2.2"></circle>
-            </svg>
-            <span class="skill-value" id="skillWVal">10</span>
+              <div class="skill-odo-digit"><div class="skill-odo-strip" id="skillOdoTensW"></div></div>
+              <div class="skill-odo-digit"><div class="skill-odo-strip" id="skillOdoUnitsW"></div></div>
+            </div>
           </div>
           <div class="think-led" id="ledW"></div>
         </div>
@@ -388,17 +427,13 @@
             <input type="number" id="movetimeB" min="50" max="60000" step="50" value="1000">
             <span class="unit">ms</span>
           </div>
-          <div class="skill-dial-wrap" data-side="b">
+          <div class="skill-odo-wrap" data-side="b">
             <input type="range" class="skill-native" id="skillB" min="1" max="20" value="10" tabindex="-1" aria-hidden="true">
-            <svg class="skill-dial" id="skillDialB" viewBox="0 0 40 40" width="30" height="30" role="slider" tabindex="0"
+            <div class="skill-odo" id="skillOdoB" tabindex="0" role="slider"
                  aria-label="Black skill level" aria-valuemin="1" aria-valuemax="20" aria-valuenow="10">
-              <circle class="dial-face" cx="20" cy="20" r="17"></circle>
-              <circle class="dial-rim" cx="20" cy="20" r="17"></circle>
-              <g class="dial-ticks" id="skillTicksB"></g>
-              <line class="dial-needle" id="skillNeedleB" x1="20" y1="20" x2="20" y2="6"></line>
-              <circle class="dial-hub" cx="20" cy="20" r="2.2"></circle>
-            </svg>
-            <span class="skill-value" id="skillBVal">10</span>
+              <div class="skill-odo-digit"><div class="skill-odo-strip" id="skillOdoTensB"></div></div>
+              <div class="skill-odo-digit"><div class="skill-odo-strip" id="skillOdoUnitsB"></div></div>
+            </div>
           </div>
           <div class="think-led" id="ledB"></div>
         </div>
@@ -689,8 +724,8 @@ const btnRunSet = $('btnRunSet'), btnStopSet = $('btnStopSet');
 const autoplayProgress = $('autoplayProgress');
 
 const sideInputs = {
-  w: { engine: $('engineW'), skill: $('skillW'), skillVal: $('skillWVal'), movetime: $('movetimeW'), led: $('ledW'), tag: $('tagW') },
-  b: { engine: $('engineB'), skill: $('skillB'), skillVal: $('skillBVal'), movetime: $('movetimeB'), led: $('ledB'), tag: $('tagB') },
+  w: { engine: $('engineW'), skill: $('skillW'), movetime: $('movetimeW'), led: $('ledW'), tag: $('tagW') },
+  b: { engine: $('engineB'), skill: $('skillB'), movetime: $('movetimeB'), led: $('ledB'), tag: $('tagB') },
 };
 
 const ENGINE_LABEL = { stockfish: 'Stockfish', pet_dragon: 'Pet Dragon' };
@@ -876,8 +911,7 @@ function syncSideInputsFromState() {
   for (const side of ['w','b']) {
     sideInputs[side].engine.value = players[side].engine;
     sideInputs[side].skill.value = players[side].skill;
-    sideInputs[side].skillVal.textContent = players[side].skill;
-    updateSkillDialVisual(side);
+    updateSkillOdoVisual(side);
     sideInputs[side].movetime.value = players[side].movetime;
   }
   updateOrientationAndOrder();
@@ -901,8 +935,7 @@ function updateOrientationAndOrder() {
 for (const side of ['w','b']) {
   sideInputs[side].engine.addEventListener('change', readSideInputs);
   sideInputs[side].skill.addEventListener('input', () => {
-    sideInputs[side].skillVal.textContent = sideInputs[side].skill.value;
-    updateSkillDialVisual(side);
+    updateSkillOdoVisual(side);
     readSideInputs();
   });
   sideInputs[side].movetime.addEventListener('change', readSideInputs);
@@ -910,49 +943,36 @@ for (const side of ['w','b']) {
 readSideInputs();
 
 /* ---------------------------------------------------------------------- */
-/* Skill dial — analog car-meter needle over a 20-position circular scale.*/
-/* Like a revolver cylinder: 20 chambers arranged all the way round, so   */
-/* going past 20 wraps back to 1 rather than hitting a hard stop. Drag,   */
-/* click, or scroll the dial; it just drives the (hidden) native range    */
-/* input, so everything downstream — readSideInputs, freeze-while-running,*/
-/* baselines, swap-colors — keeps working unchanged.                      */
+/* Skill odometer — a little mechanical km-counter with two rolling digit */
+/* drums (tens/units) instead of a speedometer needle. Click it to open a */
+/* 1-20 picker and select a value — that's the only way to change it now. */
+/* Drives the same hidden native range input as before, so everything     */
+/* downstream — readSideInputs, freeze-while-running, baselines,          */
+/* swap-colors — keeps working unchanged.                                 */
 /* ---------------------------------------------------------------------- */
 
 const SKILL_MIN = 1, SKILL_MAX = 20, SKILL_STEPS = SKILL_MAX - SKILL_MIN + 1;
-const SKILL_DEG = 360 / SKILL_STEPS;
+const SKILL_ROW_PX = 16; // must match .skill-odo-strip > span height in CSS
 
-function skillAngle(value) {
-  return (value - SKILL_MIN) * SKILL_DEG;
-}
-
-function buildSkillTicks(side) {
-  const group = document.getElementById('skillTicks' + side.toUpperCase());
-  group.innerHTML = '';
-  for (let v = SKILL_MIN; v <= SKILL_MAX; v++) {
-    const angle = skillAngle(v);
-    const rad = (angle - 90) * Math.PI / 180;
-    const major = (v === SKILL_MIN) || (v % 5 === 0);
-    const rOuter = 16.5, rInner = major ? 12 : 14;
-    const x1 = 20 + rOuter * Math.cos(rad), y1 = 20 + rOuter * Math.sin(rad);
-    const x2 = 20 + rInner * Math.cos(rad), y2 = 20 + rInner * Math.sin(rad);
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
-    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-    line.setAttribute('class', 'dial-tick' + (major ? ' major' : ''));
-    line.dataset.v = v;
-    group.appendChild(line);
+function buildOdoStrip(el) {
+  el.innerHTML = '';
+  for (let d = 0; d <= 9; d++) {
+    const s = document.createElement('span');
+    s.textContent = d;
+    el.appendChild(s);
   }
 }
 
-function updateSkillDialVisual(side) {
+function updateSkillOdoVisual(side) {
   const val = parseInt(sideInputs[side].skill.value, 10) || SKILL_MIN;
-  const needle = document.getElementById('skillNeedle' + side.toUpperCase());
-  const svg = document.getElementById('skillDial' + side.toUpperCase());
-  needle.setAttribute('transform', `rotate(${skillAngle(val)} 20 20)`);
-  svg.setAttribute('aria-valuenow', val);
-  document.getElementById('skillTicks' + side.toUpperCase())
-    .querySelectorAll('.dial-tick')
-    .forEach(t => t.classList.toggle('active', parseInt(t.dataset.v, 10) === val));
+  const tens = Math.floor(val / 10), units = val % 10;
+  const wrap = document.getElementById('skillOdo' + side.toUpperCase());
+  document.getElementById('skillOdoTens' + side.toUpperCase())
+    .style.transform = `translateY(${-tens * SKILL_ROW_PX}px)`;
+  document.getElementById('skillOdoUnits' + side.toUpperCase())
+    .style.transform = `translateY(${-units * SKILL_ROW_PX}px)`;
+  wrap.setAttribute('aria-valuenow', val);
+  updateSkillSliderVisual(side);
 }
 
 function setSkillValue(side, value) {
@@ -964,55 +984,133 @@ function setSkillValue(side, value) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-function setupSkillDial(side) {
-  const svg = document.getElementById('skillDial' + side.toUpperCase());
-  const input = sideInputs[side].skill;
+/* ---- Click-to-pick popup: a vertical slider (bottom = 1, top = 20)
+   instead of a dropdown list — drag the thumb or click/drag the track. --- */
+function buildSkillPopup(side) {
+  const wrap = document.getElementById('skillOdo' + side.toUpperCase()).parentElement; // .skill-odo-wrap
+  const popup = document.createElement('div');
+  popup.className = 'skill-odo-popup';
+  popup.id = 'skillOdoPopup' + side.toUpperCase();
 
-  function valueFromEvent(evt) {
-    const rect = svg.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-    const dx = evt.clientX - cx, dy = evt.clientY - cy;
-    let deg = Math.atan2(dx, -dy) * 180 / Math.PI;
-    if (deg < 0) deg += 360;
-    return SKILL_MIN + Math.round(deg / SKILL_DEG) % SKILL_STEPS;
+  const label = document.createElement('div');
+  label.className = 'skill-slider-value';
+  label.id = 'skillSliderValue' + side.toUpperCase();
+  popup.appendChild(label);
+
+  const track = document.createElement('div');
+  track.className = 'skill-slider-track';
+  track.id = 'skillSliderTrack' + side.toUpperCase();
+
+  const fill = document.createElement('div');
+  fill.className = 'skill-slider-fill';
+  fill.id = 'skillSliderFill' + side.toUpperCase();
+  track.appendChild(fill);
+
+  for (let v = SKILL_MIN; v <= SKILL_MAX; v++) {
+    const frac = (v - SKILL_MIN) / (SKILL_STEPS - 1);
+    const tick = document.createElement('div');
+    tick.className = 'skill-slider-tick' + ((v === SKILL_MIN || v === SKILL_MAX || v % 5 === 0) ? ' major' : '');
+    tick.style.left = (frac * 100) + '%';
+    track.appendChild(tick);
   }
 
-  svg.addEventListener('pointerdown', (evt) => {
+  const thumb = document.createElement('div');
+  thumb.className = 'skill-slider-thumb';
+  thumb.id = 'skillSliderThumb' + side.toUpperCase();
+  track.appendChild(thumb);
+
+  popup.appendChild(track);
+  wrap.appendChild(popup);
+
+  setupSkillSlider(side, track);
+}
+
+function updateSkillSliderVisual(side) {
+  const val = parseInt(sideInputs[side].skill.value, 10) || SKILL_MIN;
+  const frac = (val - SKILL_MIN) / (SKILL_STEPS - 1);
+  const thumb = document.getElementById('skillSliderThumb' + side.toUpperCase());
+  const fill = document.getElementById('skillSliderFill' + side.toUpperCase());
+  const label = document.getElementById('skillSliderValue' + side.toUpperCase());
+  if (thumb) thumb.style.left = (frac * 100) + '%';
+  if (fill) fill.style.width = (frac * 100) + '%';
+  if (label) label.textContent = String(val).padStart(2, '0');
+}
+
+function setupSkillSlider(side, track) {
+  const input = sideInputs[side].skill;
+  track.addEventListener('click', (evt) => evt.stopPropagation());
+  function applyFromEvent(evt) {
+    const rect = track.getBoundingClientRect();
+    let frac = (evt.clientX - rect.left) / rect.width; // 0 at left (min), 1 at right (max)
+    frac = Math.max(0, Math.min(1, frac));
+    const v = Math.round(frac * (SKILL_STEPS - 1)) + SKILL_MIN;
+    setSkillValue(side, v);
+  }
+  track.addEventListener('pointerdown', (evt) => {
     if (input.disabled) return;
-    svg.setPointerCapture(evt.pointerId);
-    setSkillValue(side, valueFromEvent(evt));
-    const onMove = (e) => setSkillValue(side, valueFromEvent(e));
+    evt.stopPropagation();
+    track.setPointerCapture(evt.pointerId);
+    applyFromEvent(evt);
+    const onMove = (e) => applyFromEvent(e);
     const onUp = () => {
-      svg.removeEventListener('pointermove', onMove);
-      svg.removeEventListener('pointerup', onUp);
-      svg.removeEventListener('pointercancel', onUp);
+      track.removeEventListener('pointermove', onMove);
+      track.removeEventListener('pointerup', onUp);
+      track.removeEventListener('pointercancel', onUp);
     };
-    svg.addEventListener('pointermove', onMove);
-    svg.addEventListener('pointerup', onUp);
-    svg.addEventListener('pointercancel', onUp);
+    track.addEventListener('pointermove', onMove);
+    track.addEventListener('pointerup', onUp);
+    track.addEventListener('pointercancel', onUp);
+  });
+}
+
+function closeSkillPopup(side) {
+  const popup = document.getElementById('skillOdoPopup' + side.toUpperCase());
+  if (popup) popup.classList.remove('open');
+}
+function closeAllSkillPopups() { ['w', 'b'].forEach(closeSkillPopup); }
+
+function openSkillPopup(side) {
+  closeAllSkillPopups();
+  const popup = document.getElementById('skillOdoPopup' + side.toUpperCase());
+  if (!popup) return;
+  updateSkillSliderVisual(side);
+  popup.classList.add('open');
+}
+
+document.addEventListener('pointerdown', (evt) => {
+  if (!evt.target.closest('.skill-odo-wrap')) closeAllSkillPopups();
+});
+document.addEventListener('keydown', (evt) => {
+  if (evt.key === 'Escape') closeAllSkillPopups();
+});
+
+function setupSkillOdo(side) {
+  const wrap = document.getElementById('skillOdo' + side.toUpperCase());
+  const input = sideInputs[side].skill;
+
+  wrap.addEventListener('click', () => {
+    if (input.disabled) return;
+    const popup = document.getElementById('skillOdoPopup' + side.toUpperCase());
+    if (popup && popup.classList.contains('open')) closeSkillPopup(side);
+    else openSkillPopup(side);
   });
 
-  svg.addEventListener('wheel', (evt) => {
+  wrap.addEventListener('keydown', (evt) => {
     if (input.disabled) return;
-    evt.preventDefault();
-    setSkillValue(side, parseInt(input.value, 10) + (evt.deltaY < 0 ? 1 : -1));
-  }, { passive: false });
-
-  svg.addEventListener('keydown', (evt) => {
-    if (input.disabled) return;
-    if (evt.key === 'ArrowUp' || evt.key === 'ArrowRight') {
-      evt.preventDefault(); setSkillValue(side, parseInt(input.value, 10) + 1);
-    } else if (evt.key === 'ArrowDown' || evt.key === 'ArrowLeft') {
-      evt.preventDefault(); setSkillValue(side, parseInt(input.value, 10) - 1);
+    if (evt.key === 'Enter' || evt.key === ' ') {
+      evt.preventDefault(); openSkillPopup(side);
     }
   });
 }
 
 for (const side of ['w', 'b']) {
-  buildSkillTicks(side);
-  setupSkillDial(side);
-  updateSkillDialVisual(side);
+  buildOdoStrip(document.getElementById('skillOdoTens' + side.toUpperCase()));
+  buildOdoStrip(document.getElementById('skillOdoUnits' + side.toUpperCase()));
+  buildSkillPopup(side);
+  setupSkillOdo(side);
+  updateSkillOdoVisual(side);
 }
+
 
 // Phase 27: apply immediately on toggle, not just at boot — both setters
 // are cheap module-global stores, safe to call any time a game isn't
@@ -1359,7 +1457,8 @@ function updateControlsForRunState() {
     sideInputs[side].engine.disabled = match.running;
     sideInputs[side].skill.disabled = match.running;
     sideInputs[side].movetime.disabled = match.running;
-    document.querySelector('.skill-dial-wrap[data-side="' + side + '"]').classList.toggle('disabled', match.running);
+    document.querySelector('.skill-odo-wrap[data-side="' + side + '"]').classList.toggle('disabled', match.running);
+    if (match.running) closeSkillPopup(side);
   }
   // Phase 27: same freeze-while-running rule — avoids an in-flight game
   // silently mixing moves searched with the toggle on and off.
