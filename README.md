@@ -27,7 +27,7 @@ your browser — runs entirely client-side via WebAssembly.
 
 Pet Dragon is an original chess variant where every game starts from any one of the unique 2,162,160 distinct legal opening positions. The King stays home — but everything else finds its own place.
 
-Built from the ground up in Rust. Not a fork. Not a port.Purpose-built for Pet Dragon from day one.
+Built from the ground up in Rust. Not a fork. Not a port. Purpose-built for Pet Dragon from day one.
 
 ---
 
@@ -150,8 +150,9 @@ Requires Rust 1.75+ and wasm-pack for WASM builds.
 | NNUE evaluation | 🧪 Implemented, disabled by default (see above) |
 | Syzygy tablebase support | ✅ Complete |
 
-521 automated tests passing, 0 failing, run on every commit via
-GitHub Actions.
+Extensive automated test suite — bitboards, move generation, search,
+evaluation, UCI, and WASM — growing every session, run and required
+green on every commit via GitHub Actions.
 
 ---
 
