@@ -2140,6 +2140,14 @@ mod tests {
         setup();
         let mut pos  = Position::start_pos().unwrap();
         let mut info = SearchInfo::new();
+        // D136 (Session 139) update: current_depth defaults to 0 outside
+        // iterative_deepening()'s loop, which is now exempt from the
+        // elapsed-time check at current_depth <= 1 (the D136 depth-1
+        // fallback-quality fix — unrelated to what THIS test checks).
+        // Set it explicitly to a realistic mid-game depth so this test
+        // keeps exercising D95's actual concern: does a real timeout set
+        // info.stop at all, at any depth beyond the first.
+        info.current_depth = 5;
         // 0ms budget — is_time_up()'s elapsed-time branch fires on the
         // very first check (nodes starts at 0, `0 & 255 == 0` is true,
         // and elapsed_ms() >= 0 is trivially true), before any node-count
@@ -2168,6 +2176,9 @@ mod tests {
         let fen = "4k3/8/8/8/8/8/8/4R1K1 b - - 0 1";
         let mut pos = Position::from_fen(fen).unwrap();
         let mut info = SearchInfo::new();
+        // D136 (Session 139) update: see comment in
+        // test_alpha_beta_sets_stop_on_real_timeout above — same reason.
+        info.current_depth = 5;
         info.time_allocated_ms = 0;
         let tt = TranspositionTable::new(16);
         let _ = alpha_beta(

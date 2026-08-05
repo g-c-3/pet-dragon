@@ -24,6 +24,7 @@ use std::sync::atomic::Ordering;
 use crate::position::Position;
 use crate::search::{
     alpha_beta::{alpha_beta, extract_threat_move, defusal_score},
+    ordering::score_moves,
     time::{allocate_time, TimeControl, TimeManager},
     SearchInfo, SearchResult, INFINITY, is_mate_score, mate_in,
 };
@@ -400,10 +401,36 @@ pub fn iterative_deepening(
 
     // Ensure we always return a valid move
     if result.best_move == Move::NULL {
-        // Fallback: return first legal move
+        // D136 (Session 139, external bug report): this path used to be
+        // `let moves = generate_moves(pos); result.best_move =
+        // moves.get(0);` — an arbitrary legal move in the raw pseudo-
+        // legal generator's fixed iteration order (pawns -> knights ->
+        // bishops -> rooks -> queen -> king, by square index), with zero
+        // evaluation applied. Reproduced deterministically: missed free
+        // captures, ignored hanging own pieces, skipped obligatory
+        // recaptures — reported and confirmed with FEN-level repro cases
+        // at `go movetime 30` (the default 30ms Move Overhead reduces
+        // the allocated budget to 0ms). The `is_time_up()` fix above
+        // (D136) closes the dominant path into this fallback by
+        // guaranteeing depth 1 itself gets to run — but this is still
+        // the true last-resort safety net for whatever residual path can
+        // reach it (e.g. an explicit `stop`/`quit` landing before depth 1
+        // even starts, which must still be honored instantly). A last
+        // resort should be "the best move a 1-ply/ordering-heuristic pick
+        // can find," never "an arbitrary legal move with no evaluation
+        // applied" — score_moves() is the same SEE-aware, TT-move-aware,
+        // killer/history-aware ordering heuristic search already uses for
+        // move ordering every node, cheap (no real search) and readily
+        // available here.
         let moves = crate::movegen::generate_moves(pos);
         if !moves.is_empty() {
-            result.best_move = moves.get(0);
+            let tt_move = tt.probe_move(pos.hash);
+            let scored  = score_moves(pos, &moves, info, tt_move, 0, Move::NULL);
+            result.best_move = scored
+                .iter()
+                .max_by_key(|sm| sm.score)
+                .map(|sm| sm.mv)
+                .unwrap_or_else(|| moves.get(0));
         }
     }
 
@@ -570,6 +597,89 @@ mod tests {
 
     fn movetime_tc(ms: u64) -> TimeControl {
         TimeControl { movetime: ms, ..Default::default() }
+    }
+
+    // ── D136 (Session 139): blind end-of-function fallback fix ────────────────
+    // Regression tests for the external bug report's three reproduction
+    // cases, run exactly as reported: `go movetime 30` (the default 30ms
+    // Move Overhead, which allocate_time() reduces to a 0ms budget) —
+    // before D136, this deterministically produced an unevaluated,
+    // arbitrary legal move in all three cases below (5/5 in the report's
+    // own trials). After D136 (the is_time_up() depth-1 guard above, and
+    // the score_moves()-based fallback as a last-resort backstop), all
+    // three must find the same correct move a full, unhurried search does.
+
+    #[test]
+    fn test_movetime_30_finds_free_capture() {
+        // Case A from the report: undefended Black rook on f4, a straight
+        // queen capture. Before D136: f1g1 (queen sidesteps) every time.
+        setup();
+        let fen = "4k3/8/8/8/5r2/8/8/4KQ2 w - - 0 1";
+        let mut pos  = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt   = TranspositionTable::new(16);
+        let tc   = movetime_tc(30);
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+        assert_eq!(result.best_move.to_uci(), "f1f4",
+            "must find Qxf4 (the free capture), not an unevaluated move — \
+             got {}", result.best_move.to_uci());
+    }
+
+    #[test]
+    fn test_movetime_30_saves_hanging_own_piece() {
+        // Case B from the report: White rook on d4 hangs to Black's
+        // bishop on the long diagonal. Before D136: b1d2 (knight shuffle,
+        // rook left hanging) every time.
+        setup();
+        let fen = "4k3/b7/8/8/3R4/8/8/1N2K3 w - - 0 1";
+        let mut pos  = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt   = TranspositionTable::new(16);
+        let tc   = movetime_tc(30);
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+        assert_eq!(result.best_move.to_uci(), "d4e4",
+            "must move the rook off the diagonal, not leave it hanging — \
+             got {}", result.best_move.to_uci());
+    }
+
+    #[test]
+    fn test_movetime_30_finds_recapture() {
+        // Case C from the report: undefended Black rook just landed on
+        // e5, one square from a straight queen recapture. Before D136:
+        // e1a1 (queen slides away, ignores the free recapture) every time.
+        setup();
+        let fen = "4k3/8/8/4r3/8/8/8/4QK2 w - - 0 1";
+        let mut pos  = Position::from_fen(fen).unwrap();
+        let mut info = SearchInfo::new();
+        let tt   = TranspositionTable::new(16);
+        let tc   = movetime_tc(30);
+
+        let result = iterative_deepening(&mut pos, &tc, &mut info, &tt);
+        assert_eq!(result.best_move.to_uci(), "e1e5",
+            "must find Qxe5 (the free recapture), not an unevaluated move \
+             — got {}", result.best_move.to_uci());
+    }
+
+    #[test]
+    fn test_is_time_up_never_aborts_depth_1_on_plain_budget() {
+        // Directly exercises the is_time_up() side of D136: a 0ms plain
+        // nominal budget must not report time-up while current_depth is
+        // still at its default/initial value for the first iteration.
+        // (The full end-to-end proof is the three tests above; this pins
+        // down the specific mechanism in isolation.)
+        let mut info = SearchInfo::new();
+        info.time_allocated_ms = 0;
+        info.current_depth = 1;
+        assert!(!info.is_time_up(),
+            "the plain elapsed-time budget check must not fire while \
+             current_depth == 1 (D136) — an explicit stop/quit is a \
+             separate check, unaffected by this guard");
+        info.current_depth = 2;
+        assert!(info.is_time_up(),
+            "from current_depth == 2 onward, the plain elapsed-time \
+             budget check must behave exactly as before D136");
     }
 
     #[test]

@@ -586,7 +586,41 @@ impl SearchInfo {
         // boundary, so no mid-search check ever fired). Instant::now() is
         // cheap enough that checking 8x more often has no measurable search
         // overhead.
-        self.nodes & 255 == 0 && self.elapsed_ms() >= effective_limit
+        let elapsed_budget_exceeded = self.nodes & 255 == 0 && self.elapsed_ms() >= effective_limit;
+
+        // D136 (Session 139, external bug report): never let the elapsed-
+        // TIME-BUDGET check specifically abort iterative_deepening()'s
+        // very first iteration (current_depth == 1) — an explicit
+        // stop/quit signal above is still honored instantly regardless of
+        // depth, this only affects the "ran out of allocated time" path.
+        // At a movetime at or below the default 30ms Move Overhead,
+        // allocate_time() hands back a 0ms budget, which without this
+        // guard trips on the very FIRST check (nodes==0, elapsed>=0) —
+        // before alpha_beta's root loop has generated or evaluated a
+        // single move. iterative_deepening() then has nothing real to
+        // report and falls back to its own end-of-function safety net,
+        // which — before D136 — was an unevaluated, arbitrary legal move
+        // (reproduced deterministically: missed free captures, ignored
+        // hanging pieces, skipped obligatory recaptures). Depth 1
+        // completes in low single-digit milliseconds for real positions
+        // (report's own measurement: under 1ms in every case tested) —
+        // this can only extend an already-tiny time budget by a similarly
+        // tiny, bounded amount, never turn a real time emergency into an
+        // unbounded search, and an explicit stop/quit can still cut it
+        // short instantly via the check at the top of this function.
+        //
+        // Deliberately scoped to the plain nominal budget only — a
+        // ponder-hit hard override (`hard_override != u64::MAX` below) is
+        // a distinct, deliberate, GUI-driven "you're out of time NOW"
+        // signal computed fresh at `ponderhit` time, not the passive
+        // "movetime happened to be tiny" scenario this guard targets. It
+        // keeps its pre-D136 immediate-abort behavior at every depth,
+        // same as an explicit stop/quit, rather than gaining a new
+        // depth-1 grace period.
+        if hard_override != u64::MAX {
+            return elapsed_budget_exceeded;
+        }
+        elapsed_budget_exceeded && self.current_depth > 1
     }
 
     /// Milliseconds elapsed since search started
