@@ -1,7 +1,7 @@
 // ============================================================================
 // src/syzygy/mod.rs  —  Phase 15: Syzygy Endgame Tablebase Integration
 // Copyright (C) 2026 Gokul Chandar. Licensed under GPL v3.
-// Contributors: Claude (Anthropic).
+// Contributors: AI.
 //
 // Native-only module (cfg-gated in lib.rs). pyrrhic-rs uses libc and
 // cannot compile for wasm32 targets, so this file is not included in
