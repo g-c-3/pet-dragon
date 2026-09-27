@@ -2,7 +2,7 @@
 // Pet Dragon Chess Engine
 // Copyright (C) 2026 Gokul Chandar
 // Licensed under GPL v3 — see LICENSE file
-// Contributors: Claude (Anthropic)
+// Contributors: AI
 //
 // texel/features.rs — Per-position feature extraction for Texel tuning (D35)
 //

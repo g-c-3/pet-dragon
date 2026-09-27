@@ -2,7 +2,7 @@
 // Pet Dragon Chess Engine
 // Copyright (C) 2026 Gokul Chandar
 // Licensed under GPL v3 — see LICENSE file
-// Contributors: Claude (Anthropic)
+// Contributors: AI
 //
 // texel/predict_f64.rs — f64 forward pass + gradient accumulation (D35 step 5)
 //
