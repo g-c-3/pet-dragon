@@ -2,7 +2,7 @@
 // Pet Dragon Chess Engine
 // Copyright (C) 2026 Gokul Chandar
 // Licensed under GPL v3 — see LICENSE file
-// Contributors: Claude (Anthropic)
+// Contributors: AI
 //
 // src/opening_stats.rs — GENERATED FILE, DO NOT HAND-EDIT.
 // Produced by src/bin/aggregate_opening_stats.rs (Phase 23.4, D67/D71).
