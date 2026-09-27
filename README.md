@@ -8,7 +8,7 @@
 
 **Created by Gokul Chandar**
 
-**Engine contributors: Claude (Anthropic)**
+**Engine contributors: AI**
 
 **Licensed under GPL v3**
 
@@ -176,4 +176,4 @@ discussions are welcome.
 
 *Engine built in Rust from the ground up*
 
-*Contributors: Claude (Anthropic)*
+*Contributors: AI*
