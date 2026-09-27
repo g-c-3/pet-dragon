@@ -2,7 +2,7 @@
 // Pet Dragon Chess Engine
 // Copyright (C) 2026 Gokul Chandar
 // Licensed under GPL v3 — see LICENSE file
-// Contributors: Claude (Anthropic)
+// Contributors: AI
 //
 // src/bin/uci_match_runner.rs — real engine-vs-engine UCI match harness (D36)
 //

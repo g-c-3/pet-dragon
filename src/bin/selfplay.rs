@@ -2,7 +2,7 @@
 // Pet Dragon Chess Engine
 // Copyright (C) 2026 Gokul Chandar
 // Licensed under GPL v3 — see LICENSE file
-// Contributors: Claude (Anthropic)
+// Contributors: AI
 //
 // src/bin/selfplay.rs — NNUE training data generator (Phase 16.4a),
 // plus opening-statistics data collection (Phase 23.4, D67, Session 84)

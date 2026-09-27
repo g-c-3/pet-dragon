@@ -2,7 +2,7 @@
 // Pet Dragon Chess Engine
 // Copyright (C) 2026 Gokul Chandar
 // Licensed under GPL v3 — see LICENSE file
-// Contributors: Claude (Anthropic)
+// Contributors: AI
 //
 // src/bin/aggregate_opening_stats.rs — Phase 23.4 step 3 (D67, D71)
 //
@@ -196,7 +196,7 @@ fn write_output(entries: &[(u16, String, f32, u32)]) {
          // Pet Dragon Chess Engine\n\
          // Copyright (C) 2026 Gokul Chandar\n\
          // Licensed under GPL v3 — see LICENSE file\n\
-         // Contributors: Claude (Anthropic)\n\
+         // Contributors: AI\n\
          //\n\
          // src/opening_stats.rs — GENERATED FILE, DO NOT HAND-EDIT.\n\
          // Produced by src/bin/aggregate_opening_stats.rs (Phase 23.4, D67/D71).\n\

@@ -2,7 +2,7 @@
 // Pet Dragon Chess Engine
 // Copyright (C) 2026 Gokul Chandar
 // Licensed under GPL v3 — see LICENSE file
-// Contributors: Claude (Anthropic)
+// Contributors: AI
 //
 // src/bin/texel_diag.rs — Texel-tuned HCE weights sanity diagnostic
 // (Phase 14, D35 — the check flagged as missing after Session 55's first
