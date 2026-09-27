@@ -2,7 +2,7 @@
 // Pet Dragon Chess Engine
 // Copyright (C) 2026 Gokul Chandar
 // Licensed under GPL v3 — see LICENSE file
-// Contributors: Claude (Anthropic)
+// Contributors: AI
 //
 // eval/threats.rs — Threats term (Phase 24 item 4, D68; extended Phase 34.2
 // with ThreatByRook, Session 133)
