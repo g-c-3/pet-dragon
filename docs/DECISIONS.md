@@ -131,7 +131,7 @@ These have DIFFERENT feature encodings → different evaluation → correct beha
 ## D15 — GitHub Actions Only, No Terminal
 **Decision**: All building, testing, and deployment via GitHub Actions. Gokul never runs cargo commands.
 
-**Why**: Gokul has mobile only. GitHub Actions provides the CI/CD pipeline. Every file Claude produces must be complete and ready to upload directly to GitHub via the web UI. This is a hard constraint, never violated.
+**Why**: Gokul has mobile only. GitHub Actions provides the CI/CD pipeline. Every file AI produces must be complete and ready to upload directly to GitHub via the web UI. This is a hard constraint, never violated.
 
 ---
 
@@ -183,7 +183,7 @@ test`, or the WASM/browser bundle.
 
 ## D18.5 — Phase 16.5 Training Platform: Kaggle Notebooks, Not Colab (2026-07-04)
 **Decision**: Phase 16.5 (NORU NNUE training on combined selfplay + Lichess
-data) will use Kaggle Notebooks instead of Google Colab.
+data) will use Kaggle Notebooks instead of Colab.
 
 **Why**: Gokul is mobile-only (no terminal, no desktop — see CORE RULES).
 Kaggle's "Save Version → Run All" (commit) mode keeps a notebook running
@@ -208,7 +208,7 @@ paths.
 
 ## D19 — NNUE Training via GitHub Actions, Not Colab (2026-07-05)
 **Decision**: Phase 16.5 training runs as a GitHub Actions workflow
-(train_nnue.yml) rather than a Google Colab notebook.
+(train_nnue.yml) rather than a Colab notebook.
 
 **Why**: NORU is pure Rust with no GPU-dependent training path (FP32
 backprop is CPU-only), so Colab's main advantage (free GPU) doesn't apply.
@@ -642,7 +642,7 @@ the same answer with zero changes to any shipped eval code.
   routinely-scheduled job.
 - `pre_tuning_ref` is a required workflow input with no default (Gokul
   supplies the SHA via the mobile GitHub app's commit history) rather than
-  hardcoded, since Claude could not reliably confirm the exact pre-Session-55
+  hardcoded, since AI could not reliably confirm the exact pre-Session-55
   commit SHA this session (api.github.com anonymous rate limit hit).
 
 
@@ -1008,7 +1008,7 @@ Color`, `Color: PartialEq`, `score`/`is_mate`/`mate_in` on
 `SearchResult`) and mirrors the already-working `search_from_fen`'s
 structure exactly apart from the new eval-formatting tail, but this is
 the one piece in this session that was not mechanically compiled by
-Claude before delivery. The Rust lib/bins (everything except the
+AI before delivery. The Rust lib/bins (everything except the
 `wasm` feature) and the JS (`node --check` on all 3 script blocks,
 including the Worker source extracted and checked separately as its
 own ES module) were both verified. **Next session should confirm the
@@ -2313,7 +2313,7 @@ summary.
 ## D66 — Full Texel Re-Tuning Chosen as Next Strength Lever (Session 83)
 
 **Context:** Gokul set a new broad goal — make Pet Dragon "lethal,
-precisive, scary, brutal" regardless of game phase — and asked Claude
+precisive, scary, brutal" regardless of game phase — and asked AI
 to decide the right first move rather than picking for him.
 
 **Options weighed:** (1) full Texel re-tuning pass, (2) endgame
@@ -3793,7 +3793,7 @@ project's scale.
 Gokul supplied two external bench logs (100ms/move, then 1000ms/move)
 of Pet Dragon (Skill 20, uncapped) vs. real Stockfish (Skill 10, then
 Skill 9) from the standard classical FEN — 6 games, 6 losses, all
-checkmates against Pet Dragon. Claude-side `python-chess` replay of the
+checkmates against Pet Dragon. AI-side `python-chess` replay of the
 raw move lists (read-only, no repo changes) found the same shape in
 every game: material stays roughly level through the opening/early
 middlegame, then collapses hard and fast late-game (Match examples:
@@ -3918,7 +3918,7 @@ actually changed):
   `currentGameMeta` at the same point white/black configs are snapshot,
   same "settings in effect when the game's first move was requested"
   timing) — a downloaded log is now self-describing about which A/B
-  config produced it, so a future session (or Claude) doesn't have to
+  config produced it, so a future session (or AI) doesn't have to
   ask which config a given log came from.
 
 Chose module-global atomics over adding parameters to
@@ -6093,7 +6093,7 @@ that it improves strength; n=20 is far too small a sample to draw any
 Elo conclusion either way, positive or negative. Flagged this once,
 plainly, before making the change — Gokul's explicit, repeated
 instruction stands, and this is his call to make as the project owner,
-not something requiring further pushback from Claude once stated
+not something requiring further pushback from AI once stated
 clearly.
 
 **What changed**: `SearchInfo::recapture_extension_enabled` (default

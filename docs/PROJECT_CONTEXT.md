@@ -7,7 +7,7 @@ in Rust from scratch. Not a fork. Not a port. Purpose-built for the Pet Dragon
 variant from day one.
 
 **Copyright © Gokul Chandar. All rights reserved.**
-Licensed under GPL v3. Contributors: Claude (Anthropic).
+Licensed under GPL v3. Contributors: AI.
 GitHub: https://github.com/g-c-3/pet-dragon
 Live: https://g-c-3.github.io/pet-dragon
 

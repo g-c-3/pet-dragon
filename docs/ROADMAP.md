@@ -377,7 +377,7 @@
              confirmed still working live, synced into context (1521 lines
              as of Session 47). Future sessions: treat web/index.html as
              current/live, not stale, and re-fetch before any delta against
-             it since it wasn't authored/reviewed by Claude.
+             it since it wasn't authored/reviewed by AI.
 
 ---
 
@@ -850,7 +850,7 @@
             closeness for the same reason). Depth-cap tiers 10+ landed in
             the region where extra depth barely changes the chosen move
             anymore.
-            Fix (Gokul deferred the specific choice to Claude): built the
+            Fix (Gokul deferred the specific choice to AI): built the
             move-selection noise mechanism 20.1 always flagged as the
             fallback for this exact situation, rather than just
             compressing the option's upper range or leaving it
@@ -959,7 +959,7 @@
             **CONFIRMED (still Session 70)**: `deploy.yml`'s wasm-pack build
             succeeded on runs #443 and #444 — `search_from_fen_with_eval`
             compiles cleanly to `wasm32-unknown-unknown` for real, not
-            just Claude's field-check against `Position`/`SearchResult`'s
+            just AI's field-check against `Position`/`SearchResult`'s
             definitions. **CONFIRMED (Session 71)**: Gokul supplied a
             screen recording of the live deployed page — the eval bar
             renders a real, changing numeric value (e.g. `+0.3`) across
@@ -1781,7 +1781,7 @@ Elo numbers) is Pet-Dragon-vs-itself or Pet-Dragon-vs-pinned-ref, never
 vs. a real independent engine. Treat this as new, real signal, not
 noise to explain away.
 
-**Analysis done this session (Claude, via local `python-chess` replay
+**Analysis done this session (AI, via local `python-chess` replay
 of the raw move lists — read-only, no repo changes):**
 - All 3 games are legal, end in genuine checkmates (not parser/UCI bugs).
 - Material tracked ply-by-ply in all 3 games shows the **same shape**:

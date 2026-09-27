@@ -3703,7 +3703,7 @@ Phase 25/26 scoping:**
 4. **New goal set: make Pet Dragon "lethal... irrespective of game
    phase."** Presented 4 candidate levers (full Texel re-tune, endgame
    conversion technique, search depth/efficiency, un-shelve NNUE),
-   asked Gokul to prioritize, he asked Claude to decide. Chose full
+   asked Gokul to prioritize, he asked AI to decide. Chose full
    Texel re-tune — reasoning recorded as **D66**. Scoped as **Phase 25**
    in `ROADMAP.md` (2-step plan: `texel_gen.yml` then `texel_tune.yml`,
    both pre-existing mobile-friendly `workflow_dispatch` workflows —
@@ -4645,7 +4645,7 @@ The `wasm` feature itself could NOT be compiled locally this session —
 rustc 1.77+, this sandbox has 1.75.0. `search_from_fen_with_eval` was
 manually field-checked against `Position`/`SearchResult`'s real
 definitions and mirrors the already-working `search_from_fen`'s
-structure, but was never actually built or run in a browser by Claude.
+structure, but was never actually built or run in a browser by AI.
 
 **Later the same session — reversed the UCI_Elo decline (D43):** Gokul
 asked to implement `UCI_LimitStrength`/`UCI_Elo` after all, with
@@ -4896,7 +4896,7 @@ Kaggle job), not another hidden_size bump on the current data.
    signature — found it in `src/lib.rs`, and found it had NO skill_level
    parameter at all (every WASM search silently ran full-strength, since
    `SearchInfo::new()` defaults to `MAX_SKILL_LEVEL`). Decided (his call,
-   deferred to Claude) to add it as a 3rd plain parameter —
+   deferred to AI) to add it as a 3rd plain parameter —
    `search_from_fen(fen, movetime_ms, skill_level)` — rather than a
    separate stateful setter function, since this WASM API is otherwise
    fully stateless (fen and movetime are already passed fresh every call,
@@ -4991,7 +4991,7 @@ vs. depth (huge gains in the first few plies, fast-diminishing returns
 once the search is already reasonably deep for the time budget; even
 Stockfish's own Skill Level 15-20 are notoriously close for the same
 reason). Decided — with Gokul deferring the specific fix choice to
-Claude — to add move-selection noise rather than leave it undocumented or
+AI — to add move-selection noise rather than leave it undocumented or
 just compress the option's upper range, since noise fixes the actual
 separation problem instead of just hiding it, and 20.1 always flagged
 this as the fallback for exactly this situation.
@@ -5502,7 +5502,7 @@ default unchanged), so this isn't a repeat of the NNUE-blend confound
 17.7 already ruled out. The harness is trustworthy; the result itself
 still needs replication before acting on it.
 
-**Decision (delegated to Claude — "you decide, confirmative call"):**
+**Decision (delegated to AI — "you decide, confirmative call"):**
 Don't revert Phase 14's work and don't start a tuner-bug investigation off
 one 20-game/one-seed sample. Rerun with a different seed first — it's
 free, changes no code, and either confirms the regression (then
@@ -5571,7 +5571,7 @@ run that didn't actually happen.
 **Next session start point:** Nothing to build yet. Gokul needs to (1)
 find the git SHA immediately before the Session 55 Texel-tuning commit
 (mobile GitHub app -> Commits, search "Session 55" or "tuned weights", use
-the parent SHA — Claude couldn't confirm this SHA directly this session,
+the parent SHA — AI couldn't confirm this SHA directly this session,
 api.github.com anonymous rate limit was hit), (2) run
 `uci_match_runner.yml` from the Actions tab with that SHA as
 `pre_tuning_ref`. Next session should start by checking whether that run
@@ -6016,7 +6016,7 @@ Texel tuning, or a future hidden_size=128+ NNUE attempt per D34's
 
 ## Session 47 — 2026-07-08 (16.7 confirmed, web/index.html synced)
 
-**Built:** Nothing new from Claude. Confirmed 16.7 (WASM engine responds
+**Built:** Nothing new from AI. Confirmed 16.7 (WASM engine responds
 in-browser at https://g-c-3.github.io/pet-dragon). Gokul independently
 edited `web/index.html` directly on GitHub ("more dynamic" — no further
 detail given), confirmed still working live. Pulled the current version
@@ -7702,5 +7702,5 @@ Context window reached limit. Docs generated to enable fresh context continuatio
 - Project name: Pet Dragon
 - Language: Rust
 - License: GPL v3
-- Gokul Chandar as author, Claude (Anthropic) as contributor
+- Gokul Chandar as author, AI as contributor
 - Target: 3000+ Elo without NNUE
