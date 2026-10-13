@@ -1,0 +1,59 @@
+name: Cleanup old runs
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_workflows:
+        description: "Workflow names to keep the latest run of, comma-separated (empty = latest run overall)"
+        default: "Build & Release"
+      dry_run:
+        description: "Only list what would be deleted"
+        type: boolean
+        default: true
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all runs except the latest of each chosen workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          KEEP_NAMES: ${{ inputs.keep_workflows }}
+          DRY: ${{ inputs.dry_run }}
+          SELF_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          runs=$(gh api --paginate "repos/$REPO/actions/runs?per_page=100" \
+            --jq '.workflow_runs[] | {id, name, created_at}' | jq -s '.')
+
+          keep=$(echo "$runs" | jq -c --arg n "$KEEP_NAMES" --arg s "$SELF_ID" '
+            [.[] | select((.id|tostring)!=$s)] as $r
+            | ($n | split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))) as $names
+            | if ($names|length)==0
+              then [$r | sort_by(.created_at) | last | .id]
+              else [ $names[] as $x
+                     | [$r[] | select(.name==$x)] | sort_by(.created_at) | last | .id ]
+              end
+            | map(select(. != null))')
+
+          if [ "$keep" = "[]" ]; then
+            echo "No matching runs found. Aborting so nothing is lost."
+            exit 1
+          fi
+          echo "Keeping runs: $keep (and this cleanup run $SELF_ID)"
+
+          echo "$runs" | jq -r --argjson k "$keep" --arg s "$SELF_ID" \
+            '.[] | select((.id|tostring)!=$s and ([.id] | inside($k) | not)) | .id' |
+          while read -r id; do
+            if [ "$DRY" = "true" ]; then
+              echo "[dry run] would delete $id"
+            else
+              echo "Deleting $id"
+              gh api -X DELETE "repos/$REPO/actions/runs/$id" || true
+            fi
+          done
