@@ -1,0 +1,61 @@
+name: Release builds cleanup
+
+# Decision 291 — keeps the newest releases and deletes the rest, with their tags and APK assets. Manual run only: Actions,
+# Release builds cleanup, Run workflow. Run artifacts of build-android.yml expire by themselves and are not touched.
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: 'Newest releases to keep'
+        required: true
+        default: '3'
+      dry_run:
+        description: 'Only list what would be deleted'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # deleting a release and its tag
+
+concurrency:
+  group: release-builds-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Delete old releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEEP: ${{ inputs.keep }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          case "$KEEP" in ''|*[!0-9]*) echo "::error::Keep must be a whole number."; exit 1;; esac
+          if [ "$KEEP" -lt 1 ]; then echo "::error::Keep at least 1 release."; exit 1; fi
+
+          # newest first, by creation time
+          gh release list --limit 1000 --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[].tagName' > all.txt
+          total=$(grep -c '' all.txt || true)
+          tail -n +"$((KEEP + 1))" all.txt > old.txt
+          old=$(grep -c '' old.txt || true)
+
+          {
+            echo "### Release builds cleanup"
+            echo "- Releases found: $total"
+            echo "- Kept (newest): $((total - old))"
+            if [ "$DRY_RUN" = "true" ]; then echo "- Dry run: nothing deleted. Would delete: $old"; else echo "- Deleted: $old"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          while read -r tag; do
+            [ -n "$tag" ] || continue
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "Would delete $tag"
+            else
+              gh release delete "$tag" --cleanup-tag --yes
+              echo "Deleted $tag"
+            fi
+          done < old.txt
